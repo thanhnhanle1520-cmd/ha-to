@@ -57,14 +57,15 @@
     if (LOCAL) { token = { v: 'local', exp: Date.now() + 3e9 }; if (!env.email) { env.email = meta.email = 'local@hato'; } return Promise.resolve(env.email); }
     if (token.v && token.exp - 60000 > Date.now()) return Promise.resolve(meta.email);
     if (!CLIENT_ID) return Promise.reject(new Error('Chưa có Client ID Google.'));
-    return loadGsi().then(function () {
-      return new Promise(function (res, rej) {
-        tokenClient = tokenClient || google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPE, callback: function () { } });
-        tokenClient.callback = function (r) { if (r.error) return rej(new Error(r.error)); token = { v: r.access_token, exp: Date.now() + (r.expires_in || 3600) * 1000 }; res(); };
-        tokenClient.error_callback = function (e) { rej(new Error((e && e.type) || 'popup')); };
-        var hint = localStorage.getItem('hato_email') || '';
-        tokenClient.requestAccessToken({ prompt: interactive && !hint ? 'consent' : '', hint: hint || undefined });
-      });
+    return new Promise(function (res, rej) {
+      if (!(token.v && token.exp - 60000 > Date.now())) {                       // dùng token đã lưu sau lần đăng nhập chuyển trang
+        try { var st = JSON.parse(localStorage.getItem('hato_token') || 'null'); if (st && st.v && st.exp - 60000 > Date.now()) token = st; } catch (e) { }
+      }
+      if (token.v && token.exp - 60000 > Date.now()) return res();
+      if (!interactive) return rej(new Error('Cần đăng nhập Google.'));
+      var rs = Math.random().toString(36).slice(2) + Date.now().toString(36), hint = localStorage.getItem('hato_email') || '';
+      sessionStorage.setItem('hato_state', rs); window.__redirecting = true;
+      location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + ['client_id=' + encodeURIComponent(CLIENT_ID), 'redirect_uri=' + encodeURIComponent(location.origin + location.pathname), 'response_type=token', 'scope=' + encodeURIComponent(SCOPE), 'include_granted_scopes=true', 'state=' + rs, hint ? 'login_hint=' + encodeURIComponent(hint) : 'prompt=select_account'].join('&');
     }).then(function () {
       return fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + token.v } }).then(function (r) { return r.json(); }).then(function (u) {
         if (!u.email) throw new Error('Không lấy được email Google.');
@@ -72,6 +73,17 @@
       });
     });
   }
+
+  var authErr = '';
+  (function readAuthHash() {
+    var h = location.hash || ''; if (h.indexOf('access_token=') < 0 && h.indexOf('error=') < 0) return;
+    var q = {}; h.replace(/^#/, '').split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) q[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+    history.replaceState(null, '', location.pathname + location.search);
+    if (q.error) { authErr = 'Google từ chối: ' + q.error; return; }
+    if (q.state !== sessionStorage.getItem('hato_state')) { authErr = 'Phiên đăng nhập không khớp, hãy thử lại.'; return; }
+    token = { v: q.access_token, exp: Date.now() + (+q.expires_in || 3600) * 1000 };
+    try { localStorage.setItem('hato_token', JSON.stringify(token)); } catch (e) { }
+  })();
 
   var Drive = (function () {
     if (LOCAL) {                                     // giả lập: mỗi "file" là một khoá trong IndexedDB
@@ -268,18 +280,18 @@
   function firstLoad(interactive) {
     signIn(interactive).then(function () { showGate([el('p', null, 'Đang tải dữ liệu từ Drive…')]); return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
       return Promise.all(remote.map(function (x) { return Drive.read(x.id).then(function (p) { var n = x.name.replace(/\.json$/, ''); applyPayload(n, p); meta.versions[n] = { id: x.id, version: x.version }; return n; }); }));
-    }).then(function (names) { return persistLocal(names); }).then(function () { start(); }).catch(function (e) { askLogin(e.message === 'popup_closed' ? '' : 'Không đăng nhập được: ' + e.message); });
+    }).then(function (names) { return persistLocal(names); }).then(function () { start(); }).catch(function (e) { askLogin('Không đăng nhập được: ' + e.message); });
   }
   function start() { isReady = true; hideGate(); readyResolve(); drawChip(); syncNow(); }
   function boot() {
     if (!LOCAL && !CLIENT_ID) return askClientId();
     loadLocal().then(function (has) {
       if (has) { start(); return; }
-      if (LOCAL) return firstLoad(false);
-      askLogin('');
+      if (LOCAL || token.v) return firstLoad(false);
+      askLogin(authErr);
     });
   }
-  window.addEventListener('beforeunload', function (e) { if (Object.keys(meta.dirty).length && !state.needLogin) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', function (e) { if (!window.__redirecting && Object.keys(meta.dirty).length && !state.needLogin) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('online', function () { syncNow(); });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && isReady) syncNow(); });
   window.HatoStore = { queueBackup: queueBackup, syncNow: syncNow, meta: function () { return meta; }, state: state, env: env, ready: readyP, signIn: signIn,
