@@ -14,7 +14,7 @@
       }
       snap.sheets[name] = out; found.push(name + ' ' + (out.length - 1));
     });
-    return { snap: snap, found: found };
+    (PRICE_SHEETS || []).forEach(function (n) { var src = book[n]; if (src && src.length) { var w = Math.max.apply(null, src.map(function (r) { return r.length; })); snap.sheets[n] = src.map(function (r) { var o = []; for (var i = 0; i < w; i++) o.push(r[i] === undefined || r[i] === null ? '' : r[i]); return o; }); found.push(n + ' ' + (src.length - 1)); } }); return { snap: snap, found: found };
   }
   function importXlsx(file) {
     return file.arrayBuffer().then(XlsxLite.read).then(function (book) {
