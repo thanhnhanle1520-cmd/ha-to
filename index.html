@@ -401,6 +401,7 @@ function form(fields, vals) {
     if (f.oninput) el.addEventListener('input', f.oninput);
     inputs[f.k] = el;
     root.appendChild(h('label', { class: f.full ? 'full' : '' }, h('span', { class: f.req ? 'req' : '' }, f.label), el));
+    if (el._flatpickr && el._flatpickr.altInput && !el._flatpickr.altInput.parentNode) el.parentNode.insertBefore(el._flatpickr.altInput, el.nextSibling);   // ô ngày hiển thị dd/mm/yyyy (flatpickr chỉ chèn khi ô đã có cha)
   });
   return {
     el: root, inputs: inputs,
@@ -717,10 +718,10 @@ PAGES.dashboard = function (p, q) {
     var r = range();
     return call('dashboard', { from: r.from, to: r.to, customer_id: f.customer_id, project_id: f.project_id }).then(draw);
   }
-  var todayBox = todayBlock(), taskBox = taskPanel({});
+  var taskBox = taskPanel({});
   function draw(d) {
     view.innerHTML = '';
-    view.appendChild(todayBox); view.appendChild(taskBox);
+    view.appendChild(taskBox);
     view.appendChild(h('div', { class: 'bar2' },
       sel([['all', 'Tất cả'], ['month', 'Tháng này'], ['quarter', 'Quý này'], ['year', 'Năm nay']], f.period, function (e) { f.period = e.target.value; load(); }),
       sel(opt(S.customers), f.customer_id, function (e) { f.customer_id = e.target.value; f.project_id = ''; load(); }, 'Tất cả khách hàng'),
@@ -743,28 +744,6 @@ PAGES.dashboard = function (p, q) {
 
 /* ---- Bảng giá ---- */
 
-/* ---- Cần xử lý hôm nay (việc tự động + việc tự thêm, tick xong thì ẩn) ---- */
-function todayBlock() {
-  var box = h('div', { class: 'card', style: 'margin-bottom:12px;border-left:4px solid #ee0033' });
-  var KL = { quote: 'Báo giá', delivery: 'Giao hàng', warranty: 'Bảo hành' };
-  function open(link) { if (!link) return; var t = link[0], id = link[1]; go(t === 'quote' ? 'quote/' + id : t === 'delivery' ? 'delivery/' + id : 'project/' + id); }
-  function render() {
-    safe(call('todayList', {})).then(function (r) {
-      box.innerHTML = '';
-      var items = (r && r.items) || [], td = (r && r.today) || today();
-      box.appendChild(h('h3', { style: 'margin:0 0 6px' }, 'Cần xử lý hôm nay' + (items.length ? ' (' + items.length + ')' : '') + ' — cảnh báo tự động'));
-      if (!items.length) { box.appendChild(h('div', { class: 'mut' }, 'Không có cảnh báo: báo giá, giao hàng, bảo hành đều ổn.')); return; }
-      box.appendChild(h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Loại', 'Nội dung', 'Dự án', 'Từ', 'Hạn', 'Tình trạng', ''].map(function (x) { return h('th', null, x); }))),
-        h('tbody', null, items.map(function (it) {
-          var n = it.end_date ? Math.round((new Date(it.end_date + 'T00:00:00') - new Date(td + 'T00:00:00')) / 86400000) : null;
-          var st = n == null ? '' : n < 0 ? h('span', { class: 'badge b-bad' }, 'Trễ ' + (-n) + ' ngày') : n === 0 ? h('span', { class: 'badge b-warn' }, 'Hôm nay') : h('span', { class: 'badge ' + (n <= 3 ? 'b-warn' : 'b-info') }, 'Còn ' + n + ' ngày');
-          return h('tr', { style: it.late ? 'background:#fff5f5' : '' }, h('td', null, h('span', { class: 'badge' }, KL[it.kind] || '')), h('td', { style: 'min-width:200px;' + (it.link ? 'cursor:pointer' : ''), onclick: function () { open(it.link); } }, it.title), h('td', { class: 'mut' }, it.project || ''), h('td', null, D(it.start_date)), h('td', null, D(it.end_date)), h('td', null, st),
-            h('td', null, h('button', { class: 'dng', title: 'Ẩn mục này khỏi danh sách', onclick: function () { confirmBox('Ẩn mục “' + it.title + '” khỏi danh sách?', function () { safe(call('taskDone', { ref: it.ref })).then(function () { render(); }); }); } }, 'Ẩn')));
-        })))));
-    });
-  }
-  render(); return box;
-}
 var PL_HDR = [['code', 'Mã (để trống nếu hàng mới)'], ['brand', 'Thương hiệu'], ['group', 'Nhóm hàng'], ['name', 'Tên hàng'], ['model', 'Model'], ['size', 'Kích cỡ'], ['origin', 'Xuất xứ'], ['unit', 'ĐVT'], ['qc', 'Quy cách / kích thước'], ['cost', 'Giá mua (VND)'], ['coef_own', 'Hệ số riêng'], ['note', 'Ghi chú'], ['status', 'Trạng thái (Đang bán / Ngừng)']];
 function plSheetRows(items) { return [PL_HDR.map(function (c) { return c[1]; })].concat(items.map(function (x) { return PL_HDR.map(function (c) { var v = x[c[0]]; return v === undefined || v === null || v === 0 && c[0] === 'coef_own' ? '' : v; }); })); }
 function plGuide() {
@@ -2031,7 +2010,8 @@ function projectSummaryPrint(b) {
 
 /* ===== Công việc hằng ngày: bảng việc, nhắc việc, lặp lại ===== */
 var TASK_TYPES = ['Báo giá', 'Gọi khách', 'Giao hàng', 'Hợp đồng / PO', 'Thanh toán', 'Mua hàng', 'Khác'], TASK_STS = ['Chưa làm', 'Đang làm', 'Chờ phản hồi', 'Xong'];
-var REP_LB = { '': 'Không lặp', day: 'Hằng ngày', week: 'Hằng tuần', month: 'Hằng tháng' }, REM_LB = { '': 'Không nhắc', '0': 'Đúng hạn', '1': 'Trước 1 ngày', '3': 'Trước 3 ngày' };
+var REP_LB = { '': 'Không lặp', day: 'Hằng ngày', week: 'Hằng tuần', month: 'Hằng tháng' };
+function remLabel(r) { if (r === '' || r == null) return 'Không nhắc'; var n = Number(r); return n === 0 ? 'Đúng hạn' : (n % 7 === 0 ? 'Trước ' + (n / 7) + ' tuần' : 'Trước ' + n + ' ngày'); }
 function dayDiff(a, b) { return Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000); }
 function addD(s, n) { var d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
 function taskIsOpen(t) { return t.status !== 'Xong'; }
@@ -2042,14 +2022,28 @@ function taskLeft(t, td) {
   return n < 0 ? h('span', { class: 'badge b-bad' }, 'Trễ ' + (-n) + ' ngày') : n === 0 ? h('span', { class: 'badge b-warn' }, 'Hôm nay') : h('span', { class: 'badge ' + (n <= 3 ? 'b-warn' : 'b-info') }, 'Còn ' + n + ' ngày');
 }
 function taskModal(t, pid, done) {
-  var isNew = !t || !t.id, v = Object.assign({ start_date: today(), priority: 'Thường', status: 'Chưa làm', type: 'Khác', remind: '0', repeat: '', project_id: pid || '' }, t || {});
+  var isNew = !t || !t.id, v = Object.assign({ start_date: today(), end_date: today(), priority: 'Thường', status: 'Chưa làm', type: 'Khác', remind: '0', repeat: '', project_id: pid || '' }, t || {});
   var f = form([{ k: 'title', label: 'Nội dung công việc', req: true, full: true }, { k: 'type', label: 'Loại việc', type: 'select', opts: TASK_TYPES.map(function (x) { return [x, x]; }) }, { k: 'priority', label: 'Ưu tiên', type: 'select', opts: [['Cao', 'Cao'], ['Thường', 'Thường'], ['Thấp', 'Thấp']] },
     { k: 'project_id', label: 'Dự án (nếu có)', type: 'select', opts: S.projects.map(function (x) { return [x.id, projLabel(x)]; }), blank: '— không —', disabled: !!pid }, { k: 'status', label: 'Tình trạng', type: 'select', opts: TASK_STS.map(function (x) { return [x, x]; }) },
-    { k: 'start_date', label: 'Ngày bắt đầu', type: 'date' }, { k: 'end_date', label: 'Ngày kết thúc (hạn)', type: 'date' }, { k: 'time', label: 'Giờ hẹn (tùy chọn)', ph: 'VD 14:30' },
-    { k: 'remind', label: 'Nhắc việc', type: 'select', opts: Object.keys(REM_LB).map(function (k) { return [k, REM_LB[k]]; }) }, { k: 'repeat', label: 'Lặp lại khi xong', type: 'select', opts: Object.keys(REP_LB).map(function (k) { return [k, REP_LB[k]]; }) },
+    { k: 'start_date', label: 'Ngày bắt đầu (ngày được giao)', type: 'date' }, { k: 'end_date', label: 'Ngày kết thúc (hạn hoàn thành)', req: true, type: 'date' },
+    { k: 'repeat', label: 'Lặp lại khi xong', type: 'select', opts: Object.keys(REP_LB).map(function (k) { return [k, REP_LB[k]]; }) },
     { k: 'note', label: 'Ghi chú', type: 'textarea', full: true }], v);
+  var quick = function (label, target, fn) { return h('button', { type: 'button', onclick: function () { f.set(target, fn()); } }, label); };
+  f.el.insertBefore(h('div', { class: 'full', style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' }, h('span', { class: 'mut' }, 'Bắt đầu:'), quick('Hôm nay', 'start_date', today),
+    h('span', { class: 'mut', style: 'margin-left:10px' }, 'Hạn:'), quick('Hôm nay', 'end_date', today), quick('Ngày mai', 'end_date', function () { return addD(today(), 1); }), quick('+3 ngày', 'end_date', function () { return addD(today(), 3); }), quick('+1 tuần', 'end_date', function () { return addD(today(), 7); })), f.inputs.repeat.parentNode);
+  // nhắc nhở: không / đúng hạn / 1 ngày / 2 ngày / tự điền (số ngày hoặc tuần)
+  var rn = v.remind === '' || v.remind == null ? null : Number(v.remind), mode = rn == null ? '' : (rn === 0 || rn === 1 || rn === 2) ? String(rn) : 'x';
+  var rs = sel([['', 'Không nhắc'], ['0', 'Đúng hạn'], ['1', 'Trước 1 ngày'], ['2', 'Trước 2 ngày'], ['x', 'Tự điền…']], mode), rv = h('input', { type: 'number', min: 1, step: 1, style: 'width:80px', value: mode === 'x' ? (rn % 7 === 0 ? rn / 7 : rn) : 3 }), ru = sel([['d', 'ngày'], ['w', 'tuần']], mode === 'x' && rn % 7 === 0 ? 'w' : 'd');
+  var cust = h('span', { style: 'display:' + (mode === 'x' ? 'inline-flex' : 'none') + ';gap:6px;align-items:center' }, 'Trước', rv, ru, 'hạn');
+  rs.addEventListener('change', function () { cust.style.display = rs.value === 'x' ? 'inline-flex' : 'none'; });
+  f.el.insertBefore(h('label', { class: 'full' }, h('span', null, 'Nhắc nhở'), h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, rs, cust)), f.inputs.repeat.parentNode);
   modal({ title: isNew ? 'Thêm công việc' : 'Sửa công việc', body: f.el, dismiss: true, buttons: [{ label: 'Lưu', cls: 'pri', fn: function (close) {
     var rec = f.get(); rec.id = isNew ? '' : t.id; if (pid) rec.project_id = pid;
+    if (!String(rec.title).trim()) { toast('Nhập nội dung công việc', true); return; }
+    if (!rec.end_date) { toast('Chọn ngày kết thúc (hạn hoàn thành)', true); return; }
+    if (!rec.start_date) rec.start_date = today();
+    if (rec.end_date < rec.start_date) { toast('Ngày kết thúc phải sau ngày bắt đầu', true); return; }
+    rec.remind = rs.value === 'x' ? String(Math.max(1, Math.round(num(rv.value))) * (ru.value === 'w' ? 7 : 1)) : rs.value;
     safe(call('taskSave', { rec: rec })).then(function (r) { if (r) { close(); toast('Đã lưu công việc'); done && done(); } });
   } }] });
 }
@@ -2083,13 +2077,13 @@ function taskPanel(o) {
       var dot = h('span', { title: 'Ưu tiên ' + t.priority, style: 'color:' + (t.priority === 'Cao' ? '#dc2626' : t.priority === 'Thấp' ? '#9ca3af' : '#f59e0b') + ';margin-right:4px' }, '●');
       var chk = h('input', { type: 'checkbox', checked: !taskIsOpen(t), title: taskIsOpen(t) ? 'Đánh dấu xong' : 'Mở lại việc', onchange: function (ev) { setStatus(t, ev.target.checked ? 'Xong' : 'Chưa làm'); } });
       var stSel = sel(TASK_STS.map(function (x) { return [x, x]; }), t.status, function (ev) { setStatus(t, ev.target.value); });
-      var meta = [t.remind !== '' && t.remind != null ? '🔔 ' + REM_LB[t.remind] : '', t.repeat ? '🔁 ' + REP_LB[t.repeat] : ''].filter(Boolean).join(' · ');
+      var meta = [t.remind !== '' && t.remind != null ? '🔔 ' + remLabel(t.remind) : '', t.repeat ? '🔁 ' + REP_LB[t.repeat] : ''].filter(Boolean).join(' · ');
       return (function () {
         var tr = h('tr', { style: late ? 'background:#fff5f5' : '' });
         tr.append(h('td', null, chk), h('td', { style: 'min-width:200px;' + (!taskIsOpen(t) ? 'text-decoration:line-through;color:#6b7280' : '') }, dot, t.title), h('td', null, h('span', { class: 'badge' }, t.type || 'Khác')));
         if (!pid) tr.append(h('td', { class: 'mut', style: 'cursor:' + (t.project_id ? 'pointer' : 'default'), onclick: function () { if (t.project_id) go('project/' + t.project_id); } }, t.project || ''));
-        tr.append(h('td', null, D(t.start_date)), h('td', null, D(t.end_date) + (t.time ? ' ' + t.time : '')), h('td', null, taskLeft(t, td)), h('td', null, stSel), h('td', { class: 'mut', style: 'font-size:12px' }, meta), h('td', { class: 'mut', style: 'max-width:200px;font-size:12px' }, t.note || ''),
-          h('td', { style: 'white-space:nowrap' }, h('button', { onclick: function () { taskModal(t, pid, reload); } }, '✎ Sửa'), h('button', { title: 'Nhân bản', onclick: function () { taskModal(Object.assign({}, t, { id: '', status: 'Chưa làm', done_at: '' }), pid, reload); } }, '⧉'),
+        tr.append(h('td', null, D(t.start_date)), h('td', null, D(t.end_date)), h('td', null, taskLeft(t, td)), h('td', null, stSel), h('td', { class: 'mut', style: 'font-size:12px' }, meta), h('td', { class: 'mut', style: 'max-width:200px;font-size:12px' }, t.note || ''),
+          h('td', { style: 'white-space:nowrap' }, h('button', { onclick: function () { taskModal(t, pid, reload); } }, '✎ Sửa'), taskIsOpen(t) ? sel([['1', '+1 ngày'], ['3', '+3 ngày'], ['7', '+1 tuần']], '', function (ev) { var n = Number(ev.target.value); if (!n) return; safe(call('taskSave', { rec: Object.assign({}, t, { end_date: addD(t.end_date || today(), n) }) })).then(function (r) { if (r) { toast('Đã dời hạn'); reload(); } }); }, 'Dời hạn') : null, h('button', { title: 'Nhân bản', onclick: function () { taskModal(Object.assign({}, t, { id: '', status: 'Chưa làm', done_at: '' }), pid, reload); } }, '⧉'),
             h('button', { class: 'dng', onclick: function () { confirmBox('Xóa công việc “' + t.title + '”? Không khôi phục được.', function () { safe(call('taskRemove', { id: t.id })).then(function () { toast('Đã xóa'); reload(); }); }); } }, '🗑 Xóa')));
         return tr;
       })();
@@ -2102,8 +2096,8 @@ function taskPanel(o) {
       h('span', null, (window.Notification && Notification.permission === 'default') ? h('button', { onclick: function () { Notification.requestPermission().then(draw); } }, '🔔 Bật thông báo') : null, h('button', { class: 'pri', onclick: function () { taskModal(null, pid, reload); } }, '+ Thêm việc')));
     box.appendChild(head);
     if (!pid) {   // thêm nhanh: gõ nội dung + chọn hạn + Enter
-      var ti = h('input', { type: 'text', placeholder: 'Thêm nhanh: gõ việc cần làm rồi Enter…', style: 'flex:1;min-width:200px' }), du = sel([['0', 'Hôm nay'], ['1', 'Ngày mai'], ['3', '+3 ngày'], ['7', '+1 tuần'], ['', 'Không hạn']], '0');
-      var add = function () { var tt = ti.value.trim(); if (!tt) return; safe(call('taskSave', { rec: { title: tt, start_date: today(), end_date: du.value === '' ? '' : addD(today(), Number(du.value)), remind: '0', priority: 'Thường', status: 'Chưa làm', type: 'Khác' } })).then(function (r) { if (r) { ti.value = ''; reload(); } }); };
+      var ti = h('input', { type: 'text', placeholder: 'Thêm nhanh: gõ việc cần làm rồi Enter…', style: 'flex:1;min-width:200px' }), du = sel([['0', 'Hạn: hôm nay'], ['1', 'Hạn: ngày mai'], ['3', 'Hạn: +3 ngày'], ['7', 'Hạn: +1 tuần']], '0');
+      var add = function () { var tt = ti.value.trim(); if (!tt) return; safe(call('taskSave', { rec: { title: tt, start_date: today(), end_date: addD(today(), Number(du.value)), remind: '0', priority: 'Thường', status: 'Chưa làm', type: 'Khác' } })).then(function (r) { if (r) { ti.value = ''; reload(); } }); };
       ti.addEventListener('keydown', function (e) { if (e.key === 'Enter') add(); });
       box.appendChild(h('div', { class: 'bar2' }, ti, du, h('button', { onclick: add }, 'Thêm')));
     }
@@ -2140,8 +2134,17 @@ function paintReminders() {
   bar.style.display = n && !REM.hide ? 'block' : 'none';
   var a = document.querySelector('#nav a[data-k="dashboard"]'); if (a) { var b = a.querySelector('.cnt'); if (b) b.remove(); if (n) a.append(h('span', { class: 'cnt', style: 'background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px' }, n)); }
 }
-function refreshReminders() { return raw('taskList', { open: 1 }, true).then(function (r) { REM.tasks = r.tasks || []; REM.td = r.today || today(); paintReminders(); }).catch(function () { }); }
-function remTimeCheck() {
+function remPopup() {
+  var td = REM.td, items = REM.tasks.map(function (t) { return { t: t, s: remState(t, td) }; }).filter(function (x) { return x.s; });
+  if (!items.length) return;
+  items.sort(function (a, b) { return String(a.t.end_date || a.t.start_date).localeCompare(String(b.t.end_date || b.t.start_date)); });
+  var lb = { late: ['b-bad', 'Trễ'], today: ['b-warn', 'Hôm nay'], soon: ['b-info', 'Sắp đến'] };
+  modal({ title: '🔔 Nhắc việc — ' + items.length + ' việc cần chú ý', body: h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['', 'Công việc', 'Dự án', 'Hạn'].map(function (x) { return h('th', null, x); }))),
+    h('tbody', null, items.map(function (x) { return h('tr', null, h('td', null, h('span', { class: 'badge ' + lb[x.s][0] }, lb[x.s][1])), h('td', null, x.t.title), h('td', { class: 'mut' }, x.t.project || ''), h('td', null, D(x.t.end_date || x.t.start_date))); })))),
+    buttons: [{ label: 'Xem công việc', cls: 'pri', fn: function (close) { close(); go('dashboard'); } }], closeLabel: 'Đóng' });
+}
+function refreshReminders() { return raw('taskList', { open: 1 }, true).then(function (r) { REM.tasks = r.tasks || []; REM.td = r.today || today(); paintReminders(); if (!REM.popped) { REM.popped = true; remPopup(); } }).catch(function () { }); }
+function remTimeCheck_unused() {
   var d = new Date(), hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2), td = today();
   REM.tasks.forEach(function (t) {
     if (t.status === 'Xong' || !t.time || (t.end_date || t.start_date) !== td) return;
@@ -2150,7 +2153,7 @@ function remTimeCheck() {
     toast('🔔 Đến giờ: ' + t.title + ' (' + t.time + ')'); notify('Đến giờ: ' + t.title, 'Hẹn lúc ' + t.time, key);
   });
 }
-(function () { var iv = setInterval(function () { if (S.user && S.perms && S.perms.dashboard && S.perms.dashboard.view) { clearInterval(iv); refreshReminders(); setInterval(refreshReminders, 300000); setInterval(remTimeCheck, 60000); } }, 1500); })();
+(function () { var iv = setInterval(function () { if (S.user && S.perms && S.perms.dashboard && S.perms.dashboard.view) { clearInterval(iv); refreshReminders(); setInterval(refreshReminders, 300000);  } }, 1500); })();
 </script>
 
 <script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>

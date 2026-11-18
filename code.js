@@ -1445,11 +1445,13 @@ ACTIONS.taskSave = function (u, p) {
     var old = r.id ? readTable_('TASKS').filter(function (x) { return x.id === r.id; })[0] : null;
     var d10 = function (v) { return String(v || '').slice(0, 10); };
     var sd = d10(r.start_date), ed = d10(r.end_date);
+    if (!ed) throw new Error('Chọn ngày kết thúc (hạn hoàn thành).');
+    if (!sd) sd = today_();
     if (sd && ed && ed < sd) throw new Error('Ngày kết thúc phải sau ngày bắt đầu.');
     var st = TASK_ST.indexOf(r.status) >= 0 ? r.status : (old && old.status ? old.status : 'Chưa làm');
     var o = Object.assign({}, old || {}, { id: old ? old.id : newId_('T'), kind: 'TASK', ref: '', title: title, type: String(r.type || 'Khác'), priority: ['Cao', 'Thường', 'Thấp'].indexOf(r.priority) >= 0 ? r.priority : 'Thường',
-      status: st, start_date: sd, end_date: ed, time: /^\d{1,2}:\d{2}$/.test(String(r.time || '')) ? String(r.time) : '', project_id: r.project_id || '', note: String(r.note || '').trim(),
-      remind: ['', '0', '1', '3'].indexOf(String(r.remind == null ? '' : r.remind)) >= 0 ? String(r.remind == null ? '' : r.remind) : '', repeat: ['', 'day', 'week', 'month'].indexOf(r.repeat || '') >= 0 ? (r.repeat || '') : '',
+      status: st, start_date: sd, end_date: ed, project_id: r.project_id || '', note: String(r.note || '').trim(),
+      remind: /^\d{1,3}$/.test(String(r.remind == null ? '' : r.remind)) ? String(r.remind) : '', repeat: ['', 'day', 'week', 'month'].indexOf(r.repeat || '') >= 0 ? (r.repeat || '') : '',
       done: st === 'Xong' ? '1' : '', done_at: st === 'Xong' ? ((old && old.done_at) || now_()) : '', created_at: old ? old.created_at : now_(), updated_at: now_() });
     upsert_('TASKS', o);
     audit_(u, old ? 'Sửa' : 'Tạo', 'TASKS', o.id, o.project_id, o.title + ' [' + o.status + ']');
