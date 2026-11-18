@@ -39,6 +39,7 @@
     chip.innerHTML = '';
     var nd = Object.keys(meta.dirty).length, txt, col = '#16a34a';
     if (state.conflict) { txt = '⚠ Dữ liệu trên Drive đã đổi ở thiết bị khác'; col = '#dc2626'; }
+    else if (state.note) { txt = '🔀 ' + state.note; col = '#2563eb'; }
     else if (state.needLogin) { txt = '🔒 Chưa đồng bộ — cần đăng nhập Google'; col = '#d97706'; }
     else if (state.phase === 'syncing') { txt = '⏳ Đang đồng bộ…'; col = '#2563eb'; }
     else if (nd) { txt = '⏳ Có ' + nd + ' bảng chưa lưu lên Drive'; col = '#d97706'; }
@@ -94,6 +95,7 @@
         init: function () { return all().then(function () { return 'local'; }); },
         list: function () { return all().then(function (m) { return Object.keys(m.files).filter(function (k) { return k.indexOf('data/') === 0; }).map(function (k) { return { id: k, name: k.slice(5), version: String(m.files[k].v) }; }); }); },
         read: function (id) { return all().then(function (m) { return JSON.parse(m.files[id].text); }); },
+        version: function (id) { return all().then(function (m) { return m.files[id] ? String(m.files[id].v) : null; }); },
         write: function (name, obj, existing) { return all().then(function (m) { var id = existing || ('data/' + name); m.files[id] = { text: JSON.stringify(obj), v: (m.files[id] ? m.files[id].v : 0) + 1 }; return save().then(function () { return { id: id, version: String(m.files[id].v) }; }); }); },
         upload: function (path, blob) { return all().then(function (m) { m.n++; var id = 'files/' + m.n + '/' + blob.getName(); m.files[id] = { text: '(tệp thử)', v: 1 }; return save().then(function () { return { id: id, url: 'https://local.invalid/' + encodeURIComponent(id) }; }); }); },
         trash: function () { return Promise.resolve(); }, backup: function (name, obj) { return all().then(function (m) { m.files['backup/' + name] = { text: JSON.stringify(obj), v: 1 }; return save(); }); }, pruneBackups: function () { return Promise.resolve(); }
@@ -128,6 +130,7 @@
       init: function () { return ensurePath([ROOT_NAME, DATA_NAME]).then(function (id) { dataFolder = id; return id; }); },
       list: function () { return j(API + 'files?q=' + q("'" + dataFolder + "' in parents and trashed=false") + '&fields=files(id,name,version)&pageSize=200').then(function (r) { return r.files || []; }); },
       read: function (id) { return f(API + 'files/' + id + '?alt=media').then(function (r) { return r.json(); }); },
+      version: function (id) { return j(API + 'files/' + id + '?fields=version').then(function (r) { return r.version == null ? null : String(r.version); }); },
       write: function (name, obj, existing) { return multipart(existing ? {} : { name: name, parents: [dataFolder], mimeType: 'application/json' }, JSON.stringify(obj), 'application/json', existing).then(function (r) { return { id: r.id, version: String(r.version) }; }); },
       uploadBig: function (path, file) {       // tải lên dạng "resumable", từng khúc 8MB (file lớn đến 50MB)
         var segs = path.slice(); if (segs[0] === 'HATO ERP') segs[0] = ROOT_NAME;
@@ -195,36 +198,92 @@
   function syncNow() {
     pushing = pushing.then(doSync, doSync); return pushing;
   }
-  function doSync() {
+  /* ---------- Gộp dữ liệu 3 bên: bản nền (lần đồng bộ trước) · máy này · Drive ----------
+     Hai thiết bị sửa khác dòng → gộp, không báo xung đột. Cùng một dòng bị sửa khác nhau → bản có updated_at mới hơn thắng.
+     Dòng bị xóa ở một bên (và bên kia không sửa) → xóa theo. Một bên xóa, bên kia sửa → giữ bản đã sửa. */
+  function rowSig(r) { var a = r.slice(); while (a.length && (a[a.length - 1] === '' || a[a.length - 1] == null)) a.pop(); return JSON.stringify(a); }
+  function mapRows(rows) {
+    var m = {}, order = [];
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i]; if (!r || !r.length) continue; var sg = rowSig(r); if (sg === '[]') continue;
+      var k = (r[0] === '' || r[0] == null) ? '' : String(r[0]); if (k === '') k = '\u0001' + sg;
+      if (!(k in m)) order.push(k); m[k] = r;
+    }
+    return { m: m, order: order };
+  }
+  function mergeRows(name, base, local, remote) {
+    var hL = local[0] || [], hR = remote[0] || [], hdr = hL.length > hR.length ? hL : (hR.length ? hR : hL), out = [hdr];
+    if (LOGT[name]) {                                   // nhật ký: hợp hai bên, không trùng
+      var seen = {}; remote.slice(1).forEach(function (r) { if (r && r.length) { seen[rowSig(r)] = 1; out.push(r); } });
+      local.slice(1).forEach(function (r) { if (r && r.length && !seen[rowSig(r)]) out.push(r); }); return out;
+    }
+    var L = mapRows(local), R = mapRows(remote), B = base ? mapRows(base) : null, tsI = hdr.indexOf('updated_at');
+    var order = R.order.concat(L.order.filter(function (k) { return !(k in R.m); }));
+    order.forEach(function (k) {
+      var l = L.m[k], r = R.m[k], b = B ? B.m[k] : undefined, take = null;
+      if (l && r) {
+        var sl = rowSig(l), sr = rowSig(r);
+        if (sl === sr) take = r;
+        else if (b && sl === rowSig(b)) take = r;            // chỉ Drive sửa
+        else if (b && sr === rowSig(b)) take = l;            // chỉ máy này sửa
+        else if (name === 'COUNTERS') take = Number(l[1]) > Number(r[1]) ? l : r;
+        else if (tsI > 0 && String(r[tsI] || '') > String(l[tsI] || '')) take = r;
+        else take = l;
+      } else if (l) take = (b && rowSig(l) === rowSig(b)) ? null : l;      // Drive đã xóa (máy này không sửa) → xóa theo
+      else take = (b && rowSig(r) === rowSig(b)) ? null : r;               // máy này đã xóa (Drive không sửa) → xóa theo
+      if (take) out.push(take);
+    });
+    return out;
+  }
+  function saveBase(n, p) { return n === '_props' ? Promise.resolve() : IDB.set('base:' + n, { rows: (p && p.rows) || [] }); }
+  function seq(list, fn) { return list.reduce(function (p, x) { return p.then(function () { return fn(x); }); }, Promise.resolve()); }
+  var RETRY = { retry: true };
+  function doSync(attempt) {
+    attempt = typeof attempt === 'number' ? attempt : 0;
     if (state.conflict) return Promise.resolve();
     setState({ phase: 'syncing' });
+    var merged = [], pulled = false;
     return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
-      var byName = {}; remote.forEach(function (x) { byName[x.name] = x; });
-      var pulled = false, conflicts = [];
+      var tasks = [];
       remote.forEach(function (x) {
         var n = x.name.replace(/\.json$/, ''), known = meta.versions[n];
-        if (known && known.version === x.version && known.id === x.id) return;           // không đổi
-        if (meta.dirty[n]) { if (!known || known.version !== x.version) { if (LOGT[n]) x._merge = n; else conflicts.push(n); } return; }
-        x._pull = n;
+        if (known && known.version === x.version && known.id === x.id) return;             // Drive không đổi
+        tasks.push({ n: n, x: x, merge: !!meta.dirty[n] });
       });
-      if (conflicts.length) { state.conflictNames = conflicts; setState({ conflict: true, phase: 'idle', msg: 'Bảng: ' + conflicts.join(', ') }); return null; }
-      var pulls = remote.filter(function (x) { return x._pull; });
-      var merges = remote.filter(function (x) { return x._merge; });
-      return Promise.all(merges.map(function (x) {      // bảng nhật ký (AUDIT/ERRLOG): gộp dòng của hai thiết bị, không báo xung đột
-        return Drive.read(x.id).then(function (p) {
-          var sh = wb.sheets[x._merge], have = {}; sh.g.forEach(function (r) { if (r && r[0] !== '' && r[0] != null) have[String(r[0])] = 1; });
-          var add = (p.rows || []).slice(1).filter(function (r) { return r && r[0] !== '' && r[0] != null && !have[String(r[0])]; });
-          if (add.length) { var hdr = sh.g[0] ? 1 : 0; sh.g = sh.g.slice(0, hdr).concat(add, sh.g.slice(hdr)); sh.max = Math.max(1000, sh.g.length + 200); }
-          meta.versions[x._merge] = { id: x.id, version: x.version }; wb.touch(x._merge); return persistLocal([x._merge]);
+      return seq(tasks, function (t) {
+        return Drive.read(t.x.id).then(function (p) {
+          if (!t.merge) { applyPayload(t.n, p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return saveBase(t.n, p).then(function () { return persistLocal([t.n]); }); }
+          if (t.n === '_props') { wb.props = Object.assign({}, p.props || {}, wb.props || {}); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return persistLocal([t.n]); }
+          return IDB.get('base:' + t.n).then(function (b) {
+            var loc = wb.sheets[t.n] ? wb.sheets[t.n].exportRows() : [];
+            applyPayload(t.n, { rows: mergeRows(t.n, b && b.rows, loc, p.rows || []) });
+            meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; merged.push(t.n); return persistLocal([t.n]);
+          });
         });
-      })).then(function () { return Promise.all(pulls.map(function (x) { return Drive.read(x.id).then(function (p) { applyPayload(x._pull, p); meta.versions[x._pull] = { id: x.id, version: x.version }; pulled = true; return persistLocal([x._pull]); }); })).then(function () {
-        if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
-        var names = Object.keys(meta.dirty).filter(function (n) { return n === '_props' || wb.sheets[n]; });
-        return names.reduce(function (p, n) {
-          return p.then(function () { var k = meta.versions[n]; return Drive.write(FILE(n), sheetPayload(n), k && k.id).then(function (r) { meta.versions[n] = r; delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }); });
-        }, Promise.resolve());
-      }); }).then(function () { meta.lastSync = Date.now(); return maybeBackup(); });
+      });
+    }).then(function () {
+      if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
+      var names = Object.keys(meta.dirty).filter(function (n) { return n === '_props' || wb.sheets[n]; });
+      return seq(names, function (n) {
+        var k = meta.versions[n], pl = sheetPayload(n);
+        return (n !== '_props' && merged.indexOf(n) < 0 && k && k.id ? IDB.get('base:' + n) : Promise.resolve(null)).then(function (b) {
+          if (b && JSON.stringify(b.rows) === JSON.stringify(pl.rows)) { delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }   // giống bản đã đồng bộ → khỏi ghi lên Drive
+          meta.dirty[n] = 2;                                                                  // đang gửi; nếu trong lúc gửi có sửa thêm thì onChange đặt lại = 1
+          return (k && k.id ? Drive.version(k.id) : Promise.resolve(null)).then(function (v) {
+            if (k && k.id && v != null && String(v) !== String(k.version)) { meta.dirty[n] = 1; throw RETRY; }   // thiết bị khác vừa ghi: gộp lại trước khi ghi
+            return Drive.write(FILE(n), pl, k && k.id);
+          }).then(function (r) {
+            meta.versions[n] = r; if (meta.dirty[n] === 2) delete meta.dirty[n];
+            return saveBase(n, pl).then(function () { return IDB.set('meta', clone(meta)); });
+          }, function (e) { if (meta.dirty[n] === 2) meta.dirty[n] = 1; throw e; });
+        });
+      });
+    }).then(function () {
+      meta.lastSync = Date.now();
+      if (merged.length) { setState({ note: 'Đã gộp thay đổi từ thiết bị khác (' + merged.join(', ') + ')' }); setTimeout(function () { setState({ note: '' }); }, 8000); }
+      return maybeBackup();
     }).then(function () { setState({ phase: 'idle', needLogin: false, msg: '' }); }, function (e) {
+      if (e === RETRY) { if (attempt < 3) return doSync(attempt + 1); setState({ phase: 'idle', msg: 'Thiết bị khác đang ghi liên tục — sẽ thử lại.' }); setTimeout(syncNow, 15000); return; }
       var m = String((e && e.message) || e), login = /popup|access_denied|immediate_failed|login|consent|401|Client ID|đăng nhập/i.test(m);
       setState({ phase: 'idle', needLogin: login, msg: m }); if (!login && !LOCAL) setTimeout(function () { if (Object.keys(meta.dirty).length) syncNow(); }, 30000);
     });
@@ -307,7 +366,7 @@
   }
   function firstLoad(interactive) {
     signIn(interactive).then(function () { showGate([el('p', null, 'Đang tải dữ liệu từ Drive…')]); return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
-      return Promise.all(remote.map(function (x) { return Drive.read(x.id).then(function (p) { var n = x.name.replace(/\.json$/, ''); applyPayload(n, p); meta.versions[n] = { id: x.id, version: x.version }; return n; }); }));
+      return Promise.all(remote.map(function (x) { return Drive.read(x.id).then(function (p) { var n = x.name.replace(/\.json$/, ''); applyPayload(n, p); meta.versions[n] = { id: x.id, version: x.version }; return saveBase(n, p).then(function () { return n; }); }); }));
     }).then(function (names) { return persistLocal(names); }).then(function () { start(); }).catch(function (e) { askLogin('Không đăng nhập được: ' + e.message); });
   }
   function start() { isReady = true; hideGate(); readyResolve(); drawChip(); syncNow(); }
@@ -321,7 +380,9 @@
   }
   window.addEventListener('beforeunload', function (e) { if (!window.__redirecting && Object.keys(meta.dirty).length && !state.needLogin) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('online', function () { syncNow(); });
+  setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, 60000);     // tự lấy thay đổi từ thiết bị khác
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && isReady) syncNow(); });
+  if (LOCAL) window.__hatoDrive = Drive;      // chỉ chế độ thử: để kiểm tra gộp dữ liệu giữa hai "thiết bị"
   window.HatoStore = { queueBackup: queueBackup, syncNow: syncNow, meta: function () { return meta; }, state: state, env: env, ready: readyP, signIn: signIn,
     importWorkbook: function (snap) { wb.load(snap); env.resetCache(); Object.keys(wb.sheets).forEach(function (n) { meta.dirty[n] = 1; }); meta.dirty._props = 1; return persistLocal(Object.keys(wb.sheets).concat(['_props'])).then(function () { return syncNow(); }); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
