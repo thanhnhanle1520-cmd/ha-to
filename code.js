@@ -51,7 +51,7 @@ const TABLES = {
   FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size'],
   AUDIT: ['ts', 'user', 'action', 'table', 'rec_id', 'project_id', 'summary'],
   ERRLOG: ['ts', 'user', 'action', 'message'],
-  TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note'],
+  TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note', 'type', 'priority', 'status', 'time', 'remind', 'repeat', 'done_at', 'updated_at'],
   PRICEHIST: ['id', 'code', 'date', 'old_cost', 'new_cost', 'user'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
@@ -1421,12 +1421,20 @@ ACTIONS.todayList = function (u, p) {
     var end = addMonths_(w.start_date, num_(w.months));
     if (end >= td && end <= lim) add({ ref: 'W:' + w.id + ':' + end, kind: 'warranty', start_date: String(w.start_date).slice(0, 10), title: 'Bảo hành ' + w.code + ' hết hạn', end_date: end, project_id: w.project_id, project: pn(w.project_id), link: ['project', w.project_id] });
   });
-  tasks.forEach(function (t) {
-    if (t.kind !== 'TASK' || String(t.done) === '1') return;
-    items.push({ ref: 'T:' + t.id, id: t.id, kind: 'task', title: t.title, note: t.note || '', created_at: t.created_at, start_date: t.start_date, end_date: t.end_date, project_id: t.project_id, project: pn(t.project_id), link: t.project_id ? ['project', t.project_id] : null, late: !!t.end_date && t.end_date < td, manual: true });
-  });
   items.sort(function (a, b) { return String(a.end_date || '9999').localeCompare(String(b.end_date || '9999')); });
   return { today: td, items: items };
+};
+var TASK_ST = ['Chưa làm', 'Đang làm', 'Chờ phản hồi', 'Xong'];
+function taskOut_(t, projs, custs) {
+  var pr = projs[t.project_id] || {};
+  return Object.assign({}, t, { project: pr.code ? pr.code + ' ' + pr.name : '', customer: (custs[pr.customer_id] || {}).name || '' });
+}
+ACTIONS.taskList = function (u, p) {
+  need_(u, 'dashboard', 'view');
+  var projs = mapBy_(readTable_('PROJECTS'), 'id'), custs = mapBy_(readTable_('CUSTOMERS'), 'id');
+  var all = readTable_('TASKS').filter(function (t) { return t.kind === 'TASK' && (!p.project_id || t.project_id === p.project_id); });
+  var open = all.filter(function (t) { return String(t.done) !== '1'; }), done = all.filter(function (t) { return String(t.done) === '1'; }).sort(function (a, b) { return String(b.done_at).localeCompare(String(a.done_at)); }).slice(0, p.project_id ? 500 : 100);
+  return { today: today_(), tasks: open.concat(p.open ? [] : done).map(function (t) { return taskOut_(t, projs, custs); }) };
 };
 ACTIONS.taskSave = function (u, p) {
   need_(u, 'dashboard', 'view');
@@ -1435,33 +1443,63 @@ ACTIONS.taskSave = function (u, p) {
     var r = p.rec || {}, title = String(r.title || '').trim();
     if (!title) throw new Error('Thiếu nội dung công việc.');
     var old = r.id ? readTable_('TASKS').filter(function (x) { return x.id === r.id; })[0] : null;
-    var o = Object.assign({}, old || {}, { id: old ? old.id : newId_('T'), kind: 'TASK', ref: '', title: title, start_date: String(r.start_date || '').slice(0, 10), end_date: String(r.end_date || '').slice(0, 10), project_id: r.project_id || '', note: String(r.note || '').trim(), done: old ? old.done : '', created_at: old ? old.created_at : now_() });
-    upsert_('TASKS', o); return o;
+    var d10 = function (v) { return String(v || '').slice(0, 10); };
+    var sd = d10(r.start_date), ed = d10(r.end_date);
+    if (sd && ed && ed < sd) throw new Error('Ngày kết thúc phải sau ngày bắt đầu.');
+    var st = TASK_ST.indexOf(r.status) >= 0 ? r.status : (old && old.status ? old.status : 'Chưa làm');
+    var o = Object.assign({}, old || {}, { id: old ? old.id : newId_('T'), kind: 'TASK', ref: '', title: title, type: String(r.type || 'Khác'), priority: ['Cao', 'Thường', 'Thấp'].indexOf(r.priority) >= 0 ? r.priority : 'Thường',
+      status: st, start_date: sd, end_date: ed, time: /^\d{1,2}:\d{2}$/.test(String(r.time || '')) ? String(r.time) : '', project_id: r.project_id || '', note: String(r.note || '').trim(),
+      remind: ['', '0', '1', '3'].indexOf(String(r.remind == null ? '' : r.remind)) >= 0 ? String(r.remind == null ? '' : r.remind) : '', repeat: ['', 'day', 'week', 'month'].indexOf(r.repeat || '') >= 0 ? (r.repeat || '') : '',
+      done: st === 'Xong' ? '1' : '', done_at: st === 'Xong' ? ((old && old.done_at) || now_()) : '', created_at: old ? old.created_at : now_(), updated_at: now_() });
+    upsert_('TASKS', o);
+    audit_(u, old ? 'Sửa' : 'Tạo', 'TASKS', o.id, o.project_id, o.title + ' [' + o.status + ']');
+    return o;
   });
 };
-// Đánh dấu xong: việc tự thêm → ẩn; mục tự động → ẩn theo khóa (đổi hạn/ngày thì hiện lại)
+function nextRepeat_(t) {
+  var step = function (s) { return t.repeat === 'day' ? addDays_(s, 1) : t.repeat === 'week' ? addDays_(s, 7) : addMonths_(s, 1); };
+  var sd = t.start_date, ed = t.end_date, td = today_(), n = 0;
+  do { if (sd) sd = step(sd); if (ed) ed = step(ed); n++; } while (n < 400 && (ed || sd) && (ed || sd) < td);
+  return { start_date: sd, end_date: ed };
+}
+// Đổi trạng thái; Xong + có lặp lại → tạo việc kỳ kế tiếp. Có ref (mục tự động) → ẩn mục.
 ACTIONS.taskDone = function (u, p) {
   need_(u, 'dashboard', 'view');
   return withLock_(function () {
     RT = { user: RT.user, ss: RT.ss };
-    if (p.id) {
-      var t = readTable_('TASKS').filter(function (x) { return x.id === p.id; })[0];
-      if (!t) throw new Error('Không tìm thấy công việc.');
-      upsert_('TASKS', Object.assign({}, t, { done: '1' }));
-    } else if (p.ref) {
+    if (!p.id && p.ref) {
       upsert_('TASKS', { id: newId_('T'), kind: 'DISMISS', ref: String(p.ref), title: '', start_date: '', end_date: '', project_id: '', done: '1', created_at: now_() });
+      return true;
     }
-    return true;
+    var t = readTable_('TASKS').filter(function (x) { return x.id === p.id; })[0];
+    if (!t) throw new Error('Không tìm thấy công việc.');
+    var st = TASK_ST.indexOf(p.status) >= 0 ? p.status : 'Xong', wasDone = String(t.done) === '1';
+    upsert_('TASKS', Object.assign({}, t, { status: st, done: st === 'Xong' ? '1' : '', done_at: st === 'Xong' ? (t.done_at || now_()) : '', updated_at: now_() }));
+    audit_(u, st === 'Xong' ? 'Hoàn thành' : 'Đổi trạng thái', 'TASKS', t.id, t.project_id, t.title + ' → ' + st);
+    var next = null;
+    if (st === 'Xong' && !wasDone && t.repeat) {
+      var nr = nextRepeat_(t);
+      next = Object.assign({}, t, { id: newId_('T'), status: 'Chưa làm', done: '', done_at: '', start_date: nr.start_date, end_date: nr.end_date, created_at: now_(), updated_at: now_() });
+      upsert_('TASKS', next);
+      audit_(u, 'Tạo (lặp lại)', 'TASKS', next.id, next.project_id, next.title);
+    }
+    return { next: next && next.id };
   });
 };
 ACTIONS.taskRemove = function (u, p) {
   need_(u, 'dashboard', 'view');
   return withLock_(function () {
     RT = { user: RT.user, ss: RT.ss };
+    var t = readTable_('TASKS').filter(function (x) { return x.id === p.id; })[0];
     var sh = ss_().getSheetByName('TASKS'), last = sh.getLastRow();
     if (last >= 2) { var ids = sh.getRange(2, 1, last - 1, 1).getValues(); for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(p.id)) { sh.deleteRows(i + 2, 1); break; } }
-    bump_('TASKS'); return true;
+    bump_('TASKS'); if (t) audit_(u, 'Xóa', 'TASKS', t.id, t.project_id, t.title);
+    return true;
   });
+};
+ACTIONS.taskHistory = function (u, p) {
+  need_(u, 'dashboard', 'view');
+  return readTable_('AUDIT').filter(function (a) { return a.table === 'TASKS' && a.project_id === p.project_id; }).sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); }).slice(0, 200);
 };
 // ---- Gói đối chiếu: SL theo PO (hoặc HĐ) + số lượng đã giao từng ngày
 ACTIONS.reconcile = function (u, p) {
