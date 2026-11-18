@@ -51,7 +51,7 @@ const TABLES = {
   FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size'],
   AUDIT: ['ts', 'user', 'action', 'table', 'rec_id', 'project_id', 'summary'],
   ERRLOG: ['ts', 'user', 'action', 'message'],
-  TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at'],
+  TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note'],
   PRICEHIST: ['id', 'code', 'date', 'old_cost', 'new_cost', 'user'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
@@ -1409,21 +1409,21 @@ ACTIONS.todayList = function (u, p) {
   Object.keys(latest).forEach(function (k) {
     var q = latest[k]; if (q.converted_to || q.status === 'Không chốt' || q.status === 'Nháp') return;
     var exp = addDays_(q.date, num_(q.valid_days) || 30), left = Math.round((new Date(exp + 'T00:00:00Z') - new Date(td + 'T00:00:00Z')) / 86400000);
-    if (left <= 3 && left >= -14) add({ ref: 'Q:' + q.id + ':' + exp, kind: 'quote', title: 'Báo giá ' + q.code + (left < 0 ? ' đã hết hạn ' + (-left) + ' ngày' : left === 0 ? ' hết hạn hôm nay' : ' hết hạn sau ' + left + ' ngày'), end_date: exp, project_id: q.project_id, project: pn(q.project_id), link: ['quote', q.id], late: left < 0 });
+    if (left <= 3 && left >= -14) add({ ref: 'Q:' + q.id + ':' + exp, kind: 'quote', start_date: q.date, title: 'Báo giá ' + q.code + (left < 0 ? ' đã hết hạn ' + (-left) + ' ngày' : left === 0 ? ' hết hạn hôm nay' : ' hết hạn sau ' + left + ' ngày'), end_date: exp, project_id: q.project_id, project: pn(q.project_id), link: ['quote', q.id], late: left < 0 });
   });
   readTable_('DELIVERIES').forEach(function (d) {
     if (d.status === 'DA_GIAO' || d.status === 'HUY' || !d.date || String(d.date).slice(0, 10) >= td) return;
-    add({ ref: 'D:' + d.id + ':' + String(d.date).slice(0, 10), kind: 'delivery', title: 'Giao hàng trễ: ' + d.code, end_date: String(d.date).slice(0, 10), project_id: d.project_id, project: pn(d.project_id), link: ['delivery', d.id], late: true });
+    add({ ref: 'D:' + d.id + ':' + String(d.date).slice(0, 10), kind: 'delivery', start_date: String(d.date).slice(0, 10), title: 'Giao hàng trễ: ' + d.code, end_date: String(d.date).slice(0, 10), project_id: d.project_id, project: pn(d.project_id), link: ['delivery', d.id], late: true });
   });
   var lim = addDays_(td, 30);
   readTable_('WARRANTIES').forEach(function (w) {
     if (!w.start_date || !num_(w.months)) return;
     var end = addMonths_(w.start_date, num_(w.months));
-    if (end >= td && end <= lim) add({ ref: 'W:' + w.id + ':' + end, kind: 'warranty', title: 'Bảo hành ' + w.code + ' hết hạn', end_date: end, project_id: w.project_id, project: pn(w.project_id), link: ['project', w.project_id] });
+    if (end >= td && end <= lim) add({ ref: 'W:' + w.id + ':' + end, kind: 'warranty', start_date: String(w.start_date).slice(0, 10), title: 'Bảo hành ' + w.code + ' hết hạn', end_date: end, project_id: w.project_id, project: pn(w.project_id), link: ['project', w.project_id] });
   });
   tasks.forEach(function (t) {
     if (t.kind !== 'TASK' || String(t.done) === '1') return;
-    items.push({ ref: 'T:' + t.id, id: t.id, kind: 'task', title: t.title, start_date: t.start_date, end_date: t.end_date, project_id: t.project_id, project: pn(t.project_id), link: t.project_id ? ['project', t.project_id] : null, late: !!t.end_date && t.end_date < td, manual: true });
+    items.push({ ref: 'T:' + t.id, id: t.id, kind: 'task', title: t.title, note: t.note || '', created_at: t.created_at, start_date: t.start_date, end_date: t.end_date, project_id: t.project_id, project: pn(t.project_id), link: t.project_id ? ['project', t.project_id] : null, late: !!t.end_date && t.end_date < td, manual: true });
   });
   items.sort(function (a, b) { return String(a.end_date || '9999').localeCompare(String(b.end_date || '9999')); });
   return { today: td, items: items };
@@ -1435,7 +1435,7 @@ ACTIONS.taskSave = function (u, p) {
     var r = p.rec || {}, title = String(r.title || '').trim();
     if (!title) throw new Error('Thiếu nội dung công việc.');
     var old = r.id ? readTable_('TASKS').filter(function (x) { return x.id === r.id; })[0] : null;
-    var o = Object.assign({}, old || {}, { id: old ? old.id : newId_('T'), kind: 'TASK', ref: '', title: title, start_date: String(r.start_date || '').slice(0, 10), end_date: String(r.end_date || '').slice(0, 10), project_id: r.project_id || '', done: old ? old.done : '', created_at: old ? old.created_at : now_() });
+    var o = Object.assign({}, old || {}, { id: old ? old.id : newId_('T'), kind: 'TASK', ref: '', title: title, start_date: String(r.start_date || '').slice(0, 10), end_date: String(r.end_date || '').slice(0, 10), project_id: r.project_id || '', note: String(r.note || '').trim(), done: old ? old.done : '', created_at: old ? old.created_at : now_() });
     upsert_('TASKS', o); return o;
   });
 };

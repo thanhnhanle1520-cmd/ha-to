@@ -746,28 +746,36 @@ PAGES.dashboard = function (p, q) {
 /* ---- Cần xử lý hôm nay (việc tự động + việc tự thêm, tick xong thì ẩn) ---- */
 function todayBlock() {
   var box = h('div', { class: 'card', style: 'margin-bottom:12px;border-left:4px solid #ee0033' });
+  var KL = { quote: 'Báo giá', delivery: 'Giao hàng', warranty: 'Bảo hành', task: 'Công việc' };
   function open(link) { if (!link) return; var t = link[0], id = link[1]; go(t === 'quote' ? 'quote/' + id : t === 'delivery' ? 'delivery/' + id : 'project/' + id); }
   function taskModal(t) {
     var f = form([{ k: 'title', label: 'Việc cần làm', req: true, full: true }, { k: 'start_date', label: 'Ngày bắt đầu', type: 'date' }, { k: 'end_date', label: 'Hạn hoàn thành', type: 'date' },
-      { k: 'project_id', label: 'Dự án (nếu có)', type: 'select', opts: S.projects.map(function (x) { return [x.id, projLabel(x)]; }), blank: '— không —' }], t || { start_date: new Date().toISOString().slice(0, 10) });
+      { k: 'project_id', label: 'Dự án (nếu có)', type: 'select', opts: S.projects.map(function (x) { return [x.id, projLabel(x)]; }), blank: '— không —' }, { k: 'note', label: 'Ghi chú', type: 'textarea', full: true }], t || { start_date: today() });
     modal({ title: t ? 'Sửa công việc' : 'Thêm công việc', body: f.el, dismiss: true, buttons: [{ label: 'Lưu', cls: 'pri', fn: function (close) { safe(call('taskSave', { rec: Object.assign({ id: t && t.id }, f.get()) })).then(function (r) { if (r) { close(); render(); } }); } }] });
+  }
+  function left(it, td) {
+    if (!it.end_date) return '';
+    var n = Math.round((new Date(it.end_date + 'T00:00:00') - new Date(td + 'T00:00:00')) / 86400000);
+    return n < 0 ? h('span', { class: 'badge b-bad' }, 'Trễ ' + (-n) + ' ngày') : n === 0 ? h('span', { class: 'badge b-warn' }, 'Hôm nay') : h('span', { class: 'badge ' + (n <= 3 ? 'b-warn' : 'b-info') }, 'Còn ' + n + ' ngày');
   }
   function render() {
     safe(call('todayList', {})).then(function (r) {
       box.innerHTML = '';
-      var items = (r && r.items) || [];
+      var items = (r && r.items) || [], td = (r && r.today) || today();
       box.appendChild(h('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, h('h3', { style: 'margin:0' }, 'Cần xử lý hôm nay' + (items.length ? ' (' + items.length + ')' : '')),
         h('button', { onclick: function () { taskModal(null); } }, '+ Thêm việc')));
       if (!items.length) { box.appendChild(h('div', { class: 'mut' }, 'Không có việc tồn đọng.')); return; }
-      items.forEach(function (it) {
-        var chk = h('input', { type: 'checkbox', title: 'Đã xử lý — ẩn khỏi danh sách', onchange: function () { safe(call('taskDone', it.manual ? { id: it.id } : { ref: it.ref })).then(function () { render(); }); } });
-        var dates = (it.start_date ? 'Từ ' + D(it.start_date) + ' ' : '') + (it.end_date ? (it.manual ? 'đến ' : 'hạn ') + D(it.end_date) : '');
-        box.appendChild(h('div', { style: 'display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f3f4f6' }, chk,
-          h('div', { style: 'flex:1;min-width:0' },
-            h('div', { style: 'cursor:' + (it.link ? 'pointer' : 'default') + ';' + (it.late ? 'color:#b91c1c' : ''), onclick: function () { open(it.link); } }, it.title),
-            h('div', { class: 'mut', style: 'font-size:12px' }, [it.project, dates].filter(Boolean).join(' · '))),
-          it.manual ? h('span', { style: 'white-space:nowrap' }, h('button', { onclick: function () { taskModal(it); } }, '✎'), h('button', { onclick: function () { confirmBox('Xóa công việc này?', function () { safe(call('taskRemove', { id: it.id })).then(function () { render(); }); }); } }, '🗑')) : null));
-      });
+      var hd = ['', 'Loại', 'Nội dung', 'Dự án', 'Bắt đầu', 'Hạn', 'Tình trạng', 'Ghi chú', ''];
+      box.appendChild(h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, hd.map(function (x) { return h('th', null, x); }))),
+        h('tbody', null, items.map(function (it) {
+          var chk = h('input', { type: 'checkbox', title: 'Đã xử lý — ẩn khỏi danh sách', onchange: function () { safe(call('taskDone', it.manual ? { id: it.id } : { ref: it.ref })).then(function () { render(); }); } });
+          var acts = h('span', { style: 'white-space:nowrap' },
+            it.manual ? h('button', { title: 'Sửa', onclick: function () { taskModal(it); } }, '✎ Sửa') : null,
+            h('button', { class: 'dng', title: it.manual ? 'Xóa công việc' : 'Ẩn mục này', onclick: function () { confirmBox(it.manual ? 'Xóa công việc “' + it.title + '”? Không khôi phục được.' : 'Ẩn mục “' + it.title + '” khỏi danh sách?', function () { safe(call(it.manual ? 'taskRemove' : 'taskDone', it.manual ? { id: it.id } : { ref: it.ref })).then(function () { render(); }); }); } }, it.manual ? '🗑 Xóa' : 'Ẩn'));
+          return h('tr', { style: it.late ? 'background:#fff5f5' : '' }, h('td', null, chk), h('td', null, h('span', { class: 'badge' }, KL[it.kind] || '')),
+            h('td', { style: 'min-width:200px;' + (it.link ? 'cursor:pointer' : ''), onclick: function () { open(it.link); } }, it.title), h('td', { class: 'mut' }, it.project || ''), h('td', null, D(it.start_date)), h('td', null, D(it.end_date)), h('td', null, left(it, td)),
+            h('td', { class: 'mut', style: 'max-width:220px' }, (it.note || '') + (it.manual && it.created_at ? (it.note ? ' · ' : '') + 'tạo ' + D(it.created_at) : '')), h('td', null, acts));
+        })))));
     });
   }
   render(); return box;
@@ -1845,7 +1853,7 @@ function printPreview(title, html, extraBtns) {
   var fr = h('iframe', { style: 'width:100%;height:72vh;border:1px solid #d1d5db;background:#fff' }); fr.srcdoc = html;
   return modal({ title: title, wide: true, body: fr, buttons: [{ label: 'In / Lưu PDF', cls: 'pri', fn: function () { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (e) { toast('Trình duyệt chặn in.', true); } } }].concat(extraBtns || []) });
 }
-var PRINT_CSS = '<style>body{font:12px Arial,sans-serif;margin:14mm;color:#111}h2{margin:0 0 4px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #888;padding:3px 5px;vertical-align:top}th{background:#eee}td.r{text-align:right}.m{color:#555}@page{size:A4 landscape;margin:10mm}</style>';
+var PRINT_CSS = '<style>*{font-family:"Times New Roman",Times,serif}body{font-size:13px;margin:14mm;color:#000}h2{font-size:16px;margin:0 0 4px}h3{font-size:14px;margin:10px 0 4px}table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #888;padding:3px 5px;vertical-align:top;font-size:13px}th{background:#eee}td.r{text-align:right}.m{color:#555}@page{size:A4 landscape;margin:10mm}</style>';
 function copyText(txt) {
   function fb() { var t = h('textarea', { style: 'position:fixed;left:-999px' }); t.value = txt; document.body.appendChild(t); t.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) { } t.remove(); return ok; }
   if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(txt).then(function () { return true; }, function () { return fb(); });
