@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -14,7 +14,7 @@ const ALL = ['ADMIN', 'GD', 'KD', 'KHO'], MGR = ['ADMIN', 'GD'], SALES = ['ADMIN
 // Ma trận quyền: Xem / Tạo / Sửa  (sửa tại đây nếu cần đổi quyền)
 const PERMS = {
   dashboard:  { view: SALES, create: [], edit: [] },
-  pricelist:  { view: ALL, create: [], edit: [] },
+  pricelist:  { view: ALL, create: SALES, edit: SALES },
   customers:  { view: ALL, create: SALES, edit: SALES },
   quotes:     { view: SALES, create: SALES, edit: SALES },
   projects:   { view: ALL, create: SALES, edit: SALES },
@@ -35,12 +35,12 @@ const DEFAULT_IMG = { logo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAggAA
 
 const TABLES = {
   USERS: ['email', 'name', 'role', 'active', 'phone'],
-  CUSTOMERS: ['id', 'code', 'name', 'tax_code', 'address', 'contact', 'phone', 'email', 'status', 'created_at', 'updated_at'],
+  CUSTOMERS: ['id', 'code', 'name', 'tax_code', 'address', 'contact', 'phone', 'email', 'status', 'created_at', 'updated_at', 'short_name', 'rep_name', 'rep_title', 'bank_account'],
   PROJECTS: ['id', 'code', 'name', 'customer_id', 'owner_email', 'start_date', 'end_date', 'status', 'rep_name', 'rep_phone', 'receiver', 'note', 'created_by', 'created_at', 'updated_at', 'kind'],
-  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method'],
-  QUOTE_ITEMS: ['id', 'quote_id', 'line_no', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price', 'cost', 'disc_pct', 'note'],
-  DOCS: ['id', 'code', 'type', 'project_id', 'parent_id', 'doc_no', 'sign_date', 'delivery_date', 'pay_method', 'currency', 'vat_pct', 'terms', 'warranty_months', 'late_penalty', 'pay_docs', 'attached', 'source_quote_id', 'note', 'created_by', 'created_at', 'updated_at'],
-  DOC_ITEMS: ['id', 'doc_id', 'line_no', 'ref_item_id', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price_offer', 'price', 'cost', 'source', 'note', 'cost_list'],
+  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'coef'],
+  QUOTE_ITEMS: ['id', 'quote_id', 'line_no', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price', 'cost', 'disc_pct', 'note', 'spec', 'coef'],
+  DOCS: ['id', 'code', 'type', 'project_id', 'parent_id', 'doc_no', 'sign_date', 'delivery_date', 'pay_method', 'currency', 'vat_pct', 'terms', 'warranty_months', 'late_penalty', 'pay_docs', 'attached', 'source_quote_id', 'note', 'created_by', 'created_at', 'updated_at', 'ext'],
+  DOC_ITEMS: ['id', 'doc_id', 'line_no', 'ref_item_id', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price_offer', 'price', 'cost', 'source', 'note', 'cost_list', 'spec'],
   DELIVERIES: ['id', 'code', 'project_id', 'date', 'status', 'deliverer', 'place', 'receiver', 'note', 'created_by', 'created_at', 'updated_at', 'copies', 'copies_a', 'copies_b'],
   DELIVERY_ITEMS: ['id', 'delivery_id', 'line_no', 'doc_id', 'doc_item_id', 'code', 'name', 'model', 'unit', 'qty', 'note'],
   COSTS: ['id', 'project_id', 'doc_id', 'date', 'type', 'amount', 'payer', 'note', 'file_url', 'created_by', 'created_at', 'delivery_id'],
@@ -48,23 +48,25 @@ const TABLES = {
   PAYMENTS: ['id', 'code', 'project_id', 'doc_id', 'kind', 'term_index', 'amount', 'date', 'note', 'created_by', 'created_at', 'pct', 'delivery_id'],
   WARRANTIES: ['id', 'code', 'project_id', 'doc_id', 'months', 'start_date', 'items', 'note', 'created_by', 'created_at', 'delivery_id'],
   CERTS: ['id', 'code', 'project_id', 'doc_id', 'lot', 'issue_date', 'items', 'note', 'created_by', 'created_at', 'site', 'delivery_id'],
-  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at'],
+  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size'],
   AUDIT: ['ts', 'user', 'action', 'table', 'rec_id', 'project_id', 'summary'],
   ERRLOG: ['ts', 'user', 'action', 'message'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
   COUNTERS: ['key', 'value']
 };
-const NUM = new Set(['qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
-const JSONCOLS = { DOCS: ['terms', 'attached'], WARRANTIES: ['items'], CERTS: ['items'] };
+const NUM = new Set(['qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
+const JSONCOLS = { DOCS: ['terms', 'attached', 'ext'], WARRANTIES: ['items'], CERTS: ['items'] };
 
 const DEFAULT_CONFIG = {
   company_name: 'CÔNG TY TNHH KỸ THUẬT VÀ THƯƠNG MẠI HA TO', tax_code: '0313049236', address: 'Số 94/11, Đường số 39, Phường Bình Trưng, TP. Hồ Chí Minh', phone: '028.37438551 - 028 37438556', hotline: '', email: '', website: 'hatoet.com',
   director: 'Châu Trung Quốc', sales_name: '', bank1: '1512197678 – Ngân hàng ACB – PGD Bình Trưng, TP. HCM.', bank2: '1340008133 - Ngân hàng BIDV - CN Quận 7 Sài Gòn, HCM', brand_color: '#ee0033', website: 'hatoet.com', bb_copies: '2', bb_copies_a: '1', bb_copies_b: '1', goods_phrase: 'thiết bị PCCC',
+  coef_default: '', coef_brand: '{}',
   cost_types: JSON.stringify(['Vận chuyển', 'Bốc xếp', 'Hải quan / thuế nhập khẩu', 'Khác']),
   cert_params: JSON.stringify(['Vật liệu / Material:|Tole|', 'Độ dày / Thickness:|1.2 mm|', 'Màu sơn / Color:||Đỏ']),
   drive_root_id: '', data_version: APP_VERSION
 };
+const HD_TPL = {"basis": "Căn cứ bộ luật dân sự của Quốc hội Nước Cộng hòa xã hội Chủ nghĩa Việt Nam số 33/2005/QH11 ngày 14/06/2005 và các văn bản hướng dẫn thi hành\nCăn cứ Bộ luật Thương mại của Quốc hội Nước Cộng hòa xã hội Chủ nghĩa Việt Nam số 36/2005/QH11 ngày 14/06/2005 và các văn bản hướng dẫn thi hành\nCăn cứ nhu cầu và khả năng hai bên", "price_note": "Giá trên là giá đã bao gồm thuế GTGT, phí vận chuyển đến địa điểm giao hàng và các loại thuế/ phí khác mà bên B phải nộp.\nThuế suất thuế GTGT  là thuế suất tại thời điểm ký hợp đồng. Trong trường hợp tại thời điểm giao hàng và/hoặc xuất hóa đơn mà cơ quan nhà nước có thẩm quyền quyết định điều chỉnh thuế GTGT khác với mức ký hợp đồng thì thuế suất GTGT theo hợp đồng sẽ được điều chỉnh theo quy định đó và giá trị hợp đồng cũng sẽ được điều chỉnh với mức tương ứng. Bên Bán cam kết sẽ hoàn trả tiền thuế GTGT thu dư cho Bên Mua, nếu thu sai theo kết luận của Cơ quan Nhà nước theo pháp luật quy định\nĐơn giá thỏa thuận trong hợp đồng này là đơn giá cố định và không thay đổi trong suốt quá trình thực hiện hợp đồng này cho dù có bất kỳ thay đổi nào về giá cả thị trường.\nBên B có nhiệm vụ cung cấp hàng hóa mới 100% được sản xuất từ {nam}, đúng số lượng, chủng loại, đúng thời gian đầy đủ chứng từ chứng minh nguồn gốc xuất xứ hàng hóa.", "time_note": "(Thời gian được tính kể từ ngày Bên B nhận được khoản tạm ứng hợp lệ từ Bên A, và không bao gồm ngày nghỉ, ngày lễ, Tết theo quy định)", "delivery_text": "- Bên B có trách nhiệm cung cấp hồ sơ giao nhận hàng hóa đi chung với lô hàng thực giao và cung cấp bổ sung (nếu có) không chậm hơn 03 ngày kể từ ngày giao hàng.\n- Trường hợp bên B đã giao đủ hồ sơ và hàng hóa được nghiệm thu hoặc đưa vào sử dụng, nhưng trong quá trình kiểm tra Chủ đầu tư hoặc bên A phát hiện hàng hóa hoặc hồ sơ chứng minh của hàng hóa không chính xác so với quy định Hợp đồng, thì bên B có trách nhiệm thay thế mới hoặc bổ sung đầy đủ chứng từ hợp lệ theo quy định Hợp đồng và bồi thường các chi phí phát sinh (nếu có) cho bên A.\n- Việc bàn giao hàng hóa chỉ được hoàn thành khi chủng loại, số lượng, xuất xứ, chất lượng và các tiêu chuẩn khác của hàng hóa theo đúng như thỏa thuận trong hợp đồng này và Bên A đã nhận được đầy đủ các hồ sơ tài liệu giao hàng trên.\n- Trong quá trình bàn giao nếu phát hiện các lỗi, hỏng hóc, sai sót kỹ thuật của hàng hóa hoặc chủng loại, số lượng, xuất xứ, chất lượng và các tiêu chuẩn khác của hàng hóa chưa theo đúng như thỏa thuận trong Hợp đồng này thì việc bàn giao chỉ được coi là hoàn thành sau khi bên B, bằng chi phí của mình, đã hoàn thành việc khắc phục các lỗi, sai sót kỹ thuật đó và thực hiện bổ sung hoặc đổi lại hàng hóa theo đúng thỏa thuận tại Hợp đồng này. Để làm rõ, thời gian khắc phục hoặc bổ sung, đổi hàng hóa không được bổ sung (gia hạn) vào thời gian giao hàng nêu tại Điều 2 nêu trên.\n- Bên A được đổi hàng trong trường hợp sau:\n- Nếu Bên A phát hiện những hư hỏng của hàng hóa (là hư hỏng xảy ra trước ngày giao hàng, do lỗi Bên B hoặc Nhà sản xuất mà Bên A không có khả năng nhận biết tại thời điểm giao nhận hàng), Bên B có trách nhiệm thay thế số hàng hư hỏng này cho Bên A\n- Nếu Bên B giao hàng không phù hợp với Hợp Đồng, thì Bên B có trách nhiệm thay thế hàng khác cho phù hợp với Hợp Đồng. Trường hợp hàng thay thế vẫn không phù hợp thì Bên A có quyền trả lại hàng;\n- Nếu hàng hóa bị lỗi trong thời gian vận hành bàn giao quá 02 lần.", "pay_docs_text": "- Giấy đề nghị thanh toán - (01) bản gốc;\n- Hoá đơn GTGT 100% giá trị lô hàng thực tế giao nhận – (01) bản gốc;\n- Biên bản bàn giao hàng hóa có chữ ký xác nhận của bên A –(01) Bản gốc hoặc bản sao;\n- Biên bản bàn giao chứng từ giao hàng theo điều 2 có xác nhận của bên A đã nhận đủ hồ sơ – (01) bản gốc hoặc bản sao;\n- Giấy cam kết bảo hành {bh} của bên B – (01) bản gốc;", "clauses": "ĐIỀU 4: NGHĨA VỤ VÀ TRÁCH NHIỆM CỦA CÁC BÊN\n4.1. Đối với Bên A:\n- Thanh toán đúng hạn theo quy định trong Hợp đồng (Điều 3).\n- Nhận hàng đúng quy cách, chủng loại, chất lượng như quy định của Hợp đồng\n4.2 Đối với Bên B:\n- Giao hàng cho Bên A đúng quy cách, chủng loại, chất lượng như quy định của Hợp đồng đã thoả thuận giữa hai bên.\n- Cung cấp hoá đơn VAT hợp lệ cho Bên A tương ứng với giá trị của lô hàng .\n- Cung cấp các giấy tờ liên quan đến hàng hóa theo qui định của hợp đồng này.\n- Có trách nhiệm bảo hành hàng hóa theo phạm vi cung cấp của hợp đồng là {bh} kể từ ngày giao hàng.\n- Lập hóa đơn GTGT theo đúng quy định của pháp luật. Bên Bán không được tự ý hủy hóa đơn đã cung cấp cho Bên Mua vì bất cứ lý do gì, ngoại trừ việc hủy hóa đơn do việc lập hóa đơn có sai sót, không tuân thủ quy định pháp luật và đã được thông báo cho Bên Mua về lý do hủy hóa đơn. Khi đó bên Bán phải lập biên bản thỏa thuận về việc hủy hóa đơn có chữ ký xác nhận của đại diện Bên Mua kèm theo hóa đơn thay thế hợp lệ cho hóa đơn đã hủy và cung cấp lại cho Bên Mua trong vòng 03 ngày làm việc kể từ ngày hủy hóa đơn.\n- Trong trường hợp Bên Bán hủy hóa đơn không phù hợp với quy định nêu trên hoặc khi hủy hóa đơn mà không cung cấp hóa đơn thay thế cho Bên Mua trong thời hạn 03 ngày làm việc thì Bên Bán sẽ phải chịu phạt vi phạm bằng 20% giá trị hóa đơn bị hủy và Bên Bán phải bồi thường toàn bộ thiệt hại cho Bên Mua do việc hủy hóa đơn.\n- Bên B có trách nhiệm bảo đảm:\n- Quyền sở hữu của Bên A đối với hàng hóa sau khi mua bán không bị tranh chấp bởi bên thứ ba;\n- Hàng hóa mua bán phải hợp pháp;\n- Hàng hóa bảo đảm được mục đích sử dụng cho Bên A;\n- Việc chuyển giao hàng hóa là hợp pháp\nĐIỀU 5: PHẠT HỢP ĐỒNG\n- Trong trường hợp Bên B giao hàng chậm so với thời hạn hợp đồng thì sẽ phải chịu phạt 0,5% giá trị phần hàng giao chậm/mỗi ngày giao chậm nhưng không vượt quá 8% tổng giá trị giao hàng chậm và bồi thường các chi phí phát sinh cho Bên A từ việc giao trễ hàng. Trong trường hợp phải bổ sung hoặc đổi lại hàng hóa theo quy định của Hợp đồng mà dẫn tới chậm tiến độ thì cũng áp dụng quy định này để giải quyết.\n- Trong trường hợp Bên A chậm thanh toán và làm thủ tục nhận hàng quá 7 ngày kể từ ngày bên B giao hàng thì Bên A phải chịu phạt với mức phạt 0,5% giá trị phần chậm thanh toán/mỗi tuần chậm thanh toán nhưng không vượt quá 8% tổng giá trị hợp đồng.\nĐIỀU 6: BẤT KHẢ KHÁNG\n- Trong thời gian thực hiện Hợp Đồng này, những sự kiện sau được coi là Sự Kiện Bất Khả Kháng: Bão lụt, động đất, chiến tranh, hỏa hoạn, sự thay đổi của chính sách, pháp luật, ngăn cấm của cơ quan nhà nước hoặc các sự kiện khách quan khác.\nVới điều kiện:\n- a. Sự kiện đó hoàn toàn nằm ngoài sự kiểm soát hợp lý hoặc không do lỗi hoặc sơ suất của bên bị ảnh hưởng bởi Sự Kiện Bất Khả Kháng, mặc dù bên đó đã áp dụng mọi biện pháp cần thiết và trong khả năng cho phép để đề phòng, khắc phục hoặc giảm bớt thiệt hại, gây ra việc chậm trễ hoặc gián đoạn, đình trệ việc thực hiện nghĩa vụ trong Hợp đồng này;\n- b. Trong thời hạn 02 ngày kể từ ngày xảy ra Sự Kiện Bất Khả Kháng, Bên bị ảnh hưởng bởi Sự Kiện Bất Khả Kháng phải thông báo văn bản cho bên kia, trong đó nêu chi tiết về Sự Kiện Bất Khả Kháng, các biện pháp đã tiến hành để đề phòng, khắc phục thiệt hại, dự kiến kế hoạch khắc phục và biện pháp giải quyết.\n- Trừ khi có ý kiến khác của Bên A bằng văn bản, Bên B vẫn phải thực hiện các nghĩa vụ của mình theo Hợp Đồng này theo hoàn cảnh thực tế cho phép và phải tiến hành mọi biện pháp hợp lý để thực hiện các phần việc không bị Sự Kiện Bất Khả Kháng gây trở ngại.\nĐIỀU 7: GIẢI QUYẾT TRANH CHẤP\n- Hai bên cam kết thực hiện đúng và đầy đủ các điều khoản đó thoả thuận trong Hợp đồng này.\n- Nếu có vấn đề phát sinh, bất đồng hoặc tranh chấp, cả hai bên cùng nhau thương lượng tìm biện pháp giải quyết trên tinh thần hợp tác.\n- Trong trường hợp hai bên không thương lượng được thì các bất đồng hoặc tranh chấp sẽ được đưa ra giải quyết tại Toà kinh tế, Tòa án Nhân dân TP Hồ Chí Minh. Quyết định của Toà án sẽ là quyết định cuối cùng và bắt buộc đối với cả hai bên. Mọi chi phí phát sinh liên quan đến việc giải quyết bất đồng hoặc tranh chấp thông qua Toà án do bên có lỗi chịu.\n- Thời hạn khiếu nại, thời hiệu khởi kiện theo quy định của Pháp luật.\nĐIỀU 8: CÁC ĐIỀU KHOẢN KHÁC\n- Hợp đồng này được làm thành 04 bản Tiếng Việt có giá trị như nhau, Bên A giữ 02  bản, Bên B giữ 02 bản.\n- Hợp đồng này có hiệu lực kể từ ngày ký và hết hiệu lực kể từ khi hai bên hoàn thành xong  nghĩa vụ và trách nhiệm của 2 bên.", "attached": [{"name": "Biên bản giao nhận hàng hóa (có con dấu của Bên B) - bản gốc", "qty": 4}, {"name": "Giấy chứng nhận xuất xưởng - bản sao y công ty", "qty": 4}, {"name": "Giấy chứng nhận kiểm định phương tiện PCCC - bản sao y công ty", "qty": 4}]};
 
 // ---------- Web app ----------
 // Ghép các file giao diện nhỏ (Css, Js_*) vào Index
@@ -424,6 +426,11 @@ function parsePct_(v) {
   if (typeof v === 'number') return v <= 1 ? Math.round(v * 10000) / 100 : v;
   return parseNum_(String(v).replace('%', ''));
 }
+function coefInfo_() {
+  var c = cfg_(), br = {};
+  try { br = JSON.parse(c.coef_brand || '{}') || {}; } catch (e) { br = {}; }
+  return { def: num_(c.coef_default), brand: br };
+}
 function catalog_() {
   if (RT.cat) return RT.cat;
   var cached = cacheGet_('CATALOG');
@@ -434,10 +441,10 @@ function catalog_() {
   var vals = sh.getDataRange().getValues();
   var hdr = (vals[0] || []).map(function (h) { return strip_(h); });
   function ix(starts) { for (var k = 0; k < hdr.length; k++) if (hdr[k].indexOf(starts) === 0) return k; return -1; }
-  var C = { stt: ix('stt'), brand: ix('thuong hieu'), group: ix('nhom hang'), name: ix('ten tieng viet'), model: ix('model'), size: ix('kich co'), origin: ix('xuat xu'), unit: ix('dvt'), spec: ix('quy cach'), tech: ix('ap luc'), cur: ix('dong tien'), list: ix('don gia niem yet'), disc: ix('chiet khau'), rate: ix('ty gia'), cost: ix('gia von'), margin: ix('he so'), sale: ix('gia ban'), note: ix('ghi chu') };
+  var C = { stt: ix('stt'), brand: ix('thuong hieu'), group: ix('nhom hang'), name: ix('ten tieng viet'), model: ix('model'), size: ix('kich co'), origin: ix('xuat xu'), unit: ix('dvt'), spec: (function () { var a = ix('quy cach ky'); return a >= 0 ? a : ix('quy cach'); })(), qc: ix('quy cach bao gia'), coefOwn: ix('he so rieng'), tech: ix('ap luc'), cur: ix('dong tien'), list: ix('don gia niem yet'), disc: ix('chiet khau'), rate: ix('ty gia'), cost: ix('gia von'), margin: ix('he so'), sale: ix('gia ban'), note: ix('ghi chu') };
   if (C.name < 0 || C.sale < 0 || C.cost < 0) throw new Error('Sheet bảng giá thiếu cột bắt buộc (Tên tiếng Việt / Giá vốn / Giá bán tham chiếu).');
   function g(r, k) { return C[k] < 0 ? '' : r[C[k]]; }
-  var rows = [];
+  var rows = [], CI = coefInfo_();
   for (var r = 1; r < vals.length; r++) {
     var row = vals[r], name = String(g(row, 'name') || '').trim();
     if (!name) continue;
@@ -448,7 +455,13 @@ function catalog_() {
       cur: String(g(row, 'cur')), list: parseNum_(g(row, 'list')), disc: parsePct_(g(row, 'disc')), rate: parseNum_(g(row, 'rate')),
       cost: round_(parseNum_(g(row, 'cost'))), margin: parsePct_(g(row, 'margin')), sale: round_(parseNum_(g(row, 'sale'))), note: String(g(row, 'note'))
     };
-    o.s = strip_([o.stt, o.brand, o.name, o.model, o.size, o.group].join(' '));
+    o.qc = String(g(row, 'qc') || '').trim(); o.coef_own = num_(parseNum_(g(row, 'coefOwn'))); o.sale_ref = o.sale;
+    if (o.coef_own > 0) { o.coef = o.coef_own; o.coef_src = 'ma'; }
+    else if (num_(CI.brand[o.brand]) > 0) { o.coef = num_(CI.brand[o.brand]); o.coef_src = 'hang'; }
+    else if (CI.def > 0) { o.coef = CI.def; o.coef_src = 'chung'; }
+    else { o.coef = o.cost > 0 && o.sale > 0 ? Math.round(o.sale / o.cost * 100) / 100 : 0; o.coef_src = ''; }
+    if (o.coef_src && o.cost > 0) o.sale = Math.round(o.cost * o.coef / 100) * 100;
+    o.s = strip_([o.stt, o.brand, o.name, o.model, o.size, o.group, o.qc].join(' '));
     rows.push(o);
   }
   cachePut_('CATALOG', rows, ver);
@@ -590,7 +603,7 @@ ACTIONS.bootstrap = function (u) {
   return {
     user: u, perms: permsFor_(u), version: APP_VERSION, roles: ROLES,
     cfg: (function () { var c = cfg_(), o = {}; Object.keys(c).forEach(function (k) { if (k !== 'drive_root_id') o[k] = c[k]; }); o.cost_types = costTypes_(); return o; })(),
-    customers: readTable_('CUSTOMERS').map(function (c) { return { id: c.id, code: c.code, name: c.name, status: c.status, tax_code: c.tax_code }; }),
+    customers: readTable_('CUSTOMERS').map(function (c) { return { id: c.id, code: c.code, name: c.name, status: c.status, tax_code: c.tax_code, address: c.address, phone: c.phone, short_name: c.short_name, rep_name: c.rep_name, rep_title: c.rep_title, bank_account: c.bank_account }; }),
     projects: readTable_('PROJECTS').map(function (p) { return { id: p.id, code: p.code, name: p.name, customer_id: p.customer_id, status: p.status, kind: p.kind || 'DA' }; })
   };
 };
@@ -653,9 +666,126 @@ ACTIONS.catalogList = function (u, p) {
   all.forEach(function (r) { brands[r.brand] = 1; groups[r.group] = 1; });
   return { total: rows.length, page: page, size: size, rows: rows.slice((page - 1) * size, page * size).map(slimCat_), brands: Object.keys(brands).sort(), groups: Object.keys(groups).sort() };
 };
+
+// ---------- Sửa / nhập hàng loạt Bảng giá (dữ liệu nằm trong sheet bảng giá) ----------
+var CAT_COLS = [['brand', 'Thương hiệu', 'thuong hieu'], ['group', 'Nhóm hàng', 'nhom hang'], ['name', 'Tên tiếng Việt chuyên ngành', 'ten tieng viet'], ['model', 'Model', 'model'],
+  ['size', 'Kích cỡ (Size/DN)', 'kich co'], ['origin', 'Xuất xứ', 'xuat xu'], ['unit', 'ĐVT', 'dvt'], ['qc', 'Quy cách báo giá', 'quy cach bao gia'],
+  ['cost', 'Giá vốn (VND)', 'gia von'], ['coef_own', 'Hệ số riêng', 'he so rieng'], ['note', 'Ghi chú', 'ghi chu']];
+function catSheet_() {
+  var sh = null;
+  for (var i = 0; i < PRICE_SHEETS.length && !sh; i++) sh = ss_().getSheetByName(PRICE_SHEETS[i]);
+  if (!sh) throw new Error('Không tìm thấy sheet bảng giá (' + PRICE_SHEETS.join(' / ') + ').');
+  return sh;
+}
+function catCols_(sh) {   // vị trí cột (từ 1); cột nào chưa có thì thêm tiêu đề ở cuối
+  var w = Math.max(sh.getLastColumn(), 1), hdr = sh.getRange(1, 1, 1, w).getValues()[0].map(strip_), m = { stt: 0 };
+  for (var k = 0; k < hdr.length; k++) if (!m.stt && hdr[k].indexOf('stt') === 0) m.stt = k + 1;
+  if (!m.stt) throw new Error('Bảng giá thiếu cột STT.');
+  CAT_COLS.forEach(function (c) {
+    var ix = -1;
+    for (var i = 0; i < hdr.length; i++) if (hdr[i].indexOf(c[2]) === 0) { ix = i; break; }
+    if (ix < 0) { hdr.push(strip_(c[1])); sh.getRange(1, hdr.length).setValue(c[1]); ix = hdr.length - 1; }
+    m[c[0]] = ix + 1;
+  });
+  return m;
+}
+function catRowMap_(sh, m) {
+  var last = sh.getLastRow(), map = {}, max = 0;
+  if (last >= 2) sh.getRange(2, m.stt, last - 1, 1).getValues().forEach(function (r, i) {
+    var v = String(r[0]).trim(); if (v === '') return;
+    map[v] = i + 2; var n = Number(v); if (isFinite(n) && n > max) max = n;
+  });
+  return { map: map, max: max, last: last };
+}
+function catNorm_(r) {
+  var o = {};
+  ['brand', 'group', 'name', 'model', 'size', 'origin', 'unit', 'qc', 'note'].forEach(function (k) { if (r[k] !== undefined && r[k] !== null) o[k] = String(r[k]).trim(); });
+  if (r.cost !== undefined && r.cost !== null && String(r.cost).trim() !== '') o.cost = Math.round(parseNum_(r.cost));
+  if (r.coef_own !== undefined && r.coef_own !== null && String(r.coef_own).trim() !== '') o.coef_own = Math.max(0, num_(parseNum_(r.coef_own)));
+  return o;
+}
+function catWrite_(sh, m, rowNo, f) { Object.keys(f).forEach(function (k) { if (m[k]) sh.getRange(rowNo, m[k]).setValue(f[k]); }); }
+function catAdd_(sh, m, rm, f) {
+  rm.max++; var rowNo = Math.max(rm.last, 1) + 1; ensureRows_(sh, rowNo); rm.last = rowNo;
+  sh.getRange(rowNo, m.stt).setValue(rm.max); catWrite_(sh, m, rowNo, f);
+  rm.map[String(rm.max)] = rowNo; return 'SP' + pad_(rm.max, 4);
+}
+ACTIONS.catalogSave = function (u, p) {
+  need_(u, 'pricelist', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var r = p.rec || {}, f = catNorm_(r), code = String(r.code || '').trim().toUpperCase(), sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m), out;
+    if ('coef_own' in r && (r.coef_own === '' || r.coef_own == null)) f.coef_own = 0;
+    if (code) {
+      var rowNo = rm.map[String(parseInt(code.slice(2), 10))];
+      if (!rowNo) throw new Error('Không tìm thấy mã ' + code + ' trong bảng giá.');
+      if (f.name === '') throw new Error('Tên hàng không được để trống.');
+      catWrite_(sh, m, rowNo, f); out = code;
+    } else {
+      if (!f.name) throw new Error('Thiếu tên hàng.');
+      if (f.cost == null) throw new Error('Thiếu giá mua.');
+      out = catAdd_(sh, m, rm, f);
+    }
+    audit_(u, code ? 'Sửa' : 'Tạo', 'BANGGIA', out, '', f.name || code);
+    RT.cat = null; delete RT['T:CONFIG'];
+    return { code: out };
+  });
+};
+ACTIONS.catalogImport = function (u, p) {
+  need_(u, 'pricelist', 'edit');
+  var rows = p.rows || [], apply = !!p.apply;
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m), cur = {}, res = { adds: 0, updates: 0, same: 0, errors: [], preview: [], applied: apply };
+    catalog_().forEach(function (x) { cur[x.code] = x; });
+    rows.forEach(function (r, i) {
+      var f = catNorm_(r), code = String(r.code || '').trim().toUpperCase(), line = i + 2;
+      if (!code && !f.name && f.cost == null) return;
+      var old = code ? cur[code] : null;
+      if (code && !old) { res.errors.push('Dòng ' + line + ': không có mã ' + code + ' trong bảng giá.'); return; }
+      if (!old) {
+        if (!f.name) { res.errors.push('Dòng ' + line + ': hàng mới thiếu tên hàng.'); return; }
+        if (f.cost == null) { res.errors.push('Dòng ' + line + ' (' + f.name + '): hàng mới thiếu giá mua.'); return; }
+        res.adds++; if (res.preview.length < 400) res.preview.push({ t: 'new', line: line, name: f.name, brand: f.brand || '', cost: f.cost });
+        if (apply) catAdd_(sh, m, rm, f);
+        return;
+      }
+      var diff = {}, any = false;
+      Object.keys(f).forEach(function (k) {
+        var a = (k === 'cost' || k === 'coef_own') ? num_(old[k]) : String(old[k] == null ? '' : old[k]);
+        if (a !== f[k]) { diff[k] = [old[k], f[k]]; any = true; }
+      });
+      if (!any) { res.same++; return; }
+      if (diff.name && !f.name) { res.errors.push('Dòng ' + line + ': tên hàng trống.'); return; }
+      res.updates++; if (res.preview.length < 400) res.preview.push({ t: 'upd', line: line, code: code, name: old.name, diff: diff });
+      if (apply) { var rn = rm.map[String(parseInt(code.slice(2), 10))]; var w = {}; Object.keys(diff).forEach(function (k) { w[k] = f[k]; }); if (rn) catWrite_(sh, m, rn, w); }
+    });
+    if (apply && (res.adds || res.updates)) audit_(u, 'Nhập hàng loạt', 'BANGGIA', '', '', res.adds + ' mới, ' + res.updates + ' đổi');
+    RT.cat = null;
+    return res;
+  });
+};
+ACTIONS.coefGet = function (u) {
+  need_(u, 'pricelist', 'view');
+  var ci = coefInfo_(), br = {};
+  catalog_().forEach(function (r) { if (r.brand) br[r.brand] = (br[r.brand] || 0) + 1; });
+  return { def: ci.def, brand: ci.brand, brands: Object.keys(br).sort().map(function (k) { return { name: k, count: br[k] }; }), own: catalog_().filter(function (r) { return r.coef_own > 0; }).length };
+};
+ACTIONS.coefSave = function (u, p) {
+  need_(u, 'pricelist', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var def = Math.max(0, num_(p.def)), br = {};
+    Object.keys(p.brand || {}).forEach(function (k) { var v = num_(p.brand[k]); if (v > 0) br[k] = Math.round(v * 1000) / 1000; });
+    upsert_('CONFIG', { key: 'coef_default', value: def > 0 ? String(Math.round(def * 1000) / 1000) : '' });
+    upsert_('CONFIG', { key: 'coef_brand', value: JSON.stringify(br) });
+    audit_(u, 'Sửa', 'BANGGIA', '', '', 'Hệ số giá bán');
+    return true;
+  });
+};
 ACTIONS.catalogSearch = function (u, p) {
   var lim = Math.min(num_(p.limit) || 20, 60), all = catalogFilter_(p.q, p.brand || '', p.group || '');
-  return all.slice(0, lim).map(function (r) { return { code: r.code, name: r.name, model: r.model, brand: r.brand, origin: r.origin, unit: r.unit, size: r.size, price: r.sale, cost: r.cost }; });
+  return all.slice(0, lim).map(function (r) { return { code: r.code, name: r.name, model: r.model, brand: r.brand, origin: r.origin, unit: r.unit, size: r.size, price: r.sale, cost: r.cost, spec: r.qc, coef: r.coef, coef_src: r.coef_src }; });
 };
 
 var LISTABLE = { customers: 'CUSTOMERS', projects: 'PROJECTS', quotes: 'QUOTES', docs: 'DOCS', deliveries: 'DELIVERIES', costs: 'COSTS', advances: 'ADVANCES', payments: 'PAYMENTS', warranties: 'WARRANTIES', certs: 'CERTS', files: 'FILES' };
@@ -803,14 +933,25 @@ ACTIONS.projectBundle = function (u, p) {
     var ch0 = 0, ck0 = 0; costs.filter(function (x) { return !x.doc_id; }).forEach(function (x) { if (x.payer === 'KHACH') ck0 += num_(x.amount); else ch0 += num_(x.amount); });
     if (ch0 || ck0) breakdown.push({ doc_id: '', code: '(Chi phí chung)', type: '', value: 0, cost_goods: 0, cost_hato: ch0, cost_customer: ck0, profit: -ch0, margin: 0 });
   }
-  return { project: pr, customer: cust, summary: maskProjectCalc_(u, c), lines: c.lines, docs: docsOut, breakdown: breakdown };
+  var mon = { base: 0, plhd: 0, current: 0, po: 0, total_vat: 0, paid: 0, adv: 0, over_lines: 0, has_hd: false }, pays = {};
+  docsOut.forEach(function (d) {
+    var vat = 1 + num_(d.vat_pct) / 100;
+    if (d.type === 'HD') { mon.has_hd = true; mon.base = c.docs[d.id] ? num_(c.docs[d.id].base_value) : 0; mon.current = d.current_value; mon.total_vat += d.current_value * vat; }
+    else if (d.type === 'PLHD') mon.plhd += d.value;
+    else if (d.type === 'PO') { mon.po += d.value; mon.total_vat += d.value * vat; }
+  });
+  (index_().payByProject ? index_().payByProject[pr.id] || [] : readTable_('PAYMENTS').filter(function (x) { return x.project_id === pr.id; })).forEach(function (x) { if (x.kind === 'PHAI_TRA') return; mon.paid += num_(x.amount); pays[x.doc_id] = (pays[x.doc_id] || 0) + num_(x.amount); });
+  readTable_('ADVANCES').filter(function (x) { return x.project_id === pr.id; }).forEach(function (x) { mon.adv += num_(x.amount); });
+  c.lines.forEach(function (l) { if (num_(l.delivered) > num_(l.qty) + 1e-9) mon.over_lines++; });
+  mon.paid_by_doc = pays;
+  return { project: pr, customer: cust, summary: maskProjectCalc_(u, c), lines: c.lines, docs: docsOut, breakdown: breakdown, money: mon };
 };
 
 // ---------- Lưu ----------
 function normItem_(it, i, extra) {
   var o = {
     id: it.id || '', line_no: i + 1, code: String(it.code || ''), name: String(it.name || '').trim(), model: String(it.model || ''),
-    brand: String(it.brand || ''), origin: String(it.origin || ''), unit: String(it.unit || ''), qty: num_(it.qty), note: String(it.note || '')
+    brand: String(it.brand || ''), origin: String(it.origin || ''), unit: String(it.unit || ''), qty: num_(it.qty), note: String(it.note || ''), spec: String(it.spec || '').trim()
   };
   if (!o.name) throw new Error('Dòng ' + (i + 1) + ': thiếu tên hàng.');
   if (o.qty < 0) throw new Error('Dòng ' + (i + 1) + ': số lượng âm.');
@@ -855,10 +996,11 @@ function saveQuote_(u, p) {
   out.valid_text = r.valid_text == null ? (rec && rec.valid_text != null ? rec.valid_text : '30 ngày kể từ ngày báo giá') : String(r.valid_text);
   out.valid_days = r.valid_days == null || r.valid_days === '' ? (rec && rec.valid_days ? num_(rec.valid_days) : 30) : num_(r.valid_days);
   ['contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method'].forEach(function (k) { out[k] = r[k] == null ? (rec && rec[k] != null ? rec[k] : '') : String(r[k]).trim(); });
+  out.coef = Math.max(0, num_(r.coef == null ? (rec ? rec.coef : 0) : r.coef));
   out.date = today0_(out.date); out.updated_at = now_();
   if (isNew) { out.id = newId_('Q'); out.code = nextCode_('BG', true); out.version = 1; out.created_by = u.email; out.created_at = now_(); out.converted_to = ''; }
   var recs = items.map(function (it, i) {
-    var o = normItem_(it, i, { price: function (x) { return num_(x.price); }, cost: function (x) { return num_(x.cost); }, disc_pct: function (x) { return num_(x.disc_pct); } });
+    var o = normItem_(it, i, { price: function (x) { return num_(x.price); }, cost: function (x) { return num_(x.cost); }, disc_pct: function (x) { return num_(x.disc_pct); }, coef: function (x) { return Math.max(0, num_(x.coef)); } });
     o.id = it.id || newId_('QI'); o.quote_id = out.id; return o;
   });
   if (!recs.length) throw new Error('Báo giá chưa có dòng hàng.');
@@ -888,12 +1030,17 @@ function saveDoc_(u, p) {
     var hd = siblings.filter(function (d) { return d.type === 'HD'; })[0];
     if (!hd) throw new Error('PLHD cần có Hợp đồng gốc trong dự án.');
     out.parent_id = hd.id;
+  } else if (out.type === 'PO') {
+    var hd2 = siblings.filter(function (d) { return d.type === 'HD'; })[0];
+    out.parent_id = hd2 ? hd2.id : '';       // PO thuộc HĐ khung nếu dự án có HĐ; không thì đứng riêng
   } else out.parent_id = '';
   out.sign_date = out.sign_date || today_(); out.vat_pct = r.vat_pct == null ? 10 : num_(r.vat_pct);
   out.currency = out.currency || 'VND'; out.updated_at = now_();
   out.terms = out.type === 'HD' ? validTerms_(out.terms) : [];
   out.attached = (out.attached || []).map(function (x) { return { name: String(x.name || ''), qty: num_(x.qty) || 1 }; }).filter(function (x) { return x.name; });
   out.warranty_months = num_(out.warranty_months);
+  out.ext = out.type === 'HD' ? hdClean_(out.ext) : [];
+  if (out.type === 'HD' && out.ext.wvalue > 0) out.warranty_months = Math.round((out.ext.wunit === 'tháng' ? out.ext.wvalue : out.ext.wunit === 'tuần' ? out.ext.wvalue * 7 / 30 : out.ext.wvalue / 30) * 100) / 100;
   if (isNew) { out.id = newId_('D'); out.code = nextCode_(out.type === 'HD' ? 'HD' : out.type === 'PO' ? 'PO' : 'PL', true); out.created_by = u.email; out.created_at = now_(); }
   var recs = items.map(function (it, i) {
     var o = normItem_(it, i, {
@@ -1027,7 +1174,7 @@ ACTIONS.convertQuote = function (u, p) {
     var type = p.type;
     var items = readTable_('QUOTE_ITEMS').filter(function (x) { return x.quote_id === q.id; }).sort(byLine_).map(function (x) {
       var net = round_(num_(x.price) * (1 - num_(x.disc_pct) / 100));
-      return { code: x.code, name: x.name, model: x.model, brand: x.brand, origin: x.origin, unit: x.unit, qty: x.qty, price_offer: x.price, price: net, cost: x.cost, cost_list: x.cost, source: 'QUOTE', note: x.note };
+      return { code: x.code, name: x.name, model: x.model, brand: x.brand, origin: x.origin, unit: x.unit, qty: x.qty, price_offer: x.price, price: net, cost: x.cost, cost_list: x.cost, source: 'QUOTE', note: x.note, spec: x.spec };
     });
     var rec = { type: type, project_id: q.project_id, source_quote_id: q.id, vat_pct: q.vat_pct, sign_date: today_(), terms: type === 'HD' ? [{ name: 'Đợt 1', pct: 100, days: 30 }] : [], doc_no: p.doc_no || '' };
     var res = saveDoc_(u, { rec: rec, items: items });
@@ -1209,7 +1356,7 @@ function childFolder_(parent, name) {
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 // Giới hạn tải file: dung lượng, đuôi file cho phép, tên file an toàn
-var UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+var UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 var UPLOAD_EXT = { pdf: 1, doc: 1, docx: 1, xls: 1, xlsx: 1, xlsm: 1, csv: 1, txt: 1, rtf: 1, odt: 1, ods: 1, ppt: 1, pptx: 1, jpg: 1, jpeg: 1, png: 1, gif: 1, webp: 1, heic: 1, dwg: 1, dxf: 1, cdr: 1, zip: 1, rar: 1, '7z': 1, xml: 1, eml: 1, msg: 1 };
 function safeFileName_(name) {
   var s = String(name == null ? '' : name).replace(/[\u0000-\u001f\u007f\\\/:*?"<>|]+/g, '_').replace(/^\.+/, '').trim();
@@ -1223,19 +1370,22 @@ ACTIONS.uploadFile = function (u, p) {
   var fname = safeFileName_(p.name), em = fname.match(/\.([A-Za-z0-9]{1,8})$/);
   if (!fname) throw new Error('Thiếu tên file.');
   if (!em || !UPLOAD_EXT[em[1].toLowerCase()]) throw new Error('Không nhận loại file này (' + (em ? '.' + em[1] : 'không có đuôi') + '). Hãy nén thành .zip nếu cần.');
-  if (!p.base64 || typeof p.base64 !== 'string') throw new Error('File rỗng.');
-  if (p.base64.length * 3 / 4 > UPLOAD_MAX_BYTES) throw new Error('File quá lớn (tối đa ' + (UPLOAD_MAX_BYTES / 1048576) + 'MB).');
+  var big = !!p.big_key && !p.base64, fsize = big ? num_(p.size) : (p.base64 ? Math.round(p.base64.length * 3 / 4) : 0);
+  if (!big && (!p.base64 || typeof p.base64 !== 'string')) throw new Error('File rỗng.');
+  if (fsize <= 0) throw new Error('File rỗng.');
+  if (fsize > UPLOAD_MAX_BYTES) throw new Error('File quá lớn (tối đa ' + (UPLOAD_MAX_BYTES / 1048576) + 'MB).');
   var doc = p.doc_id ? index_().docById[p.doc_id] : null;
   if (p.doc_id && (!doc || doc.project_id !== pr.id)) throw new Error('Văn bản không thuộc dự án này.');
   var cust = customerName_(pr.customer_id) || 'Khách hàng';
   var f = childFolder_(childFolder_(childFolder_(rootFolder_(), (pr.created_at || today_()).slice(0, 4)), cust), pr.code + ' ' + pr.name);
   if (doc) f = childFolder_(f, doc.code);
-  var blob = Utilities.newBlob(Utilities.base64Decode(p.base64), p.mime || 'application/octet-stream', fname);
+  var blob = big ? Utilities.newBlob([], p.mime || 'application/octet-stream', fname) : Utilities.newBlob(Utilities.base64Decode(p.base64), p.mime || 'application/octet-stream', fname);
+  if (big) blob.bigKey = String(p.big_key);
   var file = f.createFile(blob);
   try {
     return withLock_(function () {
       RT = { user: RT.user, ss: RT.ss };
-      var rec = { id: newId_('F'), project_id: pr.id, doc_id: p.doc_id || '', name: fname, url: file.getUrl(), mime: p.mime || '', created_by: u.email, created_at: now_() };
+      var rec = { id: newId_('F'), project_id: pr.id, doc_id: p.doc_id || '', name: fname, url: file.getUrl(), mime: p.mime || '', created_by: u.email, created_at: now_(), size: fsize };
       upsert_('FILES', rec);
       audit_(u, 'Tải file', 'FILES', rec.id, pr.id, fname);
       return rec;
@@ -1320,14 +1470,83 @@ function projectCtx_(pid) {
   return { pr: pr, cu: cu };
 }
 function lineTable_(rows, withPrice, tot) {
-  var h = '<table><tr><th class="c" style="width:28px">STT</th><th>Tên hàng hóa</th><th style="width:11%">Model</th><th style="width:9%">Hãng / Xuất xứ</th><th class="c" style="width:6%">ĐVT</th><th class="c" style="width:6%">SL</th><th class="c" style="width:11%">Đơn giá</th><th class="c" style="width:5%">CK%</th><th class="c" style="width:12%">Thành tiền</th><th style="width:10%">Ghi chú</th></tr>';
+  var sp = rows.some(function (r) { return String(r.spec || '').trim(); });
+  var h = '<table><tr><th class="c" style="width:28px">STT</th><th>Tên hàng hóa</th>' + (sp ? '<th style="width:14%">Quy cách</th>' : '') + '<th style="width:11%">Model</th><th style="width:9%">Hãng / Xuất xứ</th><th class="c" style="width:6%">ĐVT</th><th class="c" style="width:6%">SL</th><th class="c" style="width:11%">Đơn giá</th><th class="c" style="width:5%">CK%</th><th class="c" style="width:12%">Thành tiền</th><th style="width:10%">Ghi chú</th></tr>';
   rows.forEach(function (r, i) {
-    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td><td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' / ')) + '</td><td class="c">' + esc_(r.unit) + '</td><td class="r">' + qty_(r.qty) + '</td><td class="r">' + money_(r.price) + '</td><td class="r">' + qty_(r.disc_pct) + '</td><td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note) + '</td></tr>';
+    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' / ')) + '</td><td class="c">' + esc_(r.unit) + '</td><td class="r">' + qty_(r.qty) + '</td><td class="r">' + money_(r.price) + '</td><td class="r">' + qty_(r.disc_pct) + '</td><td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note) + '</td></tr>';
   });
   [['Cộng tiền hàng', tot.sub, 0], ['Thuế GTGT (' + qty_(tot.vat_pct) + '%)', tot.vat, 0], ['Tổng thanh toán', tot.total, 1]].forEach(function (x) {
-    h += '<tr><td colspan="8" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>';
+    h += '<tr><td colspan="' + (sp ? 9 : 8) + '" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>';
   });
   return h + '</table>';
+}
+function hdExt_(dc) {
+  var e = dc && dc.ext && !Array.isArray(dc.ext) ? dc.ext : {};
+  return Object.keys(e).reduce(function (o, k) { o[k] = e[k]; return o; }, {});
+}
+function hdClean_(x) {
+  var e = x && !Array.isArray(x) && typeof x === 'object' ? x : {}, o = {};
+  ['project_name', 'place', 'receiver', 'deliver_time', 'time_note', 'pay_text', 'pay_docs_text', 'price_note', 'delivery_text', 'clauses', 'basis', 'pay_tpl'].forEach(function (k) { if (e[k] != null) o[k] = String(e[k]); });
+  ['a', 'b'].forEach(function (s) {
+    var v = e[s] && typeof e[s] === 'object' ? e[s] : {}; o[s] = {};
+    ['name', 'address', 'phone', 'tax_code', 'account', 'rep', 'title'].forEach(function (k) { o[s][k] = String(v[k] == null ? '' : v[k]).trim(); });
+  });
+  o.wvalue = Math.max(0, num_(e.wvalue)); o.wunit = ['ngày', 'tuần', 'tháng'].indexOf(e.wunit) >= 0 ? e.wunit : 'tháng';
+  return o;
+}
+function hdPartyB_() {
+  var c = cfg_();
+  return { name: c.company_name || '', address: c.address || '', phone: c.phone || '', tax_code: c.tax_code || '', account: c.bank2 || c.bank1 || '', rep: c.director || '', title: 'Giám đốc' };
+}
+ACTIONS.hdDefaults = function (u) { need_(u, 'docs', 'view'); return { tpl: HD_TPL, b: hdPartyB_() }; };
+function hdFill_(text, vars) { return String(text || '').replace(/\{(\w+)\}/g, function (m0, k) { return vars[k] != null ? vars[k] : m0; }); }
+function hdParas_(text, vars) {
+  return String(hdFill_(text, vars)).split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (l) {
+    if (/^ĐIỀU\s*\d+/i.test(l)) return '<p style="margin:10px 0 3px"><b>' + esc_(l) + '</b></p>';
+    if (/^\d+\.\d+\.?\s/.test(l)) return '<p style="margin:5px 0 2px"><b>' + esc_(l) + '</b></p>';
+    if (l.indexOf('- ') === 0) return '<p style="margin:2px 0 2px 18px;text-align:justify">- ' + esc_(l.slice(2)) + '</p>';
+    return '<p style="margin:3px 0;text-align:justify">' + esc_(l) + '</p>';
+  }).join('');
+}
+function hdParty_(label, a) {
+  var l = function (k, v) { return '<tr><td width="17%">' + k + '</td><td>: ' + esc_(v || '') + '</td></tr>'; };
+  return '<p style="margin:9px 0 2px"><b>' + label + ': ' + esc_(String(a.name || '').toUpperCase()) + '</b></p><table class="hd" width="100%" cellspacing="0" cellpadding="1">' +
+    l('Địa chỉ', a.address) + l('Điện thoại', a.phone) + (a.tax_code ? l('Mã số thuế', a.tax_code) : '') + (a.account ? l('Tài khoản', a.account) : '') +
+    '<tr><td>Do ông/bà</td><td>: <b>' + esc_(String(a.rep || '').toUpperCase()) + '</b>&nbsp;&nbsp;&nbsp;&nbsp;Chức vụ: ' + esc_(a.title || '') + '</td></tr></table>';
+}
+function hdBody_(dc, items) {
+  var ex = hdExt_(dc), A = ex.a || {}, B = Object.assign(hdPartyB_(), (function (b) { var o = {}; Object.keys(b || {}).forEach(function (k) { if (b[k]) o[k] = b[k]; }); return o; })(ex.b)), vat = num_(dc.vat_pct);
+  var sub = 0; items.forEach(function (i) { sub += num_(i.qty) * num_(i.price); }); sub = round_(sub);
+  var vatAmt = round_(sub * vat / 100), total = sub + vatAmt, yr = String(dc.sign_date || today_()).slice(0, 4);
+  var bh = ex.wvalue > 0 ? qty_(ex.wvalue) + ' ' + ex.wunit : (num_(dc.warranty_months) > 0 ? qty_(dc.warranty_months) + ' tháng' : '24 tháng');
+  var V = { nam: yr, bh: bh };
+  var tpl = function (k) { return ex[k] != null && String(ex[k]).trim() !== '' ? ex[k] : HD_TPL[k]; };
+  var hasSpec = items.some(function (i) { return String(i.spec || '').trim(); });
+  var tb = '<table><tr><th class="c" style="width:28px">STT</th><th>TÊN HÀNG HÓA</th><th style="width:15%">QUY CÁCH</th><th style="width:12%">MODEL</th><th style="width:11%">XUẤT XỨ</th><th class="c" style="width:6%">ĐVT</th><th class="c" style="width:7%">SỐ LƯỢNG</th><th class="c" style="width:11%">ĐƠN GIÁ</th><th class="c" style="width:12%">THÀNH TIỀN</th><th style="width:11%">GHI CHÚ</th></tr>';
+  items.forEach(function (r, i) {
+    tb += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td><td>' + esc_(r.spec) + '</td><td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' - ')) + '</td><td class="c">' + esc_(r.unit) + '</td><td class="r">' + qty_(r.qty) + '</td><td class="r">' + money_(r.price) + '</td><td class="r">' + money_(round_(num_(r.qty) * num_(r.price))) + '</td><td>' + esc_(r.note) + '</td></tr>';
+  });
+  [['TỔNG', sub, 0], ['VAT ' + qty_(vat) + '%', vatAmt, 0], ['TỔNG CỘNG (ĐÃ GỒM VAT)', total, 1]].forEach(function (x) { tb += '<tr><td colspan="8" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>'; });
+  tb += '</table>';
+  var terms = dc.terms || [], payTxt = String(ex.pay_text || '').trim() ? ex.pay_text : ('Chia làm ' + pad2_(terms.length || 1) + ' đợt thanh toán như sau:\n' + (terms.length ? terms : [{ name: 'Thanh toán', pct: 100, days: 30 }]).map(function (t, i) {
+    return '- Đợt ' + (i + 1) + ' "' + (t.name || '') + '": ' + qty_(t.pct) + '% giá trị hợp đồng, tương ứng ' + money_(round_(total * num_(t.pct) / 100)) + ' đồng (đã gồm VAT)' + (num_(t.days) ? ', trong vòng ' + t.days + ' ngày' : '') + '.';
+  }).join('\n'));
+  var att = (dc.attached || []).map(function (a) { return '- ' + a.name + ' : ' + pad2_(a.qty) + ' bản'; }).join('\n');
+  var out = nationalHead_() + '<h1>HỢP ĐỒNG KINH TẾ</h1><p style="text-align:center;margin:2px 0 6px"><b>Số: ' + esc_(dc.doc_no || dc.code) + '</b></p>' +
+    (ex.project_name ? '<p style="text-align:center;margin:0 0 6px">Dự án / Công trình: <b>' + esc_(ex.project_name) + '</b></p>' : '') +
+    hdParas_(String(tpl('basis')).split('\n').map(function (l) { return '- ' + l.replace(/^-\s*/, ''); }).join('\n'), V) +
+    '<p style="margin:8px 0 2px">Hôm nay ' + esc_(viDateLong_(dc.sign_date)) + ', chúng tôi gồm có</p>' + hdParty_('BÊN A', A) + hdParty_('BÊN B', B) +
+    '<p style="margin:8px 0 2px">Sau khi bàn bạc trao đổi, hai bên đi đến thỏa thuận ký hợp đồng mua bán với những điều khoản sau</p>' +
+    '<p style="margin:10px 0 3px"><b>ĐIỀU 1: NỘI DUNG VÀ GIÁ TRỊ HỢP ĐỒNG</b></p><p style="margin:3px 0">Bên B cung cấp cho Bên A danh mục hàng hóa chi tiết kỹ thuật và giá cả theo như sau:</p>' + tb +
+    '<p style="margin:6px 0 2px"><b>Tổng giá trị hợp đồng là: ' + money_(total) + ' đồng</b></p><p style="margin:2px 0"><i>(Bằng chữ: ' + esc_(moneyWords_(total)) + ')</i></p>' + hdParas_(tpl('price_note'), V) +
+    '<p style="margin:10px 0 3px"><b>ĐIỀU 2: PHƯƠNG THỨC GIAO NHẬN</b></p>' +
+    hdParas_('- Địa điểm giao hàng: ' + (ex.place || 'Tại chân công trình') + '\n- Người nhận hàng: ' + (ex.receiver || '') + '\n- Thời gian giao hàng: ' + (ex.deliver_time || ''), V) +
+    hdParas_(tpl('time_note'), V) + (att ? hdParas_('- Bên B cung cấp đầy đủ các giấy tờ sau kèm hàng hóa:\n' + att.split('\n').map(function (l) { return '  ' + l; }).join('\n'), V) : '') + hdParas_(tpl('delivery_text'), V) +
+    '<p style="margin:10px 0 3px"><b>ĐIỀU 3: PHƯƠNG THỨC THANH TOÁN</b></p>' + hdParas_(payTxt, V) + hdParas_('- Chứng từ thanh toán bao gồm:\n' + String(tpl('pay_docs_text')).split('\n').map(function (l) { return '  ' + l; }).join('\n'), V) +
+    hdParas_('Các hồ sơ thanh toán của Bên B nộp cho Bên A tại địa chỉ: ' + (A.address || '……') + ' và khi bàn giao Bên B có trách nhiệm yêu cầu Bên A ký xác nhận vào Biên bản bàn giao hồ sơ thanh toán.\n- Số tiền thanh toán sẽ được Bên A chuyển cho Bên B vào tài khoản số: ' + (B.account || '') + '\n- Phương thức thanh toán: ' + (dc.pay_method || 'chuyển khoản') + '.\n- Đồng tiền thanh toán: ' + (!dc.currency || dc.currency === 'VND' ? 'Đồng Việt Nam' : dc.currency) + '.', V) +
+    hdParas_(tpl('clauses'), V) +
+    '<table class="sig" width="100%"><tr><td width="50%" align="center"><b>ĐẠI DIỆN BÊN A</b><br><i>(Ký tên, đóng dấu)</i><br><br><br><br><br></td><td width="50%" align="center"><b>ĐẠI DIỆN BÊN B</b><br><i>(Ký tên, đóng dấu)</i><br><br><br><br><br></td></tr></table>';
+  return out;
 }
 function buildExport_(u, p) {
   var kind = p.kind, id = p.id, body = '', title = '', fname = '', landscape = false, plain = false;
@@ -1352,6 +1571,12 @@ function buildExport_(u, p) {
       '<p>Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
       bankBlock_() + sigBlock_('KHÁCH HÀNG', 'XÁC NHẬN BÁO GIÁ', false);
     landscape = false;
+  } else if (kind === 'hd') {
+    need_(u, 'docs', 'view');
+    var dcn = readTable_('DOCS').filter(function (x) { return x.id === id; })[0]; if (!dcn) throw new Error('Không tìm thấy hợp đồng.');
+    if (dcn.type !== 'HD') throw new Error('Chỉ in mẫu cho Hợp đồng (HĐ).');
+    var dit2 = readTable_('DOC_ITEMS').filter(function (x) { return x.doc_id === id; }).sort(byLine_);
+    title = 'Hợp đồng ' + (dcn.doc_no || dcn.code); fname = 'HopDong_' + String(dcn.code || 'HD').replace(/[^A-Za-z0-9_-]/g, ''); body = hdBody_(dcn, dit2); plain = true;
   } else if (kind === 'tbgh' || kind === 'bbgh' || kind === 'bbct') {
     need_(u, 'deliveries', 'view');
     var dl = index_().delById[id]; if (!dl) throw new Error('Không tìm thấy phiếu giao hàng.');

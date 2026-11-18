@@ -129,6 +129,25 @@
       list: function () { return j(API + 'files?q=' + q("'" + dataFolder + "' in parents and trashed=false") + '&fields=files(id,name,version)&pageSize=200').then(function (r) { return r.files || []; }); },
       read: function (id) { return f(API + 'files/' + id + '?alt=media').then(function (r) { return r.json(); }); },
       write: function (name, obj, existing) { return multipart(existing ? {} : { name: name, parents: [dataFolder], mimeType: 'application/json' }, JSON.stringify(obj), 'application/json', existing).then(function (r) { return { id: r.id, version: String(r.version) }; }); },
+      uploadBig: function (path, file) {       // tải lên dạng "resumable", từng khúc 8MB (file lớn đến 50MB)
+        var segs = path.slice(); if (segs[0] === 'HATO ERP') segs[0] = ROOT_NAME;
+        var CH = 8 * 1024 * 1024, mime = file.type || 'application/octet-stream';
+        return ensurePath(segs).then(function (par) {
+          return f(UP + 'files?uploadType=resumable&fields=id,webViewLink', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(file.size) }, body: JSON.stringify({ name: file.name, parents: [par] }) });
+        }).then(function (r) {
+          var loc = r.headers.get('Location'); if (!loc) throw new Error('Drive không trả địa chỉ tải lên.');
+          function put(start, tries) {
+            var end = Math.min(start + CH, file.size);
+            return fetch(loc, { method: 'PUT', headers: { 'Content-Range': 'bytes ' + start + '-' + (end - 1) + '/' + file.size }, body: file.slice(start, end) }).then(function (x) {
+              if (x.status === 308) { if (window.__hatoUpProgress) window.__hatoUpProgress(end, file.size); return put(end, 0); }
+              if (x.ok) return x.json();
+              if (tries < 3 && x.status >= 500) return new Promise(function (ok) { setTimeout(ok, 1500 * (tries + 1)); }).then(function () { return put(start, tries + 1); });
+              return x.text().then(function (t) { throw new Error('Drive ' + x.status + ': ' + t.slice(0, 160)); });
+            }, function (e) { if (tries < 3) return new Promise(function (ok) { setTimeout(ok, 1500 * (tries + 1)); }).then(function () { return put(start, tries + 1); }); throw e; });
+          }
+          return put(0, 0);
+        }).then(function (r) { return { id: r.id, url: r.webViewLink || ('https://drive.google.com/file/d/' + r.id + '/view') }; });
+      },
       upload: function (path, blob) {
         var segs = path.slice(); if (segs[0] === 'HATO ERP') segs[0] = ROOT_NAME;
         return ensurePath(segs).then(function (par) { return multipart({ name: blob.getName(), parents: [par] }, new Blob([blob.getBytes()], { type: blob.getContentType() }), blob.getContentType() || 'application/octet-stream'); }).then(function (r) { return { id: r.id, url: r.webViewLink || ('https://drive.google.com/file/d/' + r.id + '/view') }; });
@@ -164,6 +183,7 @@
     }).catch(function () { return false; });
   }
 
+  var LOGT = { AUDIT: 1, ERRLOG: 1 };
   var pushing = Promise.resolve(), pushTimer = null;
   wb.onChange = function (n) { meta.dirty[n] = 1; };
   function afterApi() {                                // gọi sau mỗi lần chạy api()
@@ -184,18 +204,26 @@
       remote.forEach(function (x) {
         var n = x.name.replace(/\.json$/, ''), known = meta.versions[n];
         if (known && known.version === x.version && known.id === x.id) return;           // không đổi
-        if (meta.dirty[n]) { if (!known || known.version !== x.version) conflicts.push(n); return; }
+        if (meta.dirty[n]) { if (!known || known.version !== x.version) { if (LOGT[n]) x._merge = n; else conflicts.push(n); } return; }
         x._pull = n;
       });
       if (conflicts.length) { state.conflictNames = conflicts; setState({ conflict: true, phase: 'idle', msg: 'Bảng: ' + conflicts.join(', ') }); return null; }
       var pulls = remote.filter(function (x) { return x._pull; });
-      return Promise.all(pulls.map(function (x) { return Drive.read(x.id).then(function (p) { applyPayload(x._pull, p); meta.versions[x._pull] = { id: x.id, version: x.version }; pulled = true; return persistLocal([x._pull]); }); })).then(function () {
+      var merges = remote.filter(function (x) { return x._merge; });
+      return Promise.all(merges.map(function (x) {      // bảng nhật ký (AUDIT/ERRLOG): gộp dòng của hai thiết bị, không báo xung đột
+        return Drive.read(x.id).then(function (p) {
+          var sh = wb.sheets[x._merge], have = {}; sh.g.forEach(function (r) { if (r && r[0] !== '' && r[0] != null) have[String(r[0])] = 1; });
+          var add = (p.rows || []).slice(1).filter(function (r) { return r && r[0] !== '' && r[0] != null && !have[String(r[0])]; });
+          if (add.length) { var hdr = sh.g[0] ? 1 : 0; sh.g = sh.g.slice(0, hdr).concat(add, sh.g.slice(hdr)); sh.max = Math.max(1000, sh.g.length + 200); }
+          meta.versions[x._merge] = { id: x.id, version: x.version }; wb.touch(x._merge); return persistLocal([x._merge]);
+        });
+      })).then(function () { return Promise.all(pulls.map(function (x) { return Drive.read(x.id).then(function (p) { applyPayload(x._pull, p); meta.versions[x._pull] = { id: x.id, version: x.version }; pulled = true; return persistLocal([x._pull]); }); })).then(function () {
         if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
         var names = Object.keys(meta.dirty).filter(function (n) { return n === '_props' || wb.sheets[n]; });
         return names.reduce(function (p, n) {
           return p.then(function () { var k = meta.versions[n]; return Drive.write(FILE(n), sheetPayload(n), k && k.id).then(function (r) { meta.versions[n] = r; delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }); });
         }, Promise.resolve());
-      }).then(function () { meta.lastSync = Date.now(); return maybeBackup(); });
+      }); }).then(function () { meta.lastSync = Date.now(); return maybeBackup(); });
     }).then(function () { setState({ phase: 'idle', needLogin: false, msg: '' }); }, function (e) {
       var m = String((e && e.message) || e), login = /popup|access_denied|immediate_failed|login|consent|401|Client ID|đăng nhập/i.test(m);
       setState({ phase: 'idle', needLogin: login, msg: m }); if (!login && !LOCAL) setTimeout(function () { if (Object.keys(meta.dirty).length) syncNow(); }, 30000);
@@ -232,7 +260,7 @@
   function flushUploads(res) {
     var jobs = env.pending.splice(0); if (!jobs.length) return Promise.resolve(res);
     return Drive.init().then(function () {
-      return Promise.all(jobs.map(function (jb) { return Drive.upload(jb.path, jb.blob).then(function (r) { return [jb.token, r.url]; }); }));
+      return Promise.all(jobs.map(function (jb) { return (jb.blob.bigKey && window.__hatoBig && window.__hatoBig[jb.blob.bigKey] ? Drive.uploadBig(jb.path, window.__hatoBig[jb.blob.bigKey]) : Drive.upload(jb.path, jb.blob)).then(function (r) { return [jb.token, r.url]; }); }));
     }).then(function (pairs) {
       var map = {}; pairs.forEach(function (p) { map[p[0]] = p[1]; });
       var cols = TABLES.FILES, ui = cols.indexOf('url'), sh = wb.sheets.FILES;
