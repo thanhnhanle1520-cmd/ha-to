@@ -26,3 +26,9 @@ function readTableFile(file) {                                       // Nhập f
   if (file.size > IMPORT_MAX_BYTES) return Promise.reject(new Error('File quá lớn (tối đa 5MB).'));
   return file.arrayBuffer().then(XlsxLite.read).then(function (book) { var n = Object.keys(book)[0]; return (book[n] || []).map(function (r) { return r.map(function (c) { return c === null || c === undefined ? '' : String(c); }); }); });
 }
+
+var __doExport0 = doExport;
+doExport = function (kind, id, format) {     // báo giá: kiểm tra trước khi xuất
+  if (kind === 'quote' && window.__quoteCheck) return window.__quoteCheck().then(function (ok) { if (ok) return __doExport0(kind, id, format); });
+  return __doExport0(kind, id, format);
+};
