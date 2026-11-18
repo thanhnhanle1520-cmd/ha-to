@@ -55,7 +55,7 @@
   function loadGsi() { return new Promise(function (res, rej) { if (window.google && google.accounts && google.accounts.oauth2) return res(); var s = el('script', { src: 'https://accounts.google.com/gsi/client' }); s.onload = function () { res(); }; s.onerror = function () { rej(new Error('Không tải được thư viện đăng nhập Google (kiểm tra mạng).')); }; document.head.appendChild(s); }); }
   function signIn(interactive) {
     if (LOCAL) { token = { v: 'local', exp: Date.now() + 3e9 }; if (!env.email) { env.email = meta.email = 'local@hato'; } return Promise.resolve(env.email); }
-    if (token.v && token.exp - 60000 > Date.now()) return Promise.resolve(meta.email);
+    if (token.v && token.exp - 60000 > Date.now() && meta.email) return Promise.resolve(meta.email);
     if (!CLIENT_ID) return Promise.reject(new Error('Chưa có Client ID Google.'));
     return new Promise(function (res, rej) {
       if (!(token.v && token.exp - 60000 > Date.now())) {                       // dùng token đã lưu sau lần đăng nhập chuyển trang
