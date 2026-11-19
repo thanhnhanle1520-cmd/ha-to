@@ -32,7 +32,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E(`location.hash='#/project/${pj.id}'`); await sleep(1800);
   const vt = await E(`document.querySelector('#view').textContent`);
   T('trang dự án: khối Tài chính (thực tế / dự kiến / thu tiền)', /Tài chính dự án/.test(vt) && /Thực tế/.test(vt) && /Dự kiến/.test(vt) && /Còn phải thu \(theo hàng đã giao\)\s*820\.000/.test(vt), vt.slice(0, 600));
-  T('trang dự án: Quy trình dự án 5 bước', /Quy trình dự án/.test(vt) && /Báo giá/.test(vt) && /HĐ \/ PO \/ Phụ lục/.test(vt) && /Giao hàng/.test(vt) && /Chi phí phát sinh/.test(vt) && /Thu tiền/.test(vt));
+  T('trang dự án: Quy trình dự án 3 bước (chi phí / thu tiền ở khối tóm tắt)', /Quy trình dự án/.test(vt) && /HĐ \/ PO \/ Phụ lục/.test(vt) && await E(`document.querySelectorAll('.flow-step').length`) === 3);
   await E(`location.hash='#/dashboard'`); await sleep(2000);
   const dt = await E(`document.querySelector('#view').textContent`);
   T('Dashboard: Giá trị ký / Doanh thu ghi nhận / Giá vốn / Chi phí / Lợi nhuận gộp', /Giá trị ký/.test(dt) && /Doanh thu ghi nhận/.test(dt) && /Giá vốn/.test(dt) && /Chi phí phát sinh/.test(dt) && /Lợi nhuận gộp/.test(dt), dt.slice(0, 400));

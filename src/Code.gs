@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -48,7 +48,7 @@ const TABLES = {
   PAYMENTS: ['id', 'code', 'project_id', 'doc_id', 'kind', 'term_index', 'amount', 'date', 'note', 'created_by', 'created_at', 'pct', 'delivery_id', 'updated_at'],
   WARRANTIES: ['id', 'code', 'project_id', 'doc_id', 'months', 'start_date', 'items', 'note', 'created_by', 'created_at', 'delivery_id', 'updated_at'],
   CERTS: ['id', 'code', 'project_id', 'doc_id', 'lot', 'issue_date', 'items', 'note', 'created_by', 'created_at', 'site', 'delivery_id', 'updated_at'],
-  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size', 'updated_at'],
+  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size', 'updated_at', 'kind', 'ref_type', 'ref_id'],
   AUDIT: ['ts', 'user', 'action', 'table', 'rec_id', 'project_id', 'summary'],
   ERRLOG: ['ts', 'user', 'action', 'message'],
   TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note', 'type', 'priority', 'status', 'time', 'remind', 'repeat', 'done_at', 'updated_at'],
@@ -861,9 +861,9 @@ ACTIONS.list = function (u, p) {
     var cnt = {}; readTable_('PROJECTS').forEach(function (x) { cnt[x.customer_id] = (cnt[x.customer_id] || 0) + 1; });
     rows = rows.map(function (r) { return Object.assign({}, r, { project_count: cnt[r.id] || 0 }); });
   } else if (key === 'quotes') {
-    var qi = groupBy_(readTable_('QUOTE_ITEMS'), 'quote_id');
+    var qi = groupBy_(readTable_('QUOTE_ITEMS'), 'quote_id'), nRef = fileCountByRef_();
     var latest = {}; rows.forEach(function (q) { if (!latest[q.code] || q.version > latest[q.code]) latest[q.code] = q.version; });
-    rows = rows.map(function (q) { var o = Object.assign({}, q); pj(o); var t = quoteTotals_(q, qi[q.id] || []); o.sub = t.sub; o.vat = t.vat; o.total = t.total; o.is_latest = q.version === latest[q.code]; o.line_count = (qi[q.id] || []).length; return o; });
+    rows = rows.map(function (q) { var o = Object.assign({}, q); pj(o); var t = quoteTotals_(q, qi[q.id] || []); o.sub = t.sub; o.vat = t.vat; o.total = t.total; o.is_latest = q.version === latest[q.code]; o.line_count = (qi[q.id] || []).length; o.n_files = nRef[q.id] || 0; return o; });
   } else if (key === 'docs') {
     var advSum = {}, advTerm = {}, paySum = {}, nFiles = {};
     readTable_('FILES').forEach(function (x) { if (x.doc_id) nFiles[x.doc_id] = (nFiles[x.doc_id] || 0) + 1; });
@@ -884,18 +884,23 @@ ACTIONS.list = function (u, p) {
       return o;
     });
   } else if (key === 'files') {
-    rows = rows.map(function (r) { var o = Object.assign({}, r); pj(o); o.doc_code = r.doc_id ? ((docs[r.doc_id] || {}).code || '') : ''; o.doc_type = r.doc_id ? ((docs[r.doc_id] || {}).type || '') : ''; return o; });
+    var refs = {}; Object.keys(FILE_REF_).forEach(function (k) { readTable_(FILE_REF_[k]).forEach(function (x) { refs[x.id] = x.code || ''; }); });
+    rows = rows.map(function (r) { var o = Object.assign({}, r); pj(o); o.doc_code = r.doc_id ? ((docs[r.doc_id] || {}).code || '') : ''; o.doc_type = r.doc_id ? ((docs[r.doc_id] || {}).type || '') : ''; o.kind = fileKind_(r); o.kind_label = FILE_KINDS_[o.kind]; o.ref_code = r.ref_id ? (refs[r.ref_id] || '') : ''; return o; });
   } else if (key === 'deliveries') {
     var di = index_().delItems;
-    var lp = {}, vatOf = {};
+    var lp = {}, vatOf = {}, nRefD = fileCountByRef_();
     rows.forEach(function (d) { if (lp['p' + d.project_id]) return; lp['p' + d.project_id] = 1; calcProject_(d.project_id).lines.forEach(function (l) { lp[l.doc_id + '|' + l.id] = l.price; }); });
     Object.keys(docs).forEach(function (k) { vatOf[k] = num_(docs[k].vat_pct); });
     rows = rows.map(function (d) {
       var o = Object.assign({}, d); pj(o); var its = di[d.id] || []; o.line_count = its.length; o.qty = its.reduce(function (s, x) { return s + num_(x.qty); }, 0);
       o.value_by_doc = {}; its.forEach(function (x) { var v = num_(x.qty) * num_(lp[x.doc_id + '|' + x.doc_item_id]) * (1 + vatOf[x.doc_id] / 100); o.value_by_doc[x.doc_id] = round_((o.value_by_doc[x.doc_id] || 0) + v); });
       o.value = Object.keys(o.value_by_doc).reduce(function (a, k) { return a + o.value_by_doc[k]; }, 0);
+      o.n_files = nRefD[d.id] || 0;
       return o;
     });
+  } else if (key === 'warranties') {
+    var nRefW = fileCountByRef_();
+    rows = rows.map(function (r) { var o = Object.assign({}, r); pj(o); o.n_files = nRefW[r.id] || 0; return o; });
   } else {
     rows = rows.map(function (r) { var o = Object.assign({}, r); pj(o); return o; });
   }
@@ -1302,6 +1307,9 @@ ACTIONS.remove = function (u, p) {
     } else if (key === 'files') {
       try { var m = String(rec.url).match(/[-\w]{25,}/); if (m) DriveApp.getFileById(m[0]).setTrashed(true); } catch (e) { }
     }
+    if (key === 'docs' || key === 'quotes' || key === 'deliveries' || key === 'warranties') {      // tệp đính kèm không mất: chuyển thành tệp chung của dự án (giữ loại tệp)
+      readTable_('FILES').filter(function (x) { return x.doc_id === id || x.ref_id === id; }).forEach(function (x) { upsert_('FILES', Object.assign({}, x, { kind: fileKind_(x), doc_id: x.doc_id === id ? '' : x.doc_id, ref_type: x.ref_id === id ? '' : x.ref_type, ref_id: x.ref_id === id ? '' : x.ref_id })); });
+    }
     removeByKey_(table, id);
     audit_(u, 'Xóa', table, id, pid, rec.code || rec.name || '');
     return true;
@@ -1648,6 +1656,16 @@ function safeFileName_(name) {
   if (s.length > 150) { var m = s.match(/\.[A-Za-z0-9]{1,8}$/), ext = m ? m[0] : ''; s = s.slice(0, 150 - ext.length) + ext; }
   return s;
 }
+// Loại tệp (bản 18) — tệp cũ chưa có loại: tự suy theo nơi gắn
+var FILE_KINDS_ = { BG: 'Báo giá PDF', HD: 'Hợp đồng', BV: 'Bản vẽ', BBGH: 'BBGH', BH: 'Bảo hành', KHAC: 'Khác' };
+var FILE_REF_ = { quote: 'QUOTES', delivery: 'DELIVERIES', warranty: 'WARRANTIES' };
+function fileKind_(r) {
+  if (r.kind && FILE_KINDS_[r.kind]) return r.kind;
+  if (r.ref_type === 'quote') return 'BG'; if (r.ref_type === 'delivery') return 'BBGH'; if (r.ref_type === 'warranty') return 'BH';
+  if (r.doc_id) return 'HD';
+  return 'KHAC';
+}
+function fileCountByRef_() { var n = {}; readTable_('FILES').forEach(function (x) { if (x.ref_id) n[x.ref_id] = (n[x.ref_id] || 0) + 1; }); return n; }
 ACTIONS.uploadFile = function (u, p) {
   need_(u, 'files', 'create');
   var pr = readTable_('PROJECTS').filter(function (x) { return x.id === p.project_id; })[0];
@@ -1661,21 +1679,37 @@ ACTIONS.uploadFile = function (u, p) {
   if (fsize > UPLOAD_MAX_BYTES) throw new Error('File quá lớn (tối đa ' + (UPLOAD_MAX_BYTES / 1048576) + 'MB).');
   var doc = p.doc_id ? index_().docById[p.doc_id] : null;
   if (p.doc_id && (!doc || doc.project_id !== pr.id)) throw new Error('Văn bản không thuộc dự án này.');
+  var refT = p.ref_type && p.ref_id ? FILE_REF_[p.ref_type] : null, ref = null;
+  if (p.ref_type && !refT) throw new Error('Nơi gắn tệp không hợp lệ.');
+  if (refT) { ref = readTable_(refT).filter(function (x) { return x.id === p.ref_id; })[0]; if (!ref || ref.project_id !== pr.id) throw new Error('Phiếu gắn tệp không thuộc dự án này.'); }
+  var kind = p.kind && FILE_KINDS_[p.kind] ? p.kind : fileKind_({ doc_id: p.doc_id, ref_type: refT ? p.ref_type : '' });
   var cust = customerName_(pr.customer_id) || 'Khách hàng';
   var f = childFolder_(childFolder_(childFolder_(rootFolder_(), (pr.created_at || today_()).slice(0, 4)), cust), pr.code + ' ' + pr.name);
   if (doc) f = childFolder_(f, doc.code);
+  else if (ref && ref.code) f = childFolder_(f, ref.code);
   var blob = big ? Utilities.newBlob([], p.mime || 'application/octet-stream', fname) : Utilities.newBlob(Utilities.base64Decode(p.base64), p.mime || 'application/octet-stream', fname);
   if (big) blob.bigKey = String(p.big_key);
   var file = f.createFile(blob);
   try {
     return withLock_(function () {
       RT = { user: RT.user, ss: RT.ss };
-      var rec = { id: newId_('F'), project_id: pr.id, doc_id: p.doc_id || '', name: fname, url: file.getUrl(), mime: p.mime || '', created_by: u.email, created_at: now_(), size: fsize };
+      var rec = { id: newId_('F'), project_id: pr.id, doc_id: p.doc_id || '', name: fname, url: file.getUrl(), mime: p.mime || '', created_by: u.email, created_at: now_(), size: fsize, kind: kind, ref_type: refT ? p.ref_type : '', ref_id: refT ? p.ref_id : '' };
       upsert_('FILES', rec);
       audit_(u, 'Tải file', 'FILES', rec.id, pr.id, fname);
       return rec;
     });
   } catch (e) { try { file.setTrashed(true); } catch (x) { } throw e; }   // không để lại file mồ côi nếu ghi bản ghi thất bại
+};
+ACTIONS.setFileKind = function (u, p) {
+  need_(u, 'files', 'edit');
+  if (!FILE_KINDS_[p.kind]) throw new Error('Loại tệp không hợp lệ.');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var rec = readTable_('FILES').filter(function (x) { return x.id === p.id; })[0];
+    if (!rec) throw new Error('Không tìm thấy tệp.');
+    upsert_('FILES', Object.assign({}, rec, { kind: p.kind }));
+    return true;
+  });
 };
 ACTIONS.history = function (u, p) {
   need_(u, 'projects', 'view');

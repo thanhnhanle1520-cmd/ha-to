@@ -82,7 +82,9 @@ function entityModal(key, projectId, rec, done) {
       return safe(call('save', { table: key, rec: Object.assign({}, rec, { project_id: projectId }, f.get()) })).then(function (r) { if (r) { done && done(); return doExport(ent.exp, rec.id, fmt); } });
     }
     if (isEdit && ent.exp) btns.push({ label: 'Xuất PDF', fn: function () { saveThenExport('pdf'); } }, { label: 'Xuất Word', fn: function () { saveThenExport('doc'); } });
-    modal({ title: ent.title + (isEdit && rec.code ? ' ' + rec.code : ''), body: f.el, buttons: btns, wide: key === 'warranties' || key === 'certs', draft: (isEdit ? S.perms[key].edit : S.perms[key].create) ? { id: 'entity/' + key + '/' + (projectId || '') + '/' + (isEdit ? rec.id : 'new'), label: ent.title + ' ' + (isEdit ? (rec.code || '') : 'mới'), hash: location.hash || '#/', re: isEdit ? null : { t: 'entity', key: key, pid: projectId }, get: f.get, set: f.setDraft || function (d) { formSet(f, d); } } : null });
+    var body = f.el;
+    if (key === 'warranties' && S.perms.files.view) body = h('div', null, f.el, refFilesCard(projectId, 'warranty', isEdit ? rec.id : '', 'BH'));
+    modal({ title: ent.title + (isEdit && rec.code ? ' ' + rec.code : ''), body: body, buttons: btns, wide: key === 'warranties' || key === 'certs', draft: (isEdit ? S.perms[key].edit : S.perms[key].create) ? { id: 'entity/' + key + '/' + (projectId || '') + '/' + (isEdit ? rec.id : 'new'), label: ent.title + ' ' + (isEdit ? (rec.code || '') : 'mới'), hash: location.hash || '#/', re: isEdit ? null : { t: 'entity', key: key, pid: projectId }, get: f.get, set: f.setDraft || function (d) { formSet(f, d); } } : null });
   }
   safe(call('list', { table: 'docs', project_id: projectId })).then(function (docs) {
     if (!docs) return;
@@ -167,6 +169,7 @@ PAGES.quote = function (p, q) {
     if (qt.converted_to) v.appendChild(h('div', { class: 'card' }, h('span', { class: 'badge b-ok' }, 'Đã chốt'), ' Đã chuyển thành: ', h('b', null, qt.converted_to)));
     v.appendChild(h('div', { class: 'card' }, pf.el));
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Dòng hàng'), le));
+    if (S.perms.files.view) v.appendChild(refFilesCard(qt.project_id, 'quote', isNew ? '' : qt.id, 'BG'));
     if (!canEdit) v.querySelectorAll('input,select,textarea,button.pri').forEach(function (e) { if (!e.closest('.pick')) e.disabled = true; });
     else S.draftCtl = draftWatch({ id: 'quote/' + (isNew ? 'new:' + (q.project || '') : id), label: 'Báo giá ' + (isNew ? 'mới' : qt.code + ' v' + qt.version), hash: location.hash, root: v,
       get: function () { return { f: pf.get(), lines: lines.map(function (x) { return Object.assign({}, x); }) }; },
@@ -379,7 +382,9 @@ PAGES.delivery = function (p, q) {
     v.appendChild(h('div', { class: 'card' }, f.el));
     var pick = h('div', { class: 'card' }, h('h3', null, 'Chọn hàng giao theo văn bản (hiện khối lượng còn lại)'), h('div', { class: 'mut' }, 'Đang tải…'));
     v.appendChild(pick);
+    var filesBox = S.perms.files.view ? refFilesCard(dv.project_id, 'delivery', isNew ? '' : dv.id, 'BBGH') : null;
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Hàng trong phiếu giao'), le, h('div', { class: 'mut', style: 'margin-top:6px' }, 'Hàng ngoài văn bản: tìm trong bảng giá ở ô phía trên hoặc thêm dòng trống (sẽ không trừ vào khối lượng văn bản).')));
+    if (filesBox) v.appendChild(filesBox);
     safe(call('deliverable', { project_id: dv.project_id, exclude_delivery_id: dv.id || null })).then(function (rows) {
       pick.lastChild.remove(); if (!rows) return;
       var docsMap = {}; rows.forEach(function (r) { docsMap[r.doc_id] = r.doc_code; });
@@ -422,7 +427,7 @@ function docFilesCard(doc, isNew, pending) {
     return call('list', { table: 'files', project_id: doc.project_id }).then(function (rows) {
       rows = rows.filter(function (r) { return r.doc_id === doc.id; }); list.innerHTML = '';
       if (!rows.length) { list.appendChild(h('div', { class: 'mut' }, 'Chưa có tệp đính kèm.')); return; }
-      list.appendChild(filesTable(rows, false));
+      list.appendChild(filesTable(rows, false, load));
     });
   }
   if (S.perms.files.create) card.appendChild(h('div', { class: 'bar2' }, inp, h('button', { class: 'pri', onclick: function () {

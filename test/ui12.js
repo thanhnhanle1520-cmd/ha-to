@@ -50,7 +50,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   const ps = await E(`(()=>{const l=[...document.querySelectorAll('#view label')].find(x=>/Thuộc HĐ gốc/.test(x.textContent));return l?{shown:l.style.display!=='none',n:l.querySelectorAll('option').length}:null})()`);
   T('PLHD mới có ô chọn HĐ gốc', ps && ps.shown && ps.n >= 2, ps);
   await E(`location.hash='#/project/${le.id}/files'`); await sleep(1500);
-  T('tab Tệp có cột "Thuộc văn bản"', /Thuộc văn bản/.test(await E(`document.querySelector('#view').textContent`)));
+  T('tab Tệp có cột "Gắn với"', /Gắn với/.test(await E(`document.querySelector('#view').textContent`)));
   console.log('— Đổi tên hồ sơ cũ "Bán lẻ – …"');
   const old = (await A('save', { table: 'projects', rec: { name: 'Bán lẻ – Khách cũ', customer_id: cu.id, kind: 'LE', status: 'Đang thực hiện' } })).data;
   await E(`(()=>{PropertiesService.getScriptProperties().setProperty('SCHEMA','1.11.0');RT={};ensureSheets_(true);return 1})()`);
