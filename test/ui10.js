@@ -77,7 +77,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E(`HatoStore.syncNow()`); await sleep(1500);
   T('tệp rỗng bất thường bị bỏ qua', await E(`JSON.stringify(HatoStore.state.bad)`) === '["CUSTOMERS"]', await E(`JSON.stringify(HatoStore.state)`));
   const nLoc = (await A('list', { table: 'customers' })).data.length; T('dữ liệu khách trên máy còn nguyên', nLoc === nCus + 4, [nLoc, nCus]);
-  T('thanh trạng thái báo đỏ', /Bỏ qua tệp lỗi/.test(await E(`document.getElementById('hato-sync').textContent`)));
+  T('thanh trạng thái báo đỏ', /Tệp lỗi/.test(await E(`document.getElementById('hato-sync').textContent`)));
   await E(`(async()=>{const D=window.__hatoDrive;const l=await D.list();const g=l.find(x=>x.name==='CUSTOMERS.json');const m=await (async()=>{})();await D.write('CUSTOMERS.json','x',g.id);})()`);
   await E(`(async()=>{const D=window.__hatoDrive;const l=await D.list();const g=l.find(x=>x.name==='PROJECTS.json');await D.write('PROJECTS.json',{rows:'hỏng'},g&&g.id);})()`);
   await E(`HatoStore.syncNow()`); await sleep(1500);

@@ -222,7 +222,7 @@ function taskModal(t, pid, done) {
   } }] });
 }
 function taskPanel(o) {
-  var pid = o.project_id || '', st = { f: pid ? 'all' : 'open', type: '', proj: '' }, box = h('div', { class: 'card', style: 'margin-bottom:12px;border-left:4px solid #3b5b92' }), data = [], td = today();
+  var pid = o.project_id || '', st = { f: pid ? 'all' : 'open', type: '', proj: '' }, box = h('div', { class: 'card taskbox' }), data = [], td = today();
   function pr(t) { return t.priority === 'Cao' ? 3 : t.priority === 'Thấp' ? 1 : 2; }
   function flt(t) {
     var e = t.end_date || t.start_date, open = taskIsOpen(t);
@@ -266,22 +266,29 @@ function taskPanel(o) {
   function draw() {
     box.innerHTML = '';
     var nOpen = data.filter(taskIsOpen).length, nLate = data.filter(function (t) { var e = t.end_date || t.start_date; return taskIsOpen(t) && e && e < td; }).length;
-    var head = h('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px' }, h('h3', { style: 'margin:0' }, (pid ? 'Công việc của dự án' : 'Công việc hằng ngày') + ' (' + nOpen + ' đang mở' + (nLate ? ', ' + nLate + ' trễ' : '') + ')'),
-      h('span', null, (window.Notification && Notification.permission === 'default') ? h('button', { onclick: function () { Notification.requestPermission().then(draw); } }, '🔔 Bật thông báo') : null, h('button', { class: 'pri', onclick: function () { taskModal(null, pid, reload); } }, '+ Thêm việc')));
-    box.appendChild(head);
+    var title = h('h3', { style: 'margin:0;white-space:nowrap' }, (pid ? 'Công việc của dự án' : 'Công việc hằng ngày'), data.length ? h('span', { class: 'mut', style: 'font-weight:400;font-size:13px;margin-left:6px' }, nOpen + ' đang mở' + (nLate ? ' · ' : ''), nLate ? h('b', { class: 'neg' }, nLate + ' trễ') : null) : null);
+    var addBtn = h('button', { class: 'pri', onclick: function () { taskModal(null, pid, reload); } }, '+ Thêm việc');
+    var notif = (window.Notification && Notification.permission === 'default') ? h('button', { title: 'Hiện thông báo nhắc việc trên máy tính', onclick: function () { Notification.requestPermission().then(draw); } }, '🔔') : null;
+    var quick = null;
     if (!pid) {   // thêm nhanh: gõ nội dung + chọn hạn + Enter
-      var ti = h('input', { type: 'text', placeholder: 'Thêm nhanh: gõ việc cần làm rồi Enter…', style: 'flex:1;min-width:200px' }), du = sel([['0', 'Hạn: hôm nay'], ['1', 'Hạn: ngày mai'], ['3', 'Hạn: +3 ngày'], ['7', 'Hạn: +1 tuần']], '0');
+      var ti = h('input', { type: 'text', placeholder: 'Thêm nhanh việc cần làm rồi Enter…', style: 'flex:1 1 260px;min-width:180px' }), du = sel([['0', 'Hạn hôm nay'], ['1', 'Hạn ngày mai'], ['3', 'Hạn +3 ngày'], ['7', 'Hạn +1 tuần']], '0');
       var add = function () { var tt = ti.value.trim(); if (!tt) return; safe(call('taskSave', { rec: { title: tt, start_date: today(), end_date: addD(today(), Number(du.value)), remind: '0', priority: 'Thường', status: 'Chưa làm', type: 'Khác' } })).then(function (r) { if (r) { ti.value = ''; reload(); } }); };
       ti.addEventListener('keydown', function (e) { if (e.key === 'Enter') add(); });
-      box.appendChild(h('div', { class: 'bar2' }, ti, du, h('button', { onclick: add }, 'Thêm')));
+      quick = [ti, du];
     }
+    if (!data.length) {   // chưa có việc nào: chỉ 1 dòng gọn
+      box.appendChild(h('div', { class: 'bar2', style: 'margin:0' }, title, h('span', { class: 'mut' }, 'Chưa có công việc.'), quick, h('span', { class: 'sp' }), notif, addBtn));
+      return;
+    }
+    // có việc: dòng 1 = tiêu đề + thêm nhanh + nút; dòng 2 = bộ lọc (1 hàng)
+    box.appendChild(h('div', { class: 'bar2' }, title, quick, h('span', { class: 'sp' }), notif, addBtn));
     var chips = [['open', 'Đang mở'], ['today', 'Hôm nay'], ['week', 'Trong tuần'], ['late', 'Quá hạn'], ['wait', 'Chờ phản hồi'], ['done', 'Đã xong'], ['all', 'Tất cả']];
-    var fb = h('div', { class: 'bar2', style: 'flex-wrap:wrap' }, chips.map(function (c) { return h('button', { class: st.f === c[0] ? 'pri' : '', onclick: function () { st.f = c[0]; draw(); } }, c[1]); }),
-      sel(TASK_TYPES.map(function (x) { return [x, x]; }), st.type, function (e) { st.type = e.target.value; draw(); }, 'Mọi loại'));
+    var seg = h('div', { class: 'seg' }, chips.map(function (c) { var n = data.filter(function (t) { var o = st.f; st.f = c[0]; var r = flt(t); st.f = o; return r; }).length; return h('button', { class: st.f === c[0] ? 'on' : '', onclick: function () { st.f = c[0]; draw(); } }, c[1], n && c[0] !== 'all' ? h('small', null, ' ' + n) : null); }));
+    var fb = h('div', { class: 'bar2' }, seg, sel(TASK_TYPES.map(function (x) { return [x, x]; }), st.type, function (e) { st.type = e.target.value; draw(); }, 'Mọi loại'));
     if (!pid) fb.appendChild(sel(S.projects.map(function (x) { return [x.id, projLabel(x)]; }), st.proj, function (e) { st.proj = e.target.value; draw(); }, 'Mọi dự án'));
     box.appendChild(fb);
     var list = data.filter(flt).sort(sortT);
-    if (!list.length) box.appendChild(h('div', { class: 'mut', style: 'padding:10px 0' }, data.length ? 'Không có việc nào theo bộ lọc này.' : 'Chưa có công việc. Gõ vào ô trên rồi Enter để thêm.'));
+    if (!list.length) box.appendChild(h('div', { class: 'mut', style: 'padding:8px 0' }, 'Không có việc nào theo bộ lọc này.'));
     else box.appendChild(table(list));
     var dn = data.filter(function (t) { return !taskIsOpen(t); });
     if (!pid && st.f !== 'done' && st.f !== 'all' && dn.length) box.appendChild(h('details', { style: 'margin-top:8px' }, h('summary', { class: 'mut', style: 'cursor:pointer' }, 'Đã hoàn thành (' + dn.length + ')'), table(dn.sort(sortT).slice(0, 30))));

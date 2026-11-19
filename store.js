@@ -38,23 +38,29 @@
   var state = { phase: 'init', msg: '', needLogin: false, conflict: false }, chip;
   function setState(patch) { Object.assign(state, patch); drawChip(); }
   function drawChip() {
-    if (!chip) { chip = el('div', { id: 'hato-sync', style: 'position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:9999;font:13px system-ui,sans-serif;background:#fff;border:1px solid #d1d5db;border-radius:999px;padding:6px 12px;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;gap:8px;align-items:center;max-width:90vw' }); document.body.appendChild(chip); }
+    /* Trạng thái đồng bộ: biểu tượng nhỏ trên thanh tiêu đề (chấm màu + chữ ngắn), câu đầy đủ ở dòng gợi ý khi rê chuột */
+    var bar = document.getElementById('bar');
+    if (!chip) { chip = el('div', { id: 'hato-sync', role: 'status', style: 'position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:9999;font:13px system-ui,sans-serif;background:#fff;border:1px solid #d1d5db;border-radius:999px;padding:6px 12px;box-shadow:0 2px 10px rgba(0,0,0,.12);display:flex;gap:8px;align-items:center' }); document.body.appendChild(chip); }
+    if (bar && chip.parentNode !== bar) { bar.appendChild(chip); chip.className = 'inbar'; }
     chip.innerHTML = '';
-    var nd = Object.keys(meta.dirty).length, txt, col = '#16a34a';
-    if (state.conflict) { txt = '⚠ Dữ liệu trên Drive đã đổi ở thiết bị khác'; col = '#dc2626'; }
-    else if (state.bad && state.bad.length) { txt = '⚠ Bỏ qua tệp lỗi trên Drive: ' + state.bad.join(', ') + ' — đang giữ dữ liệu máy này'; col = '#dc2626'; }
-    else if (state.note) { txt = '🔀 ' + state.note; col = '#2563eb'; }
-    else if (state.needLogin) { txt = '🔒 Chưa đồng bộ — cần đăng nhập Google' + (nd ? ' (' + nd + ' bảng chỉ mới lưu trên máy)' : ''); col = '#d97706'; }
-    else if (state.phase === 'syncing') { txt = '⏳ Đang đồng bộ…'; col = '#2563eb'; }
-    else if (!LOCAL && !navigator.onLine) { txt = '📴 Mất mạng — ' + (nd ? nd + ' bảng đã lưu trên máy, sẽ gửi khi có mạng' : 'đang dùng dữ liệu trên máy'); col = '#d97706'; }
-    else if (state.err && nd) { txt = '⚠ Chưa gửi được lên Drive (' + nd + ' bảng lưu trên máy) — bấm để xem'; col = '#dc2626'; }
-    else if (nd) { txt = '⏳ Đã lưu trên máy · ' + nd + ' bảng chờ gửi lên Drive'; col = '#d97706'; }
-    else if (LOCAL) { txt = '🧪 Chế độ thử (chỉ lưu trong trình duyệt)'; col = '#7c3aed'; }
-    else { txt = '☁ Đã lưu lên Drive'; }
-    chip.style.color = col; chip.appendChild(document.createTextNode(txt));
-    if (state.needLogin) chip.appendChild(el('button', { style: 'border:0;background:#2563eb;color:#fff;border-radius:6px;padding:3px 10px;cursor:pointer', onclick: function () { signIn(true).then(function () { return syncNow(); }); } }, 'Đăng nhập'));
-    if (state.conflict) chip.appendChild(el('button', { style: 'border:0;background:#dc2626;color:#fff;border-radius:6px;padding:3px 10px;cursor:pointer', onclick: resolveConflict }, 'Xử lý'));
-    chip.title = state.msg || 'Bấm để mở menu dữ liệu'; chip.style.cursor = 'pointer'; chip.onclick = function (e) { if (e.target.tagName !== 'BUTTON' && window.HatoMigrate) HatoMigrate.openMenu(); };
+    var nd = Object.keys(meta.dirty).length, txt, full, col = '#16a34a';
+    if (state.conflict) { txt = 'Xung đột dữ liệu'; full = 'Dữ liệu trên Drive đã đổi ở thiết bị khác'; col = '#dc2626'; }
+    else if (state.bad && state.bad.length) { txt = 'Tệp lỗi trên Drive'; full = 'Bỏ qua tệp lỗi trên Drive: ' + state.bad.join(', ') + ' — đang giữ dữ liệu máy này. Bấm để xử lý.'; col = '#dc2626'; }
+    else if (state.note) { txt = 'Đã gộp thay đổi'; full = state.note; col = '#2563eb'; }
+    else if (state.needLogin) { txt = 'Chưa đồng bộ'; full = 'Chưa đồng bộ — cần đăng nhập Google' + (nd ? ' (' + nd + ' bảng chỉ mới lưu trên máy)' : ''); col = '#d97706'; }
+    else if (state.phase === 'syncing') { txt = 'Đang đồng bộ…'; full = 'Đang đồng bộ với Google Drive'; col = '#2563eb'; }
+    else if (!LOCAL && !navigator.onLine) { txt = 'Mất mạng' + (nd ? ' · ' + nd + ' chờ gửi' : ''); full = 'Mất mạng — ' + (nd ? nd + ' bảng đã lưu trên máy, sẽ gửi khi có mạng' : 'đang dùng dữ liệu trên máy'); col = '#d97706'; }
+    else if (state.err && nd) { txt = 'Chưa gửi được'; full = 'Chưa gửi được lên Drive (' + nd + ' bảng lưu trên máy) — bấm để xem'; col = '#dc2626'; }
+    else if (nd) { txt = 'Chờ gửi · ' + nd; full = 'Đã lưu trên máy · ' + nd + ' bảng chờ gửi lên Drive'; col = '#d97706'; }
+    else if (LOCAL) { txt = 'Chế độ thử'; full = 'Chế độ thử (chỉ lưu trong trình duyệt)'; col = '#7c3aed'; }
+    else { txt = 'Đã lưu'; full = 'Đã lưu lên Google Drive'; }
+    chip.style.color = '#374151';
+    chip.appendChild(el('span', { class: 'dot', style: 'background:' + col + ';width:8px;height:8px;border-radius:50%;display:inline-block' }));
+    chip.appendChild(el('span', { class: 'tx' }, '☁ ' + txt));
+    if (state.needLogin) chip.appendChild(el('button', { style: 'border:0;background:#0b5ca8;color:#fff;border-radius:6px;padding:2px 9px;cursor:pointer', onclick: function () { signIn(true).then(function () { return syncNow(); }); } }, 'Đăng nhập'));
+    if (state.conflict) chip.appendChild(el('button', { style: 'border:0;background:#dc2626;color:#fff;border-radius:6px;padding:2px 9px;cursor:pointer', onclick: resolveConflict }, 'Xử lý'));
+    chip.title = full + (state.msg && state.msg !== full ? '\n' + state.msg : '') + '\nBấm để mở menu Dữ liệu và đồng bộ'; chip.setAttribute('aria-label', full); chip.style.cursor = 'pointer';
+    chip.onclick = function (e) { if (e.target.tagName !== 'BUTTON' && window.HatoMigrate) HatoMigrate.openMenu(); };
   }
 
   /* ---------- Ổ đĩa: Google Drive thật hoặc giả lập trong trình duyệt (?local=1) ---------- */

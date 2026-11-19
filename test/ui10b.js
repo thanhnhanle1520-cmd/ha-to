@@ -12,7 +12,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   T('sau nâng cấp dữ liệu còn nguyên', (await pg.ev(`api('list',{table:'customers'})`)).data.some(x => x.name === 'KH trước nâng cấp'));
   await pg.ev(`window.__hatoShowUpdate()`); await sleep(200);
   T('thông báo có bản mới', /Đã có bản HA TO mới/.test(await pg.ev(`(document.getElementById('hato-upd')||{}).textContent||''`)));
-  T('trạng thái: đã lưu trên máy · chờ gửi', await pg.ev(`(async()=>{await api('save',{table:'customers',rec:{name:'x'}});await new Promise(r=>setTimeout(r,300));return document.getElementById('hato-sync').textContent})()`).then(t => /Đã lưu trên máy|Đang đồng bộ|Chế độ thử/.test(t)));
+  T('trạng thái: đã lưu trên máy · chờ gửi', await pg.ev(`(async()=>{await api('save',{table:'customers',rec:{name:'x'}});await new Promise(r=>setTimeout(r,300));return document.getElementById('hato-sync').textContent})()`).then(t => /Chờ gửi|Đang đồng bộ|Chế độ thử/.test(t)));
   const pf = await pg.ev(`HatoStore.perf()`); T('đo thời gian mở app và dung lượng bảng', pf.ready > 0 && pf.sizes.length > 5 && pf.total > 0, pf);
   await pg.ev(`HatoMigrate.openMenu()`); await sleep(200); T('menu hiện số đo hiệu năng', /Mở app: [\d.]+s/.test(await pg.ev(`document.body.lastElementChild.textContent`)));
   await pg.ev(`document.body.lastElementChild.remove(); document.querySelectorAll('[id=hato-upd]').forEach(e=>e.remove())`);

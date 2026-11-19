@@ -345,7 +345,15 @@ function table(o) {
     body.innerHTML = '';
     rows.slice((st.page - 1) * ps, st.page * ps).forEach(function (r) {
       var tr = h('tr', { class: o.onRow ? 'rw' : '', onclick: o.onRow ? function () { o.onRow(r); } : null });
-      o.cols.forEach(function (c) { tr.appendChild(h('td', { class: c.cls || '' }, c.fmt ? c.fmt(r) : (r[c.k] == null ? '' : r[c.k]))); });
+      o.cols.forEach(function (c) {
+        var v = c.fmt ? c.fmt(r) : (r[c.k] == null ? '' : r[c.k]), cl = c.cls || '';
+        if (c.k === 'code' && !/\bcode\b/.test(cl)) cl += ' code';
+        // chữ dài không xuống dòng: cắt "…" và rê chuột để xem đủ (cột có wrap:true thì cho xuống dòng)
+        var tx = typeof v === 'string' || typeof v === 'number' ? String(v) : (v && v.textContent) || '', td;
+        if (!c.wrap && tx.length > (c.max || 42)) { td = h('td', { class: cl + ' ell', title: tx }, h('div', { class: 'ellx', style: c.maxw ? 'max-width:' + c.maxw : '' }, v)); }
+        else { td = h('td', { class: cl + (c.wrap ? ' wr' : '') }, v); }
+        tr.appendChild(td);
+      });
       body.appendChild(tr);
     });
     if (!rows.length) body.appendChild(h('tr', null, h('td', { colspan: o.cols.length, class: 'mut c', style: 'padding:18px' }, o.empty || 'Chưa có dữ liệu')));
@@ -357,6 +365,7 @@ function table(o) {
   var bar = h('div', { class: 'bar2' });
   if (o.search) bar.appendChild(h('input', { type: 'search', placeholder: 'Tìm kiếm…', value: st.q, oninput: debounce(function (e) { st.q = e.target.value; st.page = 1; draw(); }, 150) }));
   (o.filters || []).forEach(function (f, i) { bar.appendChild(sel(f.opts, st.f[i] || '', function (e) { st.f[i] = e.target.value; st.page = 1; draw(); }, f.label)); });
+  if ((o.tools || []).length) bar.appendChild(h('span', { class: 'sp' }));      // nút thao tác dồn sang phải
   (o.tools || []).forEach(function (t) { bar.appendChild(t); });
   var head = h('tr', null, o.cols.map(function (c) {
     return h('th', { class: (c.cls || '') + (c.sort === false ? '' : ' s'), onclick: c.sort === false ? null : function () { if (st.sort === c.k) st.dir = -st.dir; else { st.sort = c.k; st.dir = 1; } draw(); } }, c.label);
@@ -531,14 +540,44 @@ function rowsEditor(cols, rows) {
 }
 
 /* ================= Điều hướng ================= */
-var MENU = [['dashboard', '📊', 'Dashboard'], ['pricelist', '💲', 'Bảng giá'], ['customers', '👥', 'Khách hàng'], ['projects', '📁', 'Dự án'], ['quotes', '📝', 'Báo giá'], ['docs', '📄', 'HĐ / PO / Phụ lục HĐ'], ['deliveries', '🚚', 'Giao hàng'], ['costs', '💰', 'Chi phí dự án'], ['advances', '💵', 'Tạm ứng'], ['payments', '🧾', 'Thanh toán'], ['warranties', '🛡️', 'Bảo hành'], ['certs', '🏭', 'Xuất xưởng'], ['config', '⚙️', 'Cấu hình']];
+/* Bộ icon nét (SVG tự vẽ trong app, không tải từ ngoài) — 24×24, nét theo màu chữ */
+var ICONS = {
+  dashboard: '<rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="15" width="7" height="6" rx="1.5"/>',
+  customers: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.8c1.9.6 3.1 2.4 3.5 5.2"/>',
+  projects: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2.5h8.5A1.5 1.5 0 0 1 21 10v8.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>',
+  pricelist: '<path d="M3 12.2V4.5A1.5 1.5 0 0 1 4.5 3h7.7l8.3 8.3a1.5 1.5 0 0 1 0 2.1l-7.1 7.1a1.5 1.5 0 0 1-2.1 0z"/><circle cx="8" cy="8" r="1.6"/>',
+  quotes: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 13h7M8.5 17h4"/>',
+  docs: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 12.5h7"/><path d="M9 18c1-1.6 1.8-1.6 2.4 0 .5 1.3 1.2 1.3 2.1 0"/>',
+  deliveries: '<path d="M2.5 6.5h11v10h-11z"/><path d="M13.5 10h4l3 3.2v3.3h-7z"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+  certs: '<path d="M3 21V10l5 3V10l5 3V6l8 4v11z"/><path d="M7 17h2M12 17h2M17 17h1"/>',
+  warranties: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z"/><path d="M8.8 12.2l2.2 2.2 4.3-4.6"/>',
+  costs: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  advances: '<rect x="2.5" y="6" width="19" height="12" rx="1.5"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/>',
+  payments: '<rect x="2.5" y="5" width="19" height="14" rx="1.5"/><path d="M2.5 9.5h19"/><path d="M6 15h4"/>',
+  config: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  drafts: '<path d="M4 20h4L19.3 8.7a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16z"/><path d="M13.5 6.5l4 4"/>'
+};
+function icon(k) { var s = document.createElement('span'); s.className = 'ic'; s.innerHTML = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[k] || ICONS.docs) + '</svg>'; return s; }
+/* Menu theo nhóm nghiệp vụ */
+var MENU_GROUPS = [
+  ['Tổng quan', [['dashboard', 'Dashboard']]],
+  ['Kinh doanh', [['customers', 'Khách hàng'], ['projects', 'Dự án'], ['pricelist', 'Bảng giá'], ['quotes', 'Báo giá']]],
+  ['Hợp đồng và vận hành', [['docs', 'HĐ / PO / Phụ lục HĐ'], ['deliveries', 'Giao hàng'], ['certs', 'Xuất xưởng'], ['warranties', 'Bảo hành']]],
+  ['Tài chính', [['costs', 'Chi phí dự án'], ['advances', 'Tạm ứng'], ['payments', 'Thanh toán']]],
+  ['Hệ thống', [['config', 'Cấu hình']]]
+];
+var MENU = []; MENU_GROUPS.forEach(function (g) { g[1].forEach(function (m) { MENU.push([m[0], '', m[1]]); }); });
 function buildNav() {
   var nav = $('#nav'); nav.innerHTML = '';
   var pinned = false; try { pinned = localStorage.getItem('navOpen') === '1'; } catch (e) { }
   nav.classList.toggle('open', pinned);
   nav.appendChild(h('div', { class: 'logo', title: 'Ghim / thu gọn menu', onclick: function () { var o = nav.classList.toggle('open'); try { localStorage.setItem('navOpen', o ? '1' : '0'); } catch (e) { } var t = nav.querySelector('.navtg'); if (t) t.textContent = o ? '«' : '»'; } }, h('b', null, 'H'), h('span', { class: 'lb' }, 'HA TO ☰')));
-  MENU.forEach(function (m) { if (S.perms[m[0]] && S.perms[m[0]].view) nav.appendChild(h('a', { href: '#/' + m[0], 'data-k': m[0], title: m[2] }, h('span', { class: 'ic' }, m[1]), h('span', { class: 'lb' }, m[2]))); });
-  nav.appendChild(h('a', { id: 'draftnav', href: 'javascript:void(0)', title: 'Bản nháp chưa lưu', style: 'display:none', onclick: function () { draftsModal(); } }, h('span', { class: 'ic' }, '📝'), h('span', { class: 'lb' }, 'Bản nháp')));
+  MENU_GROUPS.forEach(function (g, gi) {
+    var items = g[1].filter(function (m) { return S.perms[m[0]] && S.perms[m[0]].view; }); if (!items.length) return;
+    nav.appendChild(h('div', { class: 'grp' + (gi ? '' : ' first') }, g[0]));
+    items.forEach(function (m) { nav.appendChild(h('a', { href: '#/' + m[0], 'data-k': m[0], title: m[1] }, icon(m[0]), h('span', { class: 'lb' }, m[1]))); });
+    if (g[0] === 'Hệ thống') nav.appendChild(h('a', { id: 'draftnav', href: 'javascript:void(0)', title: 'Bản nháp chưa lưu', style: 'display:none', onclick: function () { draftsModal(); } }, icon('drafts'), h('span', { class: 'lb' }, 'Bản nháp')));
+  });
   DR.badge();
   nav.appendChild(h('div', { class: 'spacer' }));
   nav.appendChild(h('div', { class: 'me' }, S.user.name + ' · ' + S.user.roleName));

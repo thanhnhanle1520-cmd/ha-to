@@ -91,7 +91,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await pg.ev(`MEMO={};location.hash='#/dashboard'`); await sleep(2500);
   
   T('UI: đã bỏ khối Cần xử lý hôm nay', await pg.ev(`!/Cần xử lý hôm nay/.test(document.querySelector('#view').innerText)`));
-  T('UI: khối Công việc hằng ngày + thêm nhanh', await pg.ev(`/Công việc hằng ngày/.test(document.querySelector('#view').innerText) && /Đang mở/.test(document.querySelector('#view').innerText) && !!document.querySelector('#view input[placeholder^="Thêm nhanh"]')`));
+  T('UI: khối Công việc hằng ngày + thêm nhanh', await pg.ev(`/Công việc hằng ngày/.test(document.querySelector('#view').innerText) && !!document.querySelector('#view input[placeholder^="Thêm nhanh"]')`));
   T('UI: có ô tìm chung', await pg.ev(`!!document.querySelector('#gs')`));
   await pg.ev(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(2000);
   T('UI: báo giá có nút Gửi báo giá nhanh / Copy báo giá', await pg.ev(`/Gửi báo giá nhanh/.test(document.querySelector('#acts').innerText) && /Copy báo giá/.test(document.querySelector('#acts').innerText)`));
