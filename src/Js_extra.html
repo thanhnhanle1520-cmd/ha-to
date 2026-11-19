@@ -103,7 +103,7 @@ function quoteQuickSend(rec, lines) {
   function hide() { dd.style.display = 'none'; }
   function nav(kind, x) {
     hide(); inp.value = '';
-    if (kind === 'customers') { go('customers'); setTimeout(function () { var c = S.customers.filter(function (y) { return y.id === x.id; })[0]; if (c && typeof customerModal === 'function') customerModal(c, route); }, 150); }
+    if (kind === 'customers') { go('customer/' + x.id); if (false) setTimeout(function () { var c = S.customers.filter(function (y) { return y.id === x.id; })[0]; if (c && typeof customerModal === 'function') customerModal(c, route); }, 150); }
     else if (kind === 'projects') go('project/' + x.id);
     else if (kind === 'quotes') go('quote/' + x.id);
     else if (kind === 'docs') go('doc/' + x.id);

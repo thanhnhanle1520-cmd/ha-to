@@ -1952,3 +1952,35 @@ ACTIONS.export = function (u, p) {
 };
 
 
+
+/* ================= Hồ sơ khách hàng: dự án, báo giá, HĐ/PO, lịch sử giao dịch ================= */
+ACTIONS.customerBundle = function (u, p) {
+  need_(u, 'customers', 'view');
+  var cu = readTable_('CUSTOMERS').filter(function (x) { return x.id === p.id; })[0];
+  if (!cu) throw new Error('Không tìm thấy khách hàng.');
+  var cost = canCost_(u), pjs = readTable_('PROJECTS').filter(function (x) { return x.customer_id === cu.id; }), pjBy = mapBy_(pjs, 'id');
+  var pays = readTable_('PAYMENTS').filter(function (x) { return pjBy[x.project_id] && x.kind !== 'PHAI_TRA'; });
+  var paidBy = {}; pays.forEach(function (x) { paidBy[x.project_id] = (paidBy[x.project_id] || 0) + num_(x.amount); });
+  var projects = pjs.map(function (r) { var c = calcProject_(r.id), m = maskProjectCalc_(u, c); return Object.assign({ id: r.id, code: r.code, name: r.name, kind: r.kind || 'DA', status: r.status, created_at: r.created_at, paid: paidBy[r.id] || 0 }, m); })
+    .sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+  var qi = groupBy_(readTable_('QUOTE_ITEMS'), 'quote_id'), allQ = readTable_('QUOTES').filter(function (x) { return pjBy[x.project_id]; }), latest = {};
+  allQ.forEach(function (q) { if (!latest[q.code] || num_(q.version) > num_(latest[q.code].version)) latest[q.code] = q; });
+  var quotes = Object.keys(latest).map(function (k) { var q = latest[k], t = quoteTotals_(q, qi[q.id] || []); return { id: q.id, code: q.code, version: q.version, date: q.date, status: q.status || '', project_id: q.project_id, project_name: pjBy[q.project_id].name, total: t.total, sub: t.sub }; })
+    .sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+  var nF = {}; readTable_('FILES').forEach(function (x) { if (x.doc_id) nF[x.doc_id] = (nF[x.doc_id] || 0) + 1; });
+  var docs = readTable_('DOCS').filter(function (x) { return pjBy[x.project_id]; }).map(function (d) {
+    var c = calcProject_(d.project_id), e = c.docs[d.id];
+    return { id: d.id, code: d.code, type: d.type, doc_no: d.doc_no, sign_date: d.sign_date, project_id: d.project_id, project_name: pjBy[d.project_id].name, value: e ? (d.type === 'HD' && e.current_value != null ? e.current_value : e.value) : 0, vat_pct: num_(d.vat_pct), n_files: nF[d.id] || 0 };
+  }).sort(function (a, b) { return String(b.sign_date || '').localeCompare(String(a.sign_date || '')); });
+  var ev = [], TL = { HD: 'Ký hợp đồng', PO: 'Nhận PO', PLHD: 'Ký phụ lục HĐ' };
+  quotes.forEach(function (q) { ev.push({ date: q.date, kind: 'quote', title: 'Báo giá ' + q.code + (q.version > 1 ? ' (lần ' + q.version + ')' : ''), sub: q.project_name, amount: q.total, link: 'quote/' + q.id }); });
+  docs.forEach(function (d) { ev.push({ date: d.sign_date, kind: 'doc', title: (TL[d.type] || d.type) + ' ' + d.code + (d.doc_no ? ' · ' + d.doc_no : ''), sub: d.project_name, amount: round_(d.value * (1 + d.vat_pct / 100)), link: 'doc/' + d.id }); });
+  readTable_('DELIVERIES').filter(function (x) { return pjBy[x.project_id]; }).forEach(function (x) { ev.push({ date: x.date, kind: 'delivery', title: 'Giao hàng ' + x.code + ({ NHAP: ' · nháp', HUY: ' · đã hủy' }[x.status] || ''), sub: pjBy[x.project_id].name, amount: null, link: 'delivery/' + x.id }); });
+  pays.forEach(function (x) { ev.push({ date: x.date, kind: 'pay', title: 'Thu tiền' + (x.note ? ' · ' + x.note : ''), sub: pjBy[x.project_id].name, amount: num_(x.amount), link: 'project/' + x.project_id + '/payments' }); });
+  ev = ev.filter(function (e) { return e.date; }).sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); }).slice(0, 300);
+  var sum = { n_projects: projects.length, signed: 0, delivered: 0, paid: 0, n_quotes: quotes.length, n_docs: docs.length };
+  projects.forEach(function (x) { sum.signed += num_(x.value); sum.delivered += num_(x.delivered_value); sum.paid += num_(x.paid); });
+  var out = { customer: cu, projects: projects, quotes: quotes, docs: docs, events: ev, sum: sum };
+  if (!cost) projects.forEach(function (x) { delete x.cost_goods; delete x.profit; delete x.margin; });
+  return out;
+};

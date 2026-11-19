@@ -40,7 +40,7 @@ PAGES.project = function (p) {
       h('button', { onclick: function () { reconModal(pj.id); } }, 'Gói đối chiếu'), h('button', { onclick: function () { projectSummaryPrint(b); } }, 'Tóm tắt 1 trang'),
       S.perms.projects.create && S.perms.quotes.create ? h('button', { onclick: function () { confirmBox('Tạo bản sao dự án (kèm báo giá mới nhất)?', function () { safe(call('copyProject', { id: pj.id })).then(function (r) { if (r) { toast('Đã tạo ' + r.code); reloadLookups().then(function () { go('project/' + r.id); }); } }); }); } }, 'Copy dự án') : null]);
     var kp = h('div', { id: 'kpibar' },
-      h('div', { class: 'i' }, h('span', null, 'Khách hàng'), h('b', null, b.customer.name || '')),
+      h('div', { class: 'i' }, h('span', null, 'Khách hàng'), h('b', null, b.customer.id ? h('a', { href: '#/customer/' + b.customer.id, title: 'Mở hồ sơ khách hàng' }, b.customer.name || '') : (b.customer.name || ''))),
       h('div', { class: 'i' }, h('span', null, 'Trạng thái'), badge(pj.status)),
       h('div', { class: 'i' }, h('span', null, 'Giá trị thực tế (chưa VAT)' + (b.money && b.money.basis === 'PO' ? ' — theo PO' : b.money && b.money.basis === 'MIX' ? ' — theo HĐ + PO' : '')), h('b', null, M(s.value))),
       h('div', { class: 'i' }, h('span', null, 'Đã giao (theo giá trị)'), h('b', null, P(s.delivered_pct))));
