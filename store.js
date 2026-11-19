@@ -6,6 +6,7 @@
 (function () {
   'use strict';
   var Q = new URLSearchParams(location.search), LOCAL = Q.get('local') === '1';
+  var T0 = (window.performance && performance.now) ? performance.now() : 0, PERF = { ready: 0, from: '', syncs: [] };     // đo tốc độ thật trên máy người dùng
   var SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
   var ROOT_NAME = 'HA TO', DATA_NAME = 'data', BACKUP_NAME = 'Sao lưu';
   var CLIENT_ID = (window.HATO_CLIENT_ID || '') || localStorage.getItem('hato_client_id') || '';
@@ -31,7 +32,9 @@
   })();
 
   /* ---------- Trạng thái đồng bộ ---------- */
-  var meta = { email: '', versions: {}, dirty: {}, lastBackup: 0, lastSync: 0 };     // versions[name] = { id, version }
+  var meta = { email: '', versions: {}, dirty: {}, lastBackup: 0, lastSync: 0, log: [] };     // versions[name] = { id, version }
+  /* Nhật ký đồng bộ: 40 sự kiện gần nhất (kéo về, gửi lên, gộp, lỗi, sao lưu, khôi phục) — xem trong menu "Dữ liệu và đồng bộ" */
+  function logEv(kind, text) { meta.log = (meta.log || []).concat([{ t: Date.now(), k: kind, m: String(text || '').slice(0, 300) }]).slice(-40); }
   var state = { phase: 'init', msg: '', needLogin: false, conflict: false }, chip;
   function setState(patch) { Object.assign(state, patch); drawChip(); }
   function drawChip() {
@@ -39,10 +42,13 @@
     chip.innerHTML = '';
     var nd = Object.keys(meta.dirty).length, txt, col = '#16a34a';
     if (state.conflict) { txt = '⚠ Dữ liệu trên Drive đã đổi ở thiết bị khác'; col = '#dc2626'; }
+    else if (state.bad && state.bad.length) { txt = '⚠ Bỏ qua tệp lỗi trên Drive: ' + state.bad.join(', ') + ' — đang giữ dữ liệu máy này'; col = '#dc2626'; }
     else if (state.note) { txt = '🔀 ' + state.note; col = '#2563eb'; }
-    else if (state.needLogin) { txt = '🔒 Chưa đồng bộ — cần đăng nhập Google'; col = '#d97706'; }
+    else if (state.needLogin) { txt = '🔒 Chưa đồng bộ — cần đăng nhập Google' + (nd ? ' (' + nd + ' bảng chỉ mới lưu trên máy)' : ''); col = '#d97706'; }
     else if (state.phase === 'syncing') { txt = '⏳ Đang đồng bộ…'; col = '#2563eb'; }
-    else if (nd) { txt = '⏳ Có ' + nd + ' bảng chưa lưu lên Drive'; col = '#d97706'; }
+    else if (!LOCAL && !navigator.onLine) { txt = '📴 Mất mạng — ' + (nd ? nd + ' bảng đã lưu trên máy, sẽ gửi khi có mạng' : 'đang dùng dữ liệu trên máy'); col = '#d97706'; }
+    else if (state.err && nd) { txt = '⚠ Chưa gửi được lên Drive (' + nd + ' bảng lưu trên máy) — bấm để xem'; col = '#dc2626'; }
+    else if (nd) { txt = '⏳ Đã lưu trên máy · ' + nd + ' bảng chờ gửi lên Drive'; col = '#d97706'; }
     else if (LOCAL) { txt = '🧪 Chế độ thử (chỉ lưu trong trình duyệt)'; col = '#7c3aed'; }
     else { txt = '☁ Đã lưu lên Drive'; }
     chip.style.color = col; chip.appendChild(document.createTextNode(txt));
@@ -88,8 +94,8 @@
 
   var Drive = (function () {
     if (LOCAL) {                                     // giả lập: mỗi "file" là một khoá trong IndexedDB
-      var mem = null, ver = 0;
-      function all() { return mem ? Promise.resolve(mem) : IDB.get('localdrive').then(function (m) { mem = m || { files: {}, n: 0 }; return mem; }); }
+      var mem = null, memP = null, ver = 0;
+      function all() { return memP || (memP = IDB.get('localdrive').then(function (m) { mem = m || { files: {}, n: 0 }; return mem; })); }
       function save() { return IDB.set('localdrive', mem); }
       return {
         init: function () { return all().then(function () { return 'local'; }); },
@@ -98,7 +104,10 @@
         version: function (id) { return all().then(function (m) { return m.files[id] ? String(m.files[id].v) : null; }); },
         write: function (name, obj, existing) { return all().then(function (m) { var id = existing || ('data/' + name); m.files[id] = { text: JSON.stringify(obj), v: (m.files[id] ? m.files[id].v : 0) + 1 }; return save().then(function () { return { id: id, version: String(m.files[id].v) }; }); }); },
         upload: function (path, blob) { return all().then(function (m) { m.n++; var id = 'files/' + m.n + '/' + blob.getName(); m.files[id] = { text: '(tệp thử)', v: 1 }; return save().then(function () { return { id: id, url: 'https://local.invalid/' + encodeURIComponent(id) }; }); }); },
-        trash: function () { return Promise.resolve(); }, backup: function (name, obj) { return all().then(function (m) { m.files['backup/' + name] = { text: JSON.stringify(obj), v: 1 }; return save(); }); }, pruneBackups: function () { return Promise.resolve(); }
+        trash: function () { return Promise.resolve(); }, backup: function (name, obj) { return all().then(function (m) { m.files['backup/' + name] = { text: JSON.stringify(obj), v: 1, t: Date.now() }; return save(); }); }, pruneBackups: function () { return Promise.resolve(); },
+        putBlob: function (segs, name, blob) { return all().then(function (m) { return blob.arrayBuffer().then(function (ab) { m.n++; var id = 'files/' + m.n + '/' + name; m.files[id] = { text: '', bin: ab, v: 1 }; return save().then(function () { return { id: id, url: 'https://local.invalid/' + encodeURIComponent(id) }; }); }); }); },
+        download: function (id) { return all().then(function (m) { var f = m.files[id]; if (!f || !f.bin) throw new Error('Không tìm thấy file trên Drive (thử).'); return f.bin; }); },
+        listBackups: function () { return all().then(function (m) { return Object.keys(m.files).filter(function (k) { return k.indexOf('backup/') === 0; }).map(function (k) { return { id: k, name: k.slice(7), t: m.files[k].t || 0, size: m.files[k].text.length }; }).sort(function (a, b) { return b.t - a.t; }); }); }
       };
     }
     var folderIds = {}, API = 'https://www.googleapis.com/drive/v3/', UP = 'https://www.googleapis.com/upload/drive/v3/';
@@ -155,16 +164,36 @@
         var segs = path.slice(); if (segs[0] === 'HATO ERP') segs[0] = ROOT_NAME;
         return ensurePath(segs).then(function (par) { return multipart({ name: blob.getName(), parents: [par] }, new Blob([blob.getBytes()], { type: blob.getContentType() }), blob.getContentType() || 'application/octet-stream'); }).then(function (r) { return { id: r.id, url: r.webViewLink || ('https://drive.google.com/file/d/' + r.id + '/view') }; });
       },
+      putBlob: function (segs, name, blob) { return ensurePath(segs).then(function (par) { return multipart({ name: name, parents: [par] }, blob, blob.type || 'application/octet-stream'); }).then(function (r) { return { id: r.id, url: r.webViewLink || ('https://drive.google.com/file/d/' + r.id + '/view') }; }); },
+      download: function (id) { return f(API + 'files/' + id + '?alt=media').then(function (r) { return r.arrayBuffer(); }); },
       trash: function (id) { return j(API + 'files/' + id + '?fields=id', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) }).catch(function () { }); },
       backup: function (name, obj) { return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return multipart({ name: name, parents: [par], mimeType: 'application/json' }, JSON.stringify(obj), 'application/json'); }); },
+      listBackups: function () { return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=createdTime desc&fields=files(id,name,createdTime,size)&pageSize=100'); }).then(function (r) { return (r.files || []).map(function (x) { return { id: x.id, name: x.name, t: Date.parse(x.createdTime) || 0, size: +x.size || 0 }; }); }); },
       pruneBackups: function (keep) {
-        return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=name desc&fields=files(id,name)&pageSize=200'); }).then(function (r) { return Promise.all((r.files || []).slice(keep).map(function (x) { return Drive.trash(x.id); })); }).catch(function () { });
+        return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=createdTime desc&fields=files(id,name)&pageSize=200'); }).then(function (r) { return Promise.all((r.files || []).slice(keep).map(function (x) { return Drive.trash(x.id); })); }).catch(function () { });
       }
     };
   })();
 
+  /* ---------- Kiểm tra tệp JSON trước khi nhận (tệp hỏng / rỗng bất thường thì không ghi đè dữ liệu máy này) ---------- */
+  var acceptEmpty = {};
+  function checkPayload(n, p) {
+    if (!p || typeof p !== 'object') return 'không phải JSON hợp lệ';
+    if (n === '_props') return (p.props && typeof p.props === 'object') ? '' : 'thiếu phần props';
+    if (!Array.isArray(p.rows)) return 'thiếu danh sách dòng';
+    for (var i = 0; i < p.rows.length; i++) if (!Array.isArray(p.rows[i])) return 'dòng ' + (i + 1) + ' sai cấu trúc';
+    if (p.rows.length && !(p.rows[0] || []).length) return 'mất dòng tiêu đề';
+    var sh = wb.sheets[n], have = sh ? Math.max(0, sh.exportRows().length - 1) : 0;
+    if (have >= 5 && p.rows.length <= 1 && !LOGT[n] && !acceptEmpty[n]) return 'rỗng bất thường (máy này đang có ' + have + ' dòng)';
+    return '';
+  }
+  function readChecked(n, id) {
+    return Drive.read(id).then(function (p) { var e = checkPayload(n, p); if (e) throw new Error(e); return p; }, function (e) { throw new Error('không đọc được (' + ((e && e.message) || e) + ')'); });
+  }
+
   /* ---------- Lưu / nạp dữ liệu ---------- */
   var FILE = function (n) { return n + '.json'; };
+  var LOGT = { AUDIT: 1, ERRLOG: 1 };
   function sheetPayload(n) { return n === '_props' ? { props: wb.props } : { rows: wb.sheets[n].exportRows() }; }
   function applyPayload(n, p) { if (n === '_props') { wb.props = p.props || {}; return; } var s = wb.sheets[n]; if (!s) { wb.addSheet(n, p.rows || []); return; } s.g = p.rows || []; s.max = Math.max(1000, s.g.length + 200); }
 
@@ -186,7 +215,7 @@
     }).catch(function () { return false; });
   }
 
-  var LOGT = { AUDIT: 1, ERRLOG: 1 };
+
   var pushing = Promise.resolve(), pushTimer = null;
   wb.onChange = function (n) { meta.dirty[n] = 1; };
   function afterApi() {                                // gọi sau mỗi lần chạy api()
@@ -241,8 +270,8 @@
   function doSync(attempt) {
     attempt = typeof attempt === 'number' ? attempt : 0;
     if (state.conflict) return Promise.resolve();
-    setState({ phase: 'syncing' });
-    var merged = [], pulled = false;
+    var ts = Date.now(); setState({ phase: 'syncing' });
+    var merged = [], pulled = false, bad = [], pushed = [], got = [];
     return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
       var tasks = [];
       remote.forEach(function (x) {
@@ -251,19 +280,19 @@
         tasks.push({ n: n, x: x, merge: !!meta.dirty[n] });
       });
       return seq(tasks, function (t) {
-        return Drive.read(t.x.id).then(function (p) {
-          if (!t.merge) { applyPayload(t.n, p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return saveBase(t.n, p).then(function () { return persistLocal([t.n]); }); }
+        return readChecked(t.n, t.x.id).then(function (p) {
+          if (!t.merge) { applyPayload(t.n, p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; got.push(t.n); return saveBase(t.n, p).then(function () { return persistLocal([t.n]); }); }
           if (t.n === '_props') { wb.props = Object.assign({}, p.props || {}, wb.props || {}); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return persistLocal([t.n]); }
           return IDB.get('base:' + t.n).then(function (b) {
             var loc = wb.sheets[t.n] ? wb.sheets[t.n].exportRows() : [];
             applyPayload(t.n, { rows: mergeRows(t.n, b && b.rows, loc, p.rows || []) });
             meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; merged.push(t.n); return persistLocal([t.n]);
           });
-        });
+        }, function (e) { bad.push(t.n); logEv('error', t.n + '.json trên Drive ' + e.message + ' — giữ dữ liệu máy này, không ghi đè'); });
       });
     }).then(function () {
       if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
-      var names = Object.keys(meta.dirty).filter(function (n) { return n === '_props' || wb.sheets[n]; });
+      var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || wb.sheets[n]) && bad.indexOf(n) < 0; });   // bảng có tệp lỗi: không ghi đè, chờ xử lý
       return seq(names, function (n) {
         var k = meta.versions[n], pl = sheetPayload(n);
         return (n !== '_props' && merged.indexOf(n) < 0 && k && k.id ? IDB.get('base:' + n) : Promise.resolve(null)).then(function (b) {
@@ -273,19 +302,23 @@
             if (k && k.id && v != null && String(v) !== String(k.version)) { meta.dirty[n] = 1; throw RETRY; }   // thiết bị khác vừa ghi: gộp lại trước khi ghi
             return Drive.write(FILE(n), pl, k && k.id);
           }).then(function (r) {
-            meta.versions[n] = r; if (meta.dirty[n] === 2) delete meta.dirty[n];
-            return saveBase(n, pl).then(function () { return IDB.set('meta', clone(meta)); });
+            meta.versions[n] = r; if (meta.dirty[n] === 2) delete meta.dirty[n]; pushed.push(n);
+            return saveBase(n, pl).then(function () { return persistLocal([n]); });     // bản trong máy luôn khớp bản vừa gửi lên Drive
           }, function (e) { if (meta.dirty[n] === 2) meta.dirty[n] = 1; throw e; });
         });
       });
     }).then(function () {
       meta.lastSync = Date.now();
-      if (merged.length) { setState({ note: 'Đã gộp thay đổi từ thiết bị khác (' + merged.join(', ') + ')' }); setTimeout(function () { setState({ note: '' }); }, 8000); }
-      return maybeBackup();
-    }).then(function () { setState({ phase: 'idle', needLogin: false, msg: '' }); }, function (e) {
+      if (got.length) logEv('pull', 'Nhận từ Drive: ' + got.join(', '));
+      if (merged.length) { logEv('merge', 'Gộp với thiết bị khác: ' + merged.join(', ')); setState({ note: 'Đã gộp thay đổi từ thiết bị khác (' + merged.join(', ') + ')' }); setTimeout(function () { setState({ note: '' }); }, 8000); }
+      if (pushed.length) logEv('push', 'Gửi lên Drive: ' + pushed.join(', '));
+      PERF.syncs = PERF.syncs.concat([{ t: Date.now(), ms: Date.now() - ts, n: got.length + merged.length + pushed.length }]).slice(-20);
+      return IDB.set('meta', clone(meta)).then(maybeBackup);
+    }).then(function () { setState({ phase: 'idle', needLogin: false, msg: bad.length ? 'Tệp lỗi trên Drive: ' + bad.join(', ') : '', err: false, bad: bad }); }, function (e) {
       if (e === RETRY) { if (attempt < 3) return doSync(attempt + 1); setState({ phase: 'idle', msg: 'Thiết bị khác đang ghi liên tục — sẽ thử lại.' }); setTimeout(syncNow, 15000); return; }
       var m = String((e && e.message) || e), login = /popup|access_denied|immediate_failed|login|consent|401|Client ID|đăng nhập/i.test(m);
-      setState({ phase: 'idle', needLogin: login, msg: m }); if (!login && !LOCAL) setTimeout(function () { if (Object.keys(meta.dirty).length) syncNow(); }, 30000);
+      if (!login) { logEv('error', m); IDB.set('meta', clone(meta)).catch(function () { }); }
+      setState({ phase: 'idle', needLogin: login, msg: m, err: !login }); if (!login && !LOCAL) setTimeout(function () { if (Object.keys(meta.dirty).length) syncNow(); }, 30000);
     });
   }
   function resolveConflict() {
@@ -302,16 +335,39 @@
   }
 
   /* ---------- Sao lưu ---------- */
-  var backups = [];
-  function queueBackup(name) { backups.push(name); setTimeout(runBackups, 50); }
-  function runBackups() {
-    if (!backups.length) return;
-    var name = backups.shift(), snap = wb.snapshot();
-    signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.backup(name, snap); }).then(function () { return Drive.pruneBackups(30); }).then(function () { meta.lastBackup = Date.now(); return IDB.set('meta', clone(meta)); }).catch(function (e) { setState({ msg: 'Sao lưu lỗi: ' + e.message }); });
+  /* Bản sao lưu được chụp NGAY lúc gọi (không phải lúc tải lên), giữ 30 bản mới nhất trong thư mục "HA TO/Sao lưu". */
+  function stamp() { return Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd HH-mm'); }
+  function backupNow(name) {
+    var snap = clone(wb.snapshot());
+    return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.backup(name, snap); }).then(function () { return Drive.pruneBackups(30); })
+      .then(function () { meta.lastBackup = Date.now(); logEv('backup', name); return IDB.set('meta', clone(meta)); })
+      .catch(function (e) { logEv('error', 'Sao lưu lỗi: ' + e.message); setState({ msg: 'Sao lưu lỗi: ' + e.message }); throw e; });
+  }
+  function queueBackup(name) { return backupNow(name).catch(function () { }); }
+  function checkSnapshot(sn) {
+    if (!sn || typeof sn !== 'object' || !sn.sheets || typeof sn.sheets !== 'object') return 'Tệp sao lưu không đúng cấu trúc.';
+    var ns = Object.keys(sn.sheets); if (!ns.length) return 'Tệp sao lưu không có bảng nào.';
+    for (var i = 0; i < ns.length; i++) { var r = sn.sheets[ns[i]]; if (!Array.isArray(r) || r.some(function (x) { return !Array.isArray(x); })) return 'Bảng ' + ns[i] + ' trong tệp sao lưu bị lỗi.'; }
+    if (!sn.sheets.PROJECTS && !sn.sheets.CUSTOMERS) return 'Tệp không phải bản sao lưu HA TO.';
+    return '';
+  }
+  function listBackups() { return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.listBackups(); }); }
+  function restoreBackup(id, name) {
+    var sn;
+    return Drive.read(id).then(function (x) { sn = x; var e = checkSnapshot(sn); if (e) throw new Error(e); })
+      .then(function () { return backupNow('HA TO trước khi khôi phục ' + stamp() + '.json'); })          // giữ lại dữ liệu hiện tại trước đã
+      .then(function () {
+        var counters = wb.sheets.COUNTERS ? wb.sheets.COUNTERS.exportRows() : null;
+        wb.load({ sheets: sn.sheets, props: sn.props || {} }); env.resetCache();
+        if (counters && wb.sheets.COUNTERS) wb.sheets.COUNTERS.g = mergeRows('COUNTERS', null, wb.sheets.COUNTERS.exportRows(), counters);   // giữ số thứ tự lớn nhất để không cấp trùng số chứng từ
+        Object.keys(wb.sheets).forEach(function (n) { meta.dirty[n] = 1; }); meta.dirty._props = 1;
+        logEv('restore', 'Khôi phục từ ' + name);
+        return persistLocal(Object.keys(wb.sheets).concat(['_props']));
+      }).then(function () { return syncNow(); });
   }
   function maybeBackup() {
     if (Date.now() - (meta.lastBackup || 0) < 24 * 3600e3 || !Object.keys(wb.sheets).length) return Promise.resolve();
-    var name = 'HA TO sao lưu ' + Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd HH:mm') + '.json'; queueBackup(name); return Promise.resolve();
+    queueBackup('HA TO sao lưu ' + stamp() + '.json'); return Promise.resolve();
   }
 
   /* ---------- Tệp đính kèm: Code.gs "tạo file" giả → tải lên Drive thật rồi thay đường dẫn ---------- */
@@ -366,10 +422,23 @@
   }
   function firstLoad(interactive) {
     signIn(interactive).then(function () { showGate([el('p', null, 'Đang tải dữ liệu từ Drive…')]); return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
-      return Promise.all(remote.map(function (x) { return Drive.read(x.id).then(function (p) { var n = x.name.replace(/\.json$/, ''); applyPayload(n, p); meta.versions[n] = { id: x.id, version: x.version }; return saveBase(n, p).then(function () { return n; }); }); }));
-    }).then(function (names) { return persistLocal(names); }).then(function () { start(); }).catch(function (e) { askLogin('Không đăng nhập được: ' + e.message); });
+      return Promise.all(remote.map(function (x) { var n = x.name.replace(/\.json$/, ''); return readChecked(n, x.id).catch(function (e) { throw new Error('Tệp ' + x.name + ' trên Drive ' + e.message + '. Hãy khôi phục từ thư mục "HA TO/Sao lưu".'); }).then(function (p) { applyPayload(n, p); meta.versions[n] = { id: x.id, version: x.version }; return saveBase(n, p).then(function () { return n; }); }); }));
+    }).then(function (names) { return persistLocal(names); }).then(function () { PERF.firstLoad = Math.round(performance.now() - T0); start(); }).catch(function (e) { askLogin('Không đăng nhập được: ' + e.message); });
   }
-  function start() { isReady = true; hideGate(); readyResolve(); drawChip(); syncNow(); }
+  function start() {
+    var from = wb.props && wb.props.SCHEMA, to = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+    if (from && to && from !== to) {                 // bản mới sẽ thêm cột / đổi cấu trúc: chụp dữ liệu cũ trước (lưu cả trong máy lẫn trên Drive)
+      var snap = clone(wb.snapshot()); IDB.set('preupgrade', { from: from, to: to, t: Date.now(), snap: snap }).catch(function () { });
+      logEv('backup', 'Chụp dữ liệu trước nâng cấp ' + from + ' → ' + to);
+      signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.backup('HA TO trước nâng cấp ' + from + ' sang ' + to + ' ' + stamp() + '.json', snap); }).catch(function () { });
+    }
+    isReady = true; hideGate(); readyResolve(); drawChip(); syncNow();
+    PERF.ready = Math.round(performance.now() - T0);
+  }
+  function perfInfo() {               // dung lượng từng bảng + thời gian mở app / đồng bộ
+    var sizes = Object.keys(wb.sheets).map(function (n) { var len = 0; try { len = JSON.stringify(wb.sheets[n].exportRows()).length; } catch (e) { } return { name: n, bytes: len, rows: Math.max(0, wb.sheets[n].exportRows().length - 1) }; }).sort(function (a, b) { return b.bytes - a.bytes; });
+    return { ready: PERF.ready, firstLoad: PERF.firstLoad || 0, syncs: PERF.syncs.slice(), sizes: sizes, total: sizes.reduce(function (s, x) { return s + x.bytes; }, 0) };
+  }
   function boot() {
     if (!LOCAL && !CLIENT_ID) return askClientId();
     loadLocal().then(function (has) {
@@ -380,11 +449,59 @@
   }
   window.addEventListener('beforeunload', function (e) { if (!window.__redirecting && Object.keys(meta.dirty).length && !state.needLogin) { e.preventDefault(); e.returnValue = ''; } });
   window.addEventListener('online', function () { syncNow(); });
+  window.addEventListener('offline', function () { drawChip(); });
+  /* Đăng xuất: xóa token và toàn bộ dữ liệu trong máy (dữ liệu vẫn nằm trên Drive). Không cho đăng xuất khi còn dữ liệu chưa gửi lên Drive. */
+  function signOut() {
+    var nd = Object.keys(meta.dirty).length;
+    if (nd && !LOCAL) return Promise.reject(new Error('Còn ' + nd + ' bảng chưa gửi lên Drive. Hãy đồng bộ xong rồi mới đăng xuất.'));
+    var t = token.v; token = { v: '', exp: 0 };
+    ['hato_token', 'hato_email'].forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
+    if (t && !LOCAL) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }).catch(function () { });
+    window.__redirecting = true;
+    return new Promise(function (res) { var r = indexedDB.deleteDatabase(LOCAL ? 'hato_local' : 'hato_app'); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }).then(function () { location.replace(location.pathname + location.search); });
+  }
   setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, 60000);     // tự lấy thay đổi từ thiết bị khác
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && isReady) syncNow(); });
   if (LOCAL) window.__hatoDrive = Drive;      // chỉ chế độ thử: để kiểm tra gộp dữ liệu giữa hai "thiết bị"
-  window.HatoStore = { queueBackup: queueBackup, syncNow: syncNow, meta: function () { return meta; }, state: state, env: env, ready: readyP, signIn: signIn,
+  /* Xử lý bảng có tệp lỗi trên Drive: dùng bản trên Drive (kể cả rỗng) hoặc ghi bản máy này đè lên */
+  function useRemote(n) { acceptEmpty[n] = 1; delete meta.versions[n]; delete meta.dirty[n]; logEv('restore', 'Chọn dùng bản trên Drive cho ' + n); return syncNow(); }
+  function useLocal(n) {
+    return Drive.init().then(function () { return Drive.list(); }).then(function (rm) {
+      rm.forEach(function (x) { if (x.name === FILE(n)) meta.versions[n] = { id: x.id, version: x.version }; });
+      meta.dirty[n] = 1; logEv('restore', 'Chọn ghi bản máy này lên Drive cho ' + n); return syncNow();
+    });
+  }
+  /* File gốc của khách (nhập Excel): lưu lên Drive + giữ một bản trong máy để dùng khi mất mạng / xuất ngược nhanh */
+  function putFile(key, file, segs) {
+    return file.arrayBuffer().then(function (ab) {
+      return IDB.set('file:' + key, { name: file.name, type: file.type, bin: ab }).then(function () {
+        return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.putBlob([ROOT_NAME].concat(segs || []), file.name, new Blob([ab], { type: file.type || 'application/octet-stream' })); })
+          .then(function (r) { logEv('push', 'Tải file lên Drive: ' + file.name); return r; }, function (e) { logEv('error', 'Chưa tải được file ' + file.name + ' lên Drive: ' + e.message + ' (vẫn giữ trong máy)'); return { id: '', url: '', err: e.message }; });
+      });
+    });
+  }
+  function getFile(key, driveId) {
+    return IDB.get('file:' + key).then(function (x) {
+      if (x && x.bin) return x.bin;
+      if (!driveId) throw new Error('Không tìm thấy file gốc trong máy và chưa có bản trên Drive.');
+      return signIn(false).then(function () { return Drive.download(driveId); }).then(function (ab) { IDB.set('file:' + key, { bin: ab }).catch(function () { }); return ab; });
+    });
+  }
+  window.HatoStore = { perf: perfInfo, putFile: putFile, getFile: getFile, useRemote: useRemote, useLocal: useLocal, queueBackup: queueBackup, backupNow: backupNow, listBackups: listBackups, restoreBackup: restoreBackup, signOut: signOut, syncNow: syncNow, meta: function () { return meta; }, state: state, env: env, ready: readyP, signIn: signIn, isLocal: LOCAL,
     importWorkbook: function (snap) { wb.load(snap); env.resetCache(); Object.keys(wb.sheets).forEach(function (n) { meta.dirty[n] = 1; }); meta.dirty._props = 1; return persistLocal(Object.keys(wb.sheets).concat(['_props'])).then(function () { return syncNow(); }); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
-  if ('serviceWorker' in navigator && !LOCAL) navigator.serviceWorker.register('sw.js').catch(function () { });
+  if ('serviceWorker' in navigator && !LOCAL) {
+    var hadCtl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(function (reg) { setInterval(function () { reg.update().catch(function () { }); }, 30 * 60e3); }).catch(function () { });
+    navigator.serviceWorker.addEventListener('controllerchange', function () { if (hadCtl) showUpdate(); hadCtl = true; });
+  }
+  function showUpdate() {                           // bản mới đã tải xong ngầm: mời tải lại (không tự tải lại để khỏi mất dữ liệu đang nhập)
+    if (document.getElementById('hato-upd')) return;
+    var b = el('div', { id: 'hato-upd', style: 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:10002;background:#0f1b3d;color:#fff;border-radius:10px;padding:9px 14px;font:14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center' }, [
+      el('span', null, '✨ Đã có bản HA TO mới'),
+      el('button', { style: 'border:0;background:#e11d48;color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer', onclick: function () { if (window.ACTIVE_DRAFTS) ACTIVE_DRAFTS.forEach(function (c) { try { c.flush(); } catch (e) { } }); location.reload(); } }, 'Tải lại'),
+      el('button', { style: 'border:0;background:transparent;color:#cbd5e1;cursor:pointer', onclick: function () { b.remove(); } }, 'Để sau')]);
+    document.body.appendChild(b);
+  }
+  window.__hatoShowUpdate = showUpdate;
 })();

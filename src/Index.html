@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HA TO</title>
+<?!= include('Css'); ?>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/vn.js"></script>
+</head>
+<body>
+<div id="loading"></div>
+<nav id="nav"></nav>
+<div id="main">
+  <div id="bar"><h1 id="title">HA TO</h1><div class="acts" id="acts"></div></div>
+  <div id="view"><div class="mut" style="padding:20px">Đang tải…</div></div>
+</div>
+<div id="modals"></div>
+<div id="toasts"></div>
+<?!= include('Js_core'); ?>
+<?!= include('Js_pages'); ?>
+<?!= include('Js_project'); ?>
+<?!= include('Js_docs'); ?>
+<?!= include('Js_config'); ?>
+<?!= include('Js_import'); ?>
+<?!= include('Js_extra'); ?>
+<?!= include('Js_rfq'); ?>
+</body>
+</html>

@@ -1,0 +1,12 @@
+const { makeEnv } = require('./harness2');
+let pass = 0, fail = 0; const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗ FAIL:', m); } };
+const E = makeEnv(__dirname + '/../src/Code.gs');
+const call = (a, p) => { E.X.setRT({}); return E.X.api(a, p); }; const must = r => { if (!r.ok) throw new Error('API lỗi: ' + r.error); return r.data; };
+const b = must(call('bootstrap', {})); ok(b.user && b.user.role === 'ADMIN', 'bootstrap: người đầu tiên là ADMIN (' + b.user.email + ')');
+const c = must(call('save', { table: 'customers', rec: { name: 'Cty A', tax_code: '0312345678' } })); ok(!!c.id, 'tạo khách hàng');
+const p = must(call('save', { table: 'projects', rec: { name: 'DA 1', customer_id: c.id } })); ok(!!p.code, 'tạo dự án ' + p.code);
+const q = must(call('save', { table: 'quotes', rec: { project_id: p.id, vat_pct: 10 }, items: [{ name: 'Hàng', qty: 2, price: 1000 }] })).quote; ok(q.code, 'tạo báo giá ' + q.code);
+const r = call('export', { kind: 'quote', id: q.id, format: 'html' }); ok(r.ok && /<html/.test(r.data.html), 'xuất bản in HTML');
+const dirty = Object.keys(E.env.wb.dirty); ok(dirty.includes('CUSTOMERS') && dirty.includes('QUOTES'), 'đánh dấu bảng đã đổi: ' + dirty.join(','));
+const snap = E.env.wb.snapshot(); ok(Array.isArray(snap.sheets.CUSTOMERS) && snap.sheets.CUSTOMERS.length === 2, 'snapshot có 2 dòng (tiêu đề + 1 khách)');
+console.log(`\n${pass} đạt, ${fail} lỗi`); process.exit(fail ? 1 : 0);

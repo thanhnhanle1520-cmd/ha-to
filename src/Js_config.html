@@ -1,0 +1,60 @@
+<script>
+'use strict';
+/* ---- Cấu hình ---- */
+function imgBox(name, label, maxW, outType) {
+  var pv = h('img', { style: 'max-width:100%;max-height:150px;border:1px dashed #d1d5db;background:#fff;display:block;margin:6px 0' }), fi = h('input', { type: 'file', accept: 'image/png,image/jpeg' });
+  function load() { safe(call('getImages')).then(function (r) { if (r) pv.src = r[name] || ''; }); }
+  function save(dataUrl) { return safe(call('saveImage', { name: name, dataUrl: dataUrl })).then(function (r) { if (r) { toast('Đã lưu hình'); load(); } }); }
+  var tools = S.perms.config.edit ? h('div', { class: 'bar2' }, fi, h('button', { class: 'pri', onclick: function () {
+    var f = fi.files[0]; if (!f) return toast('Chọn ảnh trước', true);
+    var fr = new FileReader(); fr.onload = function () { var im = new Image(); im.onload = function () {
+      var w = Math.min(maxW, im.width), hh = Math.round(im.height * w / im.width), c = document.createElement('canvas'); c.width = w; c.height = hh;
+      var cx = c.getContext('2d'); if (outType === 'image/jpeg') { cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, hh); } cx.drawImage(im, 0, 0, w, hh);
+      save(c.toDataURL(outType, 0.8));
+    }; im.src = fr.result; }; fr.readAsDataURL(f);
+  } }, 'Lưu hình mới'), h('button', { onclick: function () { confirmBox('Khôi phục hình mặc định của HATO?', function () { save(''); }); } }, 'Khôi phục mặc định')) : null;
+  load();
+  return h('div', { style: 'margin-bottom:12px' }, h('b', null, label), pv, tools);
+}
+PAGES.config = function () {
+  setTitle('Cấu hình hệ thống');
+  return call('getConfig').then(function (d) {
+    var v = $('#view'), cfg = d.cfg, ed = S.perms.config.edit; v.innerHTML = '';
+    var ff = form([{ k: 'company_name', label: 'Tên công ty', full: true }, { k: 'tax_code', label: 'MST' }, { k: 'address', label: 'Địa chỉ', full: true }, { k: 'phone', label: 'Điện thoại' }, { k: 'hotline', label: 'Hotline' }, { k: 'email', label: 'Email' }, { k: 'website', label: 'Website' },
+      { k: 'director', label: 'Giám đốc' }, { k: 'sales_name', label: 'Kinh doanh' }, { k: 'bank1', label: 'Tài khoản ngân hàng 1', full: true, ph: 'Số TK - Ngân hàng - Chủ TK' }, { k: 'bank2', label: 'Tài khoản ngân hàng 2', full: true }, { k: 'brand_color', label: 'Màu thương hiệu (#rrggbb)' }, { k: 'drive_root_id', label: 'ID thư mục Drive gốc (tuỳ chọn)' }], cfg);
+    var ct = h('textarea', { value: (cfg.cost_types || []).join('\n') });
+    var cp = []; try { cp = JSON.parse(cfg.cert_params || '[]'); } catch (e) { }
+    var cpt = h('textarea', { value: cp.join('\n'), style: 'min-height:90px' });
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Thông tin công ty'), ff.el));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Danh mục loại chi phí (mỗi dòng một loại)'), ct));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Thông số mặc định của Phiếu xuất xưởng (tự điền)'), h('div', { class: 'mut', style: 'margin-bottom:6px' }, 'Mỗi dòng: Mô tả | Thông số | Ghi chú. Dòng Kích thước được tự lấy từ tên thiết bị (KT 1450x1200x250mm).'), cpt));
+    if (ed) v.appendChild(h('div', { class: 'bar2' }, h('button', { class: 'pri', onclick: function () { var c = ff.get(); c.cost_types = ct.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean); c.cert_params = JSON.stringify(cpt.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean)); safe(call('saveConfig', { cfg: c })).then(function (r) { if (r) { toast('Đã lưu cấu hình'); call('bootstrap').then(function (b) { S.cfg = b.cfg; }); } }); } }, 'Lưu cấu hình')));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Hình ảnh chứng từ'), h('div', { class: 'mut', style: 'margin-bottom:8px' }, 'Logo hiện bên trái đầu Báo giá, TBGH, Tạm ứng, Thanh toán, Bảo hành, Xuất xưởng; bên cạnh là tên, địa chỉ, điện thoại, MST, website lấy từ Thông tin công ty.'), imgBox('logo', 'Logo công ty (nên cắt sát, nền trắng/trong suốt)', 600, 'image/png')));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Người dùng & vai trò'),
+      table({ rows: d.users, cols: [{ k: 'email', label: 'Email' }, { k: 'name', label: 'Tên' }, { k: 'role', label: 'Vai trò', fmt: function (r) { return d.roles[r.role] || r.role; } }, { k: 'active', label: 'Trạng thái', fmt: function (r) { return h('span', { class: 'badge ' + (r.active ? 'b-ok' : 'b-bad') }, r.active ? 'Hoạt động' : 'Đã khóa'); } }], onRow: ed ? function (r) { userModal(r, d.roles); } : null,
+        tools: ed ? [h('button', { onclick: function () { userModal({ active: 1, role: 'KD' }, d.roles); } }, '+ Người dùng')] : [] })));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Hệ thống'), h('p', null, 'Phiên bản dữ liệu: ' + d.version), ed ? h('button', { onclick: function () { safe(call('backup')).then(function (r) { if (r) toast('Đã sao lưu: ' + r.name); }); } }, 'Sao lưu ngay') : null, ed ? h('button', { style: 'margin-left:8px', onclick: function () { safe(call('errorLog')).then(function (rows) { if (!rows) return; modal({ title: 'Nhật ký lỗi máy chủ (100 dòng gần nhất)', wide: true, body: rows.length ? table({ rows: rows, pageSize: 25, cols: [{ k: 'ts', label: 'Lúc' }, { k: 'user', label: 'Người dùng' }, { k: 'action', label: 'Thao tác' }, { k: 'message', label: 'Nội dung lỗi' }] }) : h('p', { class: 'mut' }, 'Chưa có lỗi nào được ghi.'), buttons: [], closeLabel: 'Đóng' }); }); } }, 'Xem nhật ký lỗi') : null, h('p', { class: 'mut' }, 'Sao lưu tự động mỗi ngày (giữ 14 bản gần nhất) sau khi chạy hàm setup() một lần.')));
+  });
+};
+function userModal(u, roles) {
+  var f = form([{ k: 'email', label: 'Email Google', req: true, disabled: !!u.name }, { k: 'name', label: 'Tên hiển thị' }, { k: 'phone', label: 'Số điện thoại (in trên báo giá)' }, { k: 'role', label: 'Vai trò', type: 'select', opts: Object.keys(roles).map(function (k) { return [k, roles[k]]; }) }, { k: 'active', label: 'Trạng thái', type: 'select', opts: [['1', 'Hoạt động'], ['0', 'Khóa']] }], Object.assign({}, u, { active: String(u.active ? 1 : 0) }));
+  modal({ title: 'Người dùng', body: f.el, buttons: [{ label: 'Lưu người dùng', cls: 'pri', fn: function (c) { var o = f.get(); o.active = num(o.active); safe(call('saveUser', { rec: o })).then(function (r) { if (r) { c(); route(); } }); } }] });
+}
+
+/* ================= Khởi động ================= */
+function applyBrand() { if (S.cfg && /^#[0-9a-f]{6}$/i.test(S.cfg.brand_color || '')) document.documentElement.style.setProperty('--brand', S.cfg.brand_color); }
+function init() {
+  if (typeof google === 'undefined' || !google.script) { $('#view').textContent = 'Ứng dụng cần chạy trong Google Apps Script (Web app).'; return; }
+  function apply(b) { S.user = b.user; S.perms = b.perms; S.cfg = b.cfg; S.customers = b.customers; S.projects = b.projects; S.roles = b.roles; S.boot = b; applyBrand(); buildNav(); }
+  var cached = cacheLoad(), shown = false;
+  if (cached) { try { apply(cached.boot); route(); shown = true; } catch (e) { shown = false; } }      // hiện ngay bằng dữ liệu lần trước
+  call('bootstrap').then(function (b) {
+    var changed = !shown || JSON.stringify(b) !== JSON.stringify(cached && cached.boot);
+    if (shown && cached.user && b.user && cached.user !== b.user.email) { MEMO = {}; }                  // đổi người dùng: bỏ dữ liệu cũ
+    if (changed) { apply(b); route(); } else S.boot = b;
+    setTimeout(prefetch, shown ? 300 : 600); setTimeout(pollVersion, 1500); if (!window.__poll) window.__poll = setInterval(pollVersion, 60000);
+  })
+    .catch(function (e) { $('#view').innerHTML = ''; $('#view').appendChild(h('div', { class: 'card neg' }, 'Không thể khởi động: ' + (e && e.message))); });
+}
+init();
+</script>

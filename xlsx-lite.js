@@ -16,12 +16,13 @@
       var name = new TextDecoder().decode(d.subarray(p + 46, p + 46 + nlen));
       (function (name, method, csize, lho) {
         var ln = u16(d, lho + 26), le = u16(d, lho + 28), start = lho + 30 + ln + le, data = d.subarray(start, start + csize);
-        tasks.push((method === 0 ? Promise.resolve(data) : inflate(data)).then(function (b) { files[name] = new TextDecoder().decode(b); }));
+        tasks.push((method === 0 ? Promise.resolve(data.slice()) : inflate(data)).then(function (b) { files[name] = b; }));
       })(name, method, csize, lho);
       p += 46 + nlen + elen + clen;
     }
     return Promise.all(tasks).then(function () { return files; });
   }
+  function texts(bin) { var o = {}; Object.keys(bin).forEach(function (k) { if (/\.(xml|rels)$/i.test(k)) o[k] = new TextDecoder().decode(bin[k]); }); return o; }
   function xml(s) { return new DOMParser().parseFromString(s, 'application/xml'); }
   function colIdx(ref) { var m = /^([A-Z]+)/.exec(ref)[1], n = 0; for (var i = 0; i < m.length; i++) n = n * 26 + (m.charCodeAt(i) - 64); return n - 1; }
   function textOf(si) { var ts = si.getElementsByTagName('t'), s = ''; for (var i = 0; i < ts.length; i++) { var par = ts[i].parentNode.nodeName; if (par === 'rPh') continue; s += ts[i].textContent; } return s; }
@@ -31,8 +32,11 @@
     var ds = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
     return t ? ds + ' ' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds()) : ds;
   }
-  function read(buf) {
-    return unzip(buf).then(function (f) {
+  function read(buf) { return readFull(buf).then(function (x) { var o = {}; x.sheets.forEach(function (s) { o[s.name] = s.rows; }); return o; }); }
+  /* readFull: như read() nhưng giữ thêm vùng gộp ô, đường dẫn trang tính trong file và toàn bộ nội dung gốc (để điền ngược giữ nguyên định dạng) */
+  function readFull(buf) {
+    return unzip(buf).then(function (bin) { var f = texts(bin);
+      if (!f['xl/workbook.xml']) throw new Error('Không phải file .xlsx hợp lệ.');
       var wbx = xml(f['xl/workbook.xml']), rels = xml(f['xl/_rels/workbook.xml.rels']), relMap = {};
       [].forEach.call(rels.getElementsByTagName('Relationship'), function (r) { var t = r.getAttribute('Target'); relMap[r.getAttribute('Id')] = t.charAt(0) === '/' ? t.slice(1) : 'xl/' + t; });
       var sst = []; if (f['xl/sharedStrings.xml']) [].forEach.call(xml(f['xl/sharedStrings.xml']).getElementsByTagName('si'), function (si) { sst.push(textOf(si)); });
@@ -45,7 +49,7 @@
           if ((+id >= 14 && +id <= 22) || (+id >= 45 && +id <= 47) || (code && /[ymd]/i.test(code.replace(/"[^"]*"|\[[^\]]*\]|\\./g, '')) && !/[#0]/.test(code.replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, '')))) dateStyle[i] = 1;
         });
       }
-      var out = {};
+      var out = [];
       [].forEach.call(wbx.getElementsByTagName('sheet'), function (sh) {
         var name = sh.getAttribute('name'), rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'), path = relMap[rid], sx = f[path]; if (!sx) return;
         var rows = [], rowEls = xml(sx).getElementsByTagName('row');
@@ -63,10 +67,12 @@
           }
           while (rows.length < rn) rows.push([]); rows[rn] = row;
         }
-        out[name] = rows;
+        var merges = [], me = xml(sx).getElementsByTagName('mergeCell');
+        for (var m = 0; m < me.length; m++) { var rg = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(me[m].getAttribute('ref') || ''); if (rg) merges.push({ r1: +rg[2] - 1, c1: colIdx(rg[1]), r2: +rg[4] - 1, c2: colIdx(rg[3]) }); }
+        out.push({ name: name, path: path, rows: rows, merges: merges });
       });
-      return out;
+      return { sheets: out, files: bin };
     });
   }
-  root.XlsxLite = { read: read };
+  root.XlsxLite = { read: read, readFull: readFull, unzip: unzip, colIdx: colIdx };
 })(window);

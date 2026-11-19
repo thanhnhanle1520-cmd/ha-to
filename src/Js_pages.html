@@ -1,0 +1,233 @@
+<script>
+'use strict';
+/* ---- Dashboard ---- */
+function pnlChart(rows) {
+  var d = rows.slice().sort(function (a, b) { return b.value - a.value; }).slice(0, 12);
+  if (!d.length) return h('div', { class: 'mut', style: 'padding:30px 0;text-align:center' }, 'Chưa có dữ liệu');
+  var max = 0; d.forEach(function (r) { max = Math.max(max, r.value, r.cost_goods + r.cost_hato, Math.abs(r.profit)); }); max = max || 1;
+  var bw = 74, W = Math.max(520, d.length * bw + 52), H = 230, pb = 26, pl = 44, g = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:none">';
+  function fm(v) { return v >= 1e9 ? (v / 1e9).toFixed(1) + ' tỷ' : v >= 1e6 ? Math.round(v / 1e6) + ' tr' : v >= 1e3 ? Math.round(v / 1e3) + ' k' : Math.round(v); }
+  for (var i = 0; i <= 4; i++) { var y = (H - pb) - (H - pb - 10) * i / 4; g += '<line x1="' + pl + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eee"/><text x="' + (pl - 4) + '" y="' + (y + 3) + '" text-anchor="end" font-size="10" fill="#6b7280">' + fm(max * i / 4) + '</text>'; }
+  d.forEach(function (r, j) {
+    var vals = [[r.value, '#3b5b92', 'Doanh thu'], [r.cost_goods + r.cost_hato, '#9ca3af', 'Giá mua + chi phí'], [Math.max(0, r.profit), r.profit < 0 ? '#dc2626' : '#16a34a', 'Lãi gộp ' + M(r.profit)]];
+    if (r.profit < 0) vals[2][0] = Math.abs(r.profit);
+    vals.forEach(function (v, k) { var bh = (H - pb - 10) * v[0] / max, x = pl + 6 + j * bw + k * 20; g += '<rect x="' + x + '" y="' + (H - pb - bh) + '" width="18" height="' + bh + '" fill="' + v[1] + '" rx="2"><title>' + esc(r.code + ' ' + r.name) + ' — ' + v[2] + ': ' + M(v[0]) + '</title></rect>'; });
+    g += '<text x="' + (pl + 6 + j * bw + 28) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#374151">' + esc(String(r.code).replace(/^DA-/, '')) + '</text>';
+  });
+  return h('div', null, h('div', { style: 'overflow-x:auto', html: g + '</svg>' }), h('div', { class: 'mut', style: 'font-size:12px;margin-top:4px' }, h('span', { style: 'color:#3b5b92' }, '■'), ' Doanh thu  ', h('span', { style: 'color:#9ca3af' }, '■'), ' Giá mua + chi phí  ', h('span', { style: 'color:#16a34a' }, '■'), ' Lãi gộp (đỏ = lỗ)', d.length < rows.length ? '  · hiện 12 dự án doanh thu cao nhất' : ''));
+}
+function pnlView(rows) {
+  var v = 0, c = 0, ch = 0; rows.forEach(function (r) { v += r.value; c += r.cost_goods; ch += r.cost_hato; });
+  var pr = v - c - ch, mg = v ? pr / v : 0, wrap = h('div');
+  wrap.appendChild(h('h3', { style: 'margin:0 0 8px' }, 'Báo cáo lãi lỗ theo dự án (chưa VAT)'));
+  wrap.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:10px' },
+    h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Doanh thu'), h('div', { class: 'v' }, M(v))),
+    h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Giá mua + chi phí'), h('div', { class: 'v' }, M(c + ch))),
+    h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Lãi gộp · biên ' + P(mg)), h('div', { class: 'v ' + (pr < 0 ? 'neg' : '') }, M(pr)))));
+  wrap.appendChild(h('div', { class: 'card' }, h('h3', null, 'Doanh thu – chi phí – lãi theo dự án'), pnlChart(rows)));
+  var bm = rows.filter(function (r) { return r.value > 0; }).sort(function (a, b) { return b.margin - a.margin; });
+  wrap.appendChild(h('div', { class: 'card' }, h('h3', null, 'Biên lãi theo dự án'), bm.length ? h('div', null, bm.map(function (r) {
+    return h('div', { style: 'display:grid;grid-template-columns:minmax(110px,38%) 1fr 70px;gap:8px;align-items:center;margin:5px 0;cursor:pointer', onclick: function () { go('project/' + r.id); } },
+      h('span', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: r.name }, r.code + ' ' + r.name),
+      h('div', { class: 'prog' }, h('i', { style: 'width:' + Math.max(2, Math.min(100, Math.abs(r.margin) * 100)) + '%;background:' + (r.margin < 0 ? '#dc2626' : '#16a34a') } )), h('span', { class: 'r ' + (r.margin < 0 ? 'neg' : ''), style: 'text-align:right' }, P(r.margin)));
+  })) : h('div', { class: 'mut' }, 'Chưa có dữ liệu')));
+  wrap.appendChild(h('div', { class: 'card' }, table({
+    rows: rows, search: function (r) { return r.code + ' ' + r.name + ' ' + r.customer_name; }, pageSize: 20, onRow: function (r) { go('project/' + r.id); },
+    cols: [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Dự án' }, { k: 'customer_name', label: 'Khách hàng' },
+      { k: 'value', label: 'Doanh thu', cls: 'r', fmt: function (r) { return M(r.value); } }, { k: 'cost_goods', label: 'Giá mua', cls: 'r', fmt: function (r) { return M(r.cost_goods); } },
+      { k: 'cost_hato', label: 'Chi phí (Ha To TT)', cls: 'r', fmt: function (r) { return M(r.cost_hato); } },
+      { k: 'profit', label: 'Lãi gộp', cls: 'r', fmt: function (r) { return h('b', { class: r.profit < 0 ? 'neg' : '' }, M(r.profit)); } },
+      { k: 'margin', label: 'Biên lãi', cls: 'r', fmt: function (r) { return P(r.margin); } }, { k: 'ratio', label: 'Doanh thu / giá mua', cls: 'r', fmt: function (r) { return (r.ratio || 0).toFixed(2); } }],
+    foot: function (rs) { var a = 0, b = 0, e = 0; rs.forEach(function (r) { a += r.value; b += r.cost_goods; e += r.cost_hato; }); return h('tr', null, h('td', { colspan: 3 }, 'Tổng'), h('td', { class: 'r' }, M(a)), h('td', { class: 'r' }, M(b)), h('td', { class: 'r' }, M(e)), h('td', { class: 'r' }, M(a - b - e)), h('td', { class: 'r' }, a ? P((a - b - e) / a) : ''), h('td')); }
+  })));
+  return wrap;
+}
+
+PAGES.dashboard = function (p, q) {
+  var f = { period: 'all', customer_id: '', project_id: '' }, view = $('#view');
+  function range() {
+    var d = new Date(), y = d.getFullYear(), m = d.getMonth(), pad = function (n) { return ('0' + n).slice(-2); };
+    if (f.period === 'month') return { from: y + '-' + pad(m + 1) + '-01', to: y + '-' + pad(m + 1) + '-31' };
+    if (f.period === 'quarter') { var qs = Math.floor(m / 3) * 3; return { from: y + '-' + pad(qs + 1) + '-01', to: y + '-' + pad(qs + 3) + '-31' }; }
+    if (f.period === 'year') return { from: y + '-01-01', to: y + '-12-31' };
+    return { from: '', to: '' };
+  }
+  function load() {
+    var r = range();
+    return call('dashboard', { from: r.from, to: r.to, customer_id: f.customer_id, project_id: f.project_id }).then(draw);
+  }
+  var taskBox = taskPanel({});
+  function draw(d) {
+    view.innerHTML = '';
+    view.appendChild(taskBox);
+    view.appendChild(h('div', { class: 'bar2' },
+      sel([['all', 'Tất cả'], ['month', 'Tháng này'], ['quarter', 'Quý này'], ['year', 'Năm nay']], f.period, function (e) { f.period = e.target.value; load(); }),
+      sel(opt(S.customers), f.customer_id, function (e) { f.customer_id = e.target.value; f.project_id = ''; load(); }, 'Tất cả khách hàng'),
+      sel(S.projects.filter(function (x) { return !f.customer_id || x.customer_id === f.customer_id; }).map(function (x) { return [x.id, projLabel(x)]; }), f.project_id, function (e) { f.project_id = e.target.value; load(); }, 'Tất cả dự án')));
+    var k = d.kpi, tiles = [];
+    if (k.quote_count) tiles.push(h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Số báo giá (bản mới nhất)'), h('div', { class: 'v' }, k.quote_count), h('div', { class: 'l' }, 'Tổng giá trị ' + M(k.quote_total) + ' (chưa VAT)')));
+    if (k.quote_sent) tiles.push(h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Tỷ lệ chốt báo giá'), h('div', { class: 'v' }, P(k.close_rate)), h('div', { class: 'l' }, k.quote_won + ' chốt / ' + k.quote_sent + ' đã gửi')));
+    if (k.hd_count || k.po_count) tiles.push(h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Số HĐ / PO'), h('div', { class: 'v' }, k.hd_count + ' HĐ · ' + k.po_count + ' PO' + (k.plhd_count ? ' · ' + k.plhd_count + ' Phụ lục' : '')), h('div', { class: 'l' }, 'Giá trị theo PO thực tế (chưa VAT) ' + M(k.converted_value))));
+    if (k.active_projects) tiles.push(h('div', { class: 'kpi' }, h('div', { class: 'l' }, 'Dự án đang thực hiện'), h('div', { class: 'v' }, k.active_projects), h('div', { class: 'l' }, 'Đã giao ' + P(k.delivered_pct_all) + ' (theo giá trị)'), h('div', { class: 'prog', style: 'margin-top:6px' }, h('i', { style: 'width:' + Math.round(k.delivered_pct_all * 100) + '%;background:#16a34a' }))));
+    if (tiles.length) view.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:12px' }, tiles));
+    var stat = (d.projectsByStatus || []).map(function (x) { return x.status + ': ' + x.count; }).join(' · ');
+    view.appendChild(h('div', { class: 'card' }, h('h3', null, 'Dự án đang thực hiện (' + d.active.length + ')'), stat ? h('div', { class: 'mut', style: 'margin-bottom:8px' }, stat) : null,
+      d.active.length ? hbars(d.deliveryProgress, function (x) { return x.code + ' ' + x.name; }, function (x) { return x.pct; }, P, '#16a34a') : h('div', { class: 'mut' }, 'Chưa có dự án đang thực hiện'),
+      d.active.length > d.deliveryProgress.length ? h('div', { class: 'mut', style: 'margin-top:6px' }, 'Còn ' + (d.active.length - d.deliveryProgress.length) + ' dự án khác — xem ở mục Dự án.') : null));
+    if (d.pnl && d.pnl.length) view.appendChild(pnlView(d.pnl));
+  }
+  setTitle('Dashboard');
+  return load();
+};
+
+/* ---- Bảng giá ---- */
+
+var PL_HDR = [['code', 'Mã (để trống nếu hàng mới)'], ['brand', 'Thương hiệu'], ['group', 'Nhóm hàng'], ['name', 'Tên hàng'], ['model', 'Model'], ['size', 'Kích cỡ'], ['origin', 'Xuất xứ'], ['unit', 'ĐVT'], ['qc', 'Quy cách / kích thước'], ['cost', 'Giá mua (VND)'], ['coef_own', 'Hệ số riêng'], ['note', 'Ghi chú'], ['status', 'Trạng thái (Đang bán / Ngừng)']];
+function plSheetRows(items) { return [PL_HDR.map(function (c) { return c[1]; })].concat(items.map(function (x) { return PL_HDR.map(function (c) { var v = x[c[0]]; return v === undefined || v === null || v === 0 && c[0] === 'coef_own' ? '' : v; }); })); }
+function plGuide() {
+  return { name: 'Hướng dẫn', widths: [110, 90], noteRows: [], rows: [['HƯỚNG DẪN ĐIỀN FILE'], [''],
+    ['• Mã có sẵn (SP0001…): chỉ ô nào bạn điền mới được cập nhật; ô để trống = giữ nguyên.'],
+    ['• Hàng mới: để trống cột Mã, bắt buộc có Tên hàng và Giá mua.'],
+    ['• Giá mua: số VND (VD 1250000). Giá bán tự tính = Giá mua × Hệ số (ưu tiên: Hệ số riêng của mã → hệ số theo hãng → hệ số chung).'],
+    ['• Hệ số riêng: VD 1.25. Điền 0 để xóa hệ số riêng của mã.'],
+    ['• Quy cách / kích thước: dùng cho hàng gia công (VD kích thước tủ). Hiện vào báo giá / hợp đồng / biên bản khi có nội dung.'],
+    ['• Sau khi chọn file, phần mềm hiện bản xem trước thay đổi để bạn kiểm tra và xác nhận trước khi ghi.']], boldRows: [0] };
+}
+function plDownloadTemplate() {
+  XlsxWrite.download('Mau_nhap_bang_gia.xlsx', [{ name: 'Bang gia', rows: [PL_HDR.map(function (c) { return c[1]; })], widths: [14, 16, 18, 40, 16, 12, 12, 8, 26, 14, 12, 24], boldRows: [0] }, plGuide()]);
+}
+function plDownloadCurrent() {
+  var all = [], page = 1;
+  function next() {
+    return call('catalogList', { page: page, size: 200 }).then(function (r) {
+      r.rows.forEach(function (x) { all.push(x); });
+      if (all.length < r.total && r.rows.length) { page++; return next(); }
+    });
+  }
+  return safe(next()).then(function () {
+    XlsxWrite.download('Bang_gia_hien_tai.xlsx', [{ name: 'Bang gia', rows: plSheetRows(all), widths: [14, 16, 18, 40, 16, 12, 12, 8, 26, 14, 12, 24], boldRows: [0] }, plGuide()]);
+    toast('Đã tạo file ' + all.length + ' dòng');
+  });
+}
+function plImport(done) {
+  var fi = h('input', { type: 'file', accept: '.xlsx,.xls,.csv', onchange: function () {
+    var f = fi.files[0]; if (!f) return;
+    readTableFile(f).then(function (rows) {
+      var hd = (rows[0] || []).map(normKey), idx = {};
+      var rules = [['code', /^ma( |$)/], ['brand', /^(thuong hieu|hang)/], ['group', /^nhom/], ['name', /^ten/], ['model', /^model/], ['size', /^(kich co|size)/], ['origin', /^xuat xu/], ['unit', /^(dvt|don vi)/], ['qc', /^quy cach/], ['cost', /^gia (mua|von)/], ['coef_own', /^he so/], ['note', /^ghi chu/], ['status', /^trang thai/]];
+      rules.forEach(function (r) { for (var i = 0; i < hd.length; i++) if (r[1].test(hd[i]) && !(r[0] in idx)) { idx[r[0]] = i; break; } });
+      if (!('cost' in idx) && !('name' in idx)) throw new Error('Không nhận ra dòng tiêu đề. Hãy dùng "Tải file mẫu".');
+      var data = rows.slice(1).map(function (row) {
+        var o = {}; Object.keys(idx).forEach(function (k) {
+          var v = row[idx[k]]; if (v === undefined || v === null || String(v).trim() === '') return;
+          o[k] = (k === 'cost' || k === 'coef_own') ? numIn(v) : String(v).trim();
+        }); return o;
+      }).filter(function (o) { return Object.keys(o).length; });
+      if (!data.length) throw new Error('File không có dòng dữ liệu.');
+      return safe(call('catalogImport', { rows: data, apply: false })).then(function (r) { if (r) plPreview(data, r, done); });
+    }).catch(function (e) { toast(e.message, true); });
+  } });
+  fi.click();
+}
+function plPreview(data, r, done) {
+  var body = h('div', null, h('p', null, h('b', null, r.adds + ' hàng mới · ' + r.updates + ' hàng thay đổi · ' + r.same + ' không đổi'), r.errors.length ? h('span', { class: 'neg' }, ' · ' + r.errors.length + ' dòng lỗi (sẽ bị bỏ qua)') : ''));
+  if (r.errors.length) body.appendChild(h('div', { class: 'card neg', style: 'max-height:120px;overflow:auto;font-size:12px' }, r.errors.slice(0, 30).map(function (e) { return h('div', null, e); })));
+  var lbl = { cost: 'Giá mua', coef_own: 'Hệ số riêng', qc: 'Quy cách / kích thước', name: 'Tên', brand: 'Hãng', group: 'Nhóm', model: 'Model', size: 'Size', origin: 'Xuất xứ', unit: 'ĐVT', note: 'Ghi chú' };
+  body.appendChild(h('div', { style: 'max-height:300px;overflow:auto;font-size:12px' }, r.preview.map(function (p) {
+    return h('div', { style: 'padding:3px 0;border-bottom:1px solid #f3f4f6' }, p.t === 'new' ? h('span', null, h('span', { class: 'badge b-ok' }, 'Mới'), ' ' + p.name + ' · ' + p.brand + ' · ' + M(p.cost)) :
+      h('span', null, h('span', { class: 'badge b-info' }, 'Sửa'), ' ' + p.code + ' ' + p.name + ' — ' + Object.keys(p.diff).map(function (k) { var a = p.diff[k]; return (lbl[k] || k) + ': ' + (k === 'cost' ? M(a[0]) + ' → ' + M(a[1]) : (a[0] || '∅') + ' → ' + a[1]); }).join('; ')));
+  })));
+  if (r.preview.length >= 400) body.appendChild(h('div', { class: 'mut' }, 'Chỉ hiện 400 dòng đầu; khi xác nhận sẽ ghi toàn bộ.'));
+  modal({ title: 'Xem trước nhập Bảng giá', body: body, closeLabel: 'Hủy', buttons: (r.adds || r.updates) ? [{ label: 'Xác nhận ghi ' + (r.adds + r.updates) + ' dòng', cls: 'pri', fn: function (close) {
+    safe(call('catalogImport', { rows: data, apply: true })).then(function (x) { if (x) { close(); toast('Đã ghi: ' + x.adds + ' mới, ' + x.updates + ' sửa'); done && done(); } });
+  } }] : [] });
+}
+var PL_UNITS = ['Bộ', 'Cái', 'Bình', 'Chiếc', 'Cuộn', 'Mét', 'Kg', 'Hộp', 'Thùng', 'Lít'];
+function plEditModal(x, done, lists) {
+  x = x || {}; lists = lists || {};
+  var f = form([{ k: 'brand', label: 'Thương hiệu', list: lists.brands }, { k: 'group', label: 'Nhóm hàng', list: lists.groups }, { k: 'name', label: 'Tên hàng', req: true, full: true }, { k: 'model', label: 'Model' }, { k: 'size', label: 'Kích cỡ' }, { k: 'origin', label: 'Xuất xứ', list: lists.origins }, { k: 'unit', label: 'ĐVT', list: PL_UNITS.concat(lists.units || []) },
+    { k: 'qc', label: 'Quy cách / kích thước (hàng gia công — hiện vào báo giá/HĐ/biên bản)', full: true }, { k: 'cost', label: 'Giá mua (VND)', type: 'number', req: true }, { k: 'coef_own', label: 'Hệ số riêng (trống = theo hãng / chung)', type: 'number' }, { k: 'status', label: 'Trạng thái', type: 'select', opts: [['Đang bán', 'Đang bán'], ['Ngừng', 'Ngừng bán']] }, { k: 'note', label: 'Ghi chú', full: true }], Object.assign({ status: 'Đang bán' }, x));
+  var info = x.code ? h('div', { class: 'mut', style: 'margin-top:8px;font-size:12px' }, 'Mã ' + x.code + ' · Hệ số đang áp ' + (x.coef ? N(x.coef) + ' (' + ({ ma: 'riêng của mã', hang: 'theo hãng', chung: 'chung' }[x.coef_src] || 'từ giá bán tham chiếu') + ')' : '—') + ' · Giá bán ' + (x.sale ? M(x.sale) : '—'),
+    x.spec ? h('div', null, h('b', null, 'Mô tả kỹ thuật: '), x.spec) : null, x.tech ? h('div', null, h('b', null, 'Thông số: '), x.tech) : null) : null;
+  var hist = h('div', { class: 'mut', style: 'margin-top:8px;font-size:12px' });
+  if (x.code) safe(call('catalogHistory', { code: x.code })).then(function (r) { if (r && r.length) { hist.appendChild(h('b', null, 'Lịch sử giá mua:')); r.forEach(function (e) { hist.appendChild(h('div', null, D(e.date) + ': ' + M(e.old_cost) + ' → ' + M(e.new_cost) + ' (' + e.user + ')')); }); } });
+  modal({ title: x.code ? 'Sửa ' + x.code : 'Thêm hàng vào Bảng giá', body: h('div', null, f.el, info, hist), buttons: [{ label: 'Lưu', cls: 'pri', fn: function (close) {
+    var rec = f.get(); rec.code = x.code || ''; if (rec.cost === '' || rec.cost == null) { toast('Nhập giá mua', true); return; }
+    safe(call('catalogSave', { rec: rec })).then(function (r) { if (r) { close(); toast('Đã lưu ' + r.code); done && done(r); } });
+  } }] });
+}
+function plCoefModal(done) {
+  safe(call('coefGet', {})).then(function (c) {
+    if (!c) return;
+    var def = h('input', { type: 'number', step: 'any', value: c.def || '', placeholder: 'VD 1.25' }), mn = h('input', { type: 'number', step: 'any', value: c.min || '', placeholder: 'VD 1.1' }), ins = {};
+    var box = h('div', { style: 'max-height:300px;overflow:auto' }, c.brands.map(function (b) {
+      var i = h('input', { type: 'number', step: 'any', value: c.brand[b.name] || '', style: 'width:90px' }); ins[b.name] = i;
+      return h('div', { style: 'display:flex;gap:8px;align-items:center;padding:3px 0' }, h('span', { style: 'flex:1' }, b.name + ' (' + b.count + ' mã)'), i);
+    }));
+    modal({ title: 'Hệ số giá bán = giá bán / giá mua', body: h('div', null, h('p', { class: 'mut' }, 'Thứ tự áp dụng: hệ số riêng của mã → hệ số theo hãng → hệ số chung. Giá bán = Giá mua × hệ số (làm tròn 100đ). Báo giá cũ không bị đổi.'),
+      h('label', null, 'Hệ số chung', def), h('label', { style: 'display:block;margin-top:8px' }, 'Ngưỡng hệ số tối thiểu (cảnh báo khi báo giá thấp hơn)', mn), h('h4', null, 'Theo hãng (trống = dùng hệ số chung)'), box, h('div', { class: 'mut' }, c.own + ' mã đang có hệ số riêng (sửa trong từng mã hoặc nhập hàng loạt).')),
+      buttons: [{ label: 'Lưu hệ số', cls: 'pri', fn: function (close) { var br = {}; Object.keys(ins).forEach(function (k) { if (num(ins[k].value) > 0) br[k] = num(ins[k].value); });
+        safe(call('coefSave', { def: num(def.value), min: num(mn.value), brand: br })).then(function (r) { if (r) { S.cfg.min_coef = num(mn.value) > 0 ? String(num(mn.value)) : ''; close(); toast('Đã lưu hệ số'); done && done(); } }); } }] });
+  });
+}
+var PL_ST = null;
+PAGES.pricelist = function () {
+  var ed = S.perms.pricelist.edit || S.perms.pricelist.create;
+  setTitle('Bảng giá', [ed ? h('button', { class: 'pri', onclick: function () { plEditModal(null, function (r) { meta = null; load(r && r.code); }, meta); } }, '+ Thêm hàng') : null,
+    ed ? h('button', { onclick: function () { plImport(function () { meta = null; load(); }); } }, 'Nhập hàng loạt') : null,
+    ed ? h('button', { onclick: plDownloadTemplate }, 'Tải file mẫu') : null, h('button', { onclick: plDownloadCurrent }, 'Tải Bảng giá hiện tại'),
+    ed ? h('button', { onclick: function () { plCoefModal(function () { load(); }); } }, 'Hệ số') : null]);
+  // st giữ bộ lọc / trang đang xem cả khi trang vẽ lại (PL_ST chỉ xóa khi mở Bảng giá từ menu)
+  var view = $('#view'), st = PL_ST || (PL_ST = { q: '', brand: '', group: '', page: 1 }), host = h('div'), meta = null;
+  function load(hl) {
+    var y = $('#main').scrollTop;
+    return call('catalogList', { q: st.q, brand: st.brand, group: st.group, page: st.page, size: 50 }).then(function (r) {
+      var firstTime = !meta; meta = meta || r;
+      if (firstTime) {
+        view.innerHTML = '';
+        view.appendChild(h('div', { class: 'bar2' }, h('input', { type: 'search', value: st.q, placeholder: 'Tìm theo tên, model, hãng, size, quy cách…', oninput: debounce(function (e) { st.q = e.target.value; st.page = 1; load(); }, 300) }),
+          sel(r.brands.map(function (b) { return [b, b]; }), st.brand, function (e) { st.brand = e.target.value; st.page = 1; load(); }, 'Tất cả hãng'),
+          sel(r.groups.map(function (b) { return [b, b]; }), st.group, function (e) { st.group = e.target.value; st.page = 1; load(); }, 'Tất cả nhóm'),
+          h('span', { class: 'mut' }, 'Giá bán = Giá mua × Hệ số (riêng → hãng → chung). Bấm dòng để sửa.')));
+        view.appendChild(host);
+      }
+      host.innerHTML = '';
+      var pages = Math.max(1, Math.ceil(r.total / r.size));
+      host.appendChild(h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Mã', 'Hãng', 'Nhóm', 'Tên hàng', 'Quy cách', 'Model', 'Size', 'Xuất xứ', 'ĐVT'].map(function (x) { return h('th', null, x); }), h('th', { class: 'r' }, 'Giá mua'), h('th', { class: 'r' }, 'Hệ số'), h('th', { class: 'r' }, 'Giá bán'))),
+        h('tbody', null, r.rows.map(function (x) {
+          return h('tr', { class: 'rw' + (hl && x.code === hl ? ' flash' : ''), 'data-code': x.code, onclick: function () { if (ed) plEditModal(x, function () { load(x.code); }, meta); else modal({ title: x.name, dismiss: true, body: h('div', null, x.qc ? h('p', null, h('b', null, 'Quy cách: '), x.qc) : null, h('p', null, h('b', null, 'Mô tả kỹ thuật: '), x.spec), h('p', null, h('b', null, 'Thông số: '), x.tech), x.note ? h('p', { class: 'neg' }, x.note) : null) }); } },
+            h('td', { class: 'mut' }, x.code), h('td', null, x.brand), h('td', null, x.group), h('td', { style: 'min-width:240px' }, x.name, x.status === 'Ngừng' ? h('span', { class: 'badge b-warn', style: 'margin-left:6px' }, 'Ngừng') : null), h('td', { style: 'min-width:110px' }, x.qc || ''), h('td', null, x.model), h('td', null, x.size), h('td', null, x.origin), h('td', null, x.unit),
+            h('td', { class: 'r' }, M(x.cost)), h('td', { class: 'r', title: ({ ma: 'Hệ số riêng của mã', hang: 'Theo hãng', chung: 'Hệ số chung' }[x.coef_src] || 'Từ giá bán tham chiếu') }, x.coef ? N(x.coef) + (x.coef_src === 'ma' ? ' ●' : '') : ''),
+            h('td', { class: 'r' }, x.sale ? M(x.sale) : h('span', { class: 'neg' }, 'Chưa có giá')));
+        })))));
+      host.appendChild(h('div', { class: 'pager' }, h('span', null, r.total + ' sản phẩm'), h('button', { disabled: st.page <= 1, onclick: function () { st.page--; load(); } }, '‹'), h('span', null, st.page + '/' + pages), h('button', { disabled: st.page >= pages, onclick: function () { st.page++; load(); } }, '›')));
+      if (hl) { $('#main').scrollTop = y; if (!r.rows.some(function (x) { return x.code === hl; })) toast('Đã lưu ' + hl + ' — hàng này không nằm trong bộ lọc / trang đang xem'); }
+    });
+  }
+  return load();
+};
+
+/* ---- Khách hàng ---- */
+function customerModal(c, done) {
+  c = c || {};
+  var f = form([{ k: 'code', label: 'Mã KH', ph: 'Tự sinh nếu để trống', disabled: !!c.id }, { k: 'name', label: 'Tên khách hàng', req: true, full: true }, { k: 'tax_code', label: 'MST (kiểm trùng)' }, { k: 'status', label: 'Trạng thái', type: 'select', opts: [['Hoạt động', 'Hoạt động'], ['Ngừng', 'Ngừng']] },
+    { k: 'address', label: 'Địa chỉ', full: true }, { k: 'contact', label: 'Người liên hệ' }, { k: 'phone', label: 'Điện thoại' }, { k: 'email', label: 'Email' },
+    { k: 'short_name', label: 'Tên viết tắt (số hợp đồng: …/HT-<viết tắt>)', ph: 'VD DN' }, { k: 'rep_name', label: 'Người đại diện (ký HĐ)' }, { k: 'rep_title', label: 'Chức vụ' }, { k: 'bank_account', label: 'Số tài khoản (ngân hàng)', full: true }], Object.assign({ status: 'Hoạt động' }, c));
+  var btns = [];
+  if (c.id ? S.perms.customers.edit : S.perms.customers.create) btns.push({ label: 'Lưu khách hàng', cls: 'pri', fn: function (close) { safe(call('save', { table: 'customers', rec: Object.assign({}, c, f.get()) })).then(function (r) { if (r) { close(); reloadLookups().then(function () { toast('Đã lưu khách hàng'); done && done(r); }); } }); } });
+  if (c.id && S.perms.customers.edit) btns.push({ label: 'Xóa', cls: 'dng', fn: function (close) { confirmBox('Xóa khách hàng này?', function () { safe(call('remove', { table: 'customers', id: c.id })).then(function (r) { if (r) { close(); reloadLookups().then(function () { done && done(); }); } }); }); } });
+  if (c.id) btns.push({ label: 'Xem dự án', fn: function (close) { close(); go('projects?customer=' + c.id); } });
+  modal({ title: c.id ? 'Khách hàng ' + c.code : 'Thêm khách hàng', body: f.el, buttons: btns, draft: (c.id ? S.perms.customers.edit : S.perms.customers.create) ? { id: 'customer/' + (c.id || 'new'), label: 'Khách hàng ' + (c.id ? c.code : 'mới'), hash: location.hash || '#/customers', re: c.id ? null : { t: 'customer' }, get: f.get, set: function (d) { formSet(f, d); } } : null });
+}
+PAGES.customers = function () {
+  var acts = [S.perms.customers.create ? h('button', { onclick: function () { importCustomers(route); } }, 'Nhập file') : null, S.perms.customers.create ? h('button', { class: 'pri', onclick: function () { customerModal(null, route); } }, '+ Khách hàng') : null];
+  setTitle('Khách hàng', acts);
+  return call('list', { table: 'customers' }).then(function (rows) {
+    var v = $('#view'); v.innerHTML = '';
+    v.appendChild(table({ rows: rows, search: function (r) { return [r.code, r.name, r.tax_code, r.address, r.contact, r.phone].join(' '); }, onRow: function (r) { customerModal(r, route); },
+      filters: [{ label: 'Mọi trạng thái', opts: [['Hoạt động', 'Hoạt động'], ['Ngừng', 'Ngừng']], get: function (r) { return r.status; } }],
+      cols: [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên khách hàng' }, { k: 'tax_code', label: 'MST' }, { k: 'address', label: 'Địa chỉ' }, { k: 'contact', label: 'Liên hệ' }, { k: 'phone', label: 'Điện thoại' }, { k: 'project_count', label: 'Số dự án', cls: 'r' }, { k: 'status', label: 'Trạng thái', fmt: function (r) { return h('span', { class: 'badge ' + (r.status === 'Hoạt động' ? 'b-ok' : '') }, r.status); } }] }));
+  });
+};
+
+</script>

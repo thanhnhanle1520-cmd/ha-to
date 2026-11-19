@@ -53,5 +53,5 @@ var XlsxWrite = (function () {
     return zip(fs);
   }
   function download(name, sheets) { var b = build(sheets), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); URL.revokeObjectURL(a.href); }, 800); }
-  return { build: build, download: download };
+  return { build: build, download: download, zip: zip };
 })();

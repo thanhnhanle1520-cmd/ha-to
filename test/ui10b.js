@@ -1,0 +1,20 @@
+const { launch, open } = require('./cdp'); const sleep = ms => new Promise(r => setTimeout(r, ms));
+let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓', n); } else { bad++; console.log('  ✗ FAIL:', n, JSON.stringify(x === undefined ? '' : x).slice(0, 300)); } };
+(async () => {
+  const c = await launch(); let pg = await open(c.port, 'http://127.0.0.1:8765/index.html?local=1'); await sleep(4000);
+  await pg.ev(`api('save',{table:'customers',rec:{name:'KH trước nâng cấp'}})`);
+  await pg.ev(`PropertiesService.getScriptProperties().setProperty('SCHEMA','1.9.0')`); await pg.ev(`HatoStore.syncNow()`); await sleep(1500);
+  await pg.ev(`window.__redirecting=true; location.reload()`); await sleep(4500);
+  const pu = await pg.ev(`new Promise(r=>{const q=indexedDB.open('hato_local');q.onsuccess=()=>{const g=q.result.transaction('kv').objectStore('kv').get('preupgrade');g.onsuccess=()=>r(g.result?{from:g.result.from,to:g.result.to,has:!!g.result.snap.sheets.CUSTOMERS}:null)}})`);
+  const APPV = await pg.ev('APP_VERSION');
+  T('chụp dữ liệu trước nâng cấp (trong máy)', pu && pu.from === '1.9.0' && pu.to === APPV && pu.has, pu);
+  const bl = await pg.ev(`HatoStore.listBackups()`); T('bản chụp trước nâng cấp có trên Drive', bl.some(b => b.name.indexOf('trước nâng cấp 1.9.0 sang ' + APPV) >= 0), bl.map(b => b.name));
+  T('sau nâng cấp dữ liệu còn nguyên', (await pg.ev(`api('list',{table:'customers'})`)).data.some(x => x.name === 'KH trước nâng cấp'));
+  await pg.ev(`window.__hatoShowUpdate()`); await sleep(200);
+  T('thông báo có bản mới', /Đã có bản HA TO mới/.test(await pg.ev(`(document.getElementById('hato-upd')||{}).textContent||''`)));
+  T('trạng thái: đã lưu trên máy · chờ gửi', await pg.ev(`(async()=>{await api('save',{table:'customers',rec:{name:'x'}});await new Promise(r=>setTimeout(r,300));return document.getElementById('hato-sync').textContent})()`).then(t => /Đã lưu trên máy|Đang đồng bộ|Chế độ thử/.test(t)));
+  const pf = await pg.ev(`HatoStore.perf()`); T('đo thời gian mở app và dung lượng bảng', pf.ready > 0 && pf.sizes.length > 5 && pf.total > 0, pf);
+  await pg.ev(`HatoMigrate.openMenu()`); await sleep(200); T('menu hiện số đo hiệu năng', /Mở app: [\d.]+s/.test(await pg.ev(`document.body.lastElementChild.textContent`)));
+  await pg.ev(`document.body.lastElementChild.remove(); document.querySelectorAll('[id=hato-upd]').forEach(e=>e.remove())`);
+  console.log('Lỗi console:', JSON.stringify(pg.logs)); console.log(ok + ' đạt, ' + bad + ' lỗi'); c.proc.kill(); process.exit(0);
+})().catch(e => { console.log('CRASH', e.message); process.exit(1); });

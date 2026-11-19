@@ -1,0 +1,117 @@
+<style>
+:root{--brand:#ee0033;--bg:#f5f6f8;--line:#e5e7eb;--text:#1f2937;--mut:#6b7280;--ok:#16a34a;--warn:#d97706;--bad:#dc2626}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:13.5px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);display:flex}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 11px}
+button:hover{background:#f9fafb}
+button.pri{background:var(--brand);border-color:var(--brand);color:#fff}button.pri:hover{filter:brightness(.93)}
+button.dng{color:var(--bad);border-color:#fecaca}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,select,textarea{border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;background:#fff;max-width:100%}
+input:focus,select:focus,textarea:focus{outline:2px solid #fecdd6;border-color:var(--brand)}
+input[type=number]{text-align:right}
+textarea{width:100%;min-height:60px;resize:vertical}
+/* menu trái: thu gọn chỉ icon */
+#nav{width:52px;flex:none;background:#1f2937;color:#e5e7eb;display:flex;flex-direction:column;position:relative;z-index:30;transition:width .15s;overflow:hidden}
+#nav.open,#nav.hover{width:210px;box-shadow:2px 0 10px rgba(0,0,0,.25)}
+#nav .logo{height:44px;display:flex;align-items:center;gap:8px;padding:0 14px;font-weight:700;color:#fff;border-bottom:1px solid #374151;white-space:nowrap;cursor:pointer}
+#nav .logo b{background:var(--brand);border-radius:5px;padding:1px 6px;font-size:13px}
+#nav a{display:flex;align-items:center;gap:12px;padding:9px 16px;color:#d1d5db;text-decoration:none;white-space:nowrap}
+#nav a:hover{background:#374151}#nav a.on{background:var(--brand);color:#fff}
+#nav .ic{width:20px;text-align:center;font-size:16px;flex:none}
+#nav .lb{opacity:0;transition:opacity .1s}#nav.open .lb,#nav.hover .lb{opacity:1}
+#nav .spacer{flex:1}#nav .me{font-size:11px;color:#9ca3af;padding:8px 16px;white-space:nowrap;overflow:hidden}
+#nav .me,#nav .pin{opacity:0}#nav.open .me,#nav.hover .me,#nav.open .pin,#nav.hover .pin{opacity:1}
+/* nội dung */
+#main{flex:1;min-width:0;height:100vh;overflow:auto;position:relative}
+#bar{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:7px 14px;min-height:44px}
+#bar h1{font-size:16px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bar .acts{display:flex;gap:6px;flex-wrap:wrap}
+#loading{position:fixed;left:0;top:0;height:3px;background:var(--brand);width:0;transition:width .3s;z-index:99}
+#view{padding:12px 14px 40px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:14px}
+.grid{display:grid;gap:12px}.g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.kpi{background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:8px;padding:10px 12px}
+.kpi .v{font-size:20px;font-weight:700}.kpi .l{color:var(--mut);font-size:12px}
+.bar2{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.bar2 input[type=search]{min-width:240px}
+/* bảng */
+.tw{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+table.t{border-collapse:collapse;width:100%;min-width:600px}
+table.t th{position:sticky;top:0;background:#f3f4f6;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:12px;white-space:nowrap;cursor:default}
+table.t th.s{cursor:pointer}table.t td{padding:5px 8px;border-bottom:1px solid #f1f2f4;vertical-align:top}
+table.t tr.rw:hover td{background:#fff7f8;cursor:pointer}
+td.r,th.r{text-align:right;white-space:nowrap}td.c,th.c{text-align:center}
+tfoot td{font-weight:700;background:#fafafa}
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:8px 2px;color:var(--mut)}
+.badge{display:inline-block;border-radius:10px;padding:1px 8px;font-size:11.5px;background:#e5e7eb;white-space:nowrap}
+.b-ok{background:#dcfce7;color:#166534}.b-warn{background:#fef3c7;color:#92400e}.b-bad{background:#fee2e2;color:#991b1b}.b-info{background:#dbeafe;color:#1e40af}
+.mut{color:var(--mut)}.neg{color:var(--bad)}.pos{color:var(--ok)}
+/* tab */
+.tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 10px}
+.tabs a{padding:7px 12px;text-decoration:none;color:var(--mut);border-bottom:2px solid transparent;cursor:pointer}
+.tabs a.on{color:var(--brand);border-color:var(--brand);font-weight:600}
+#kpibar{position:sticky;top:44px;z-index:15;background:#fff;border:1px solid var(--line);border-radius:8px;display:flex;gap:22px;flex-wrap:wrap;padding:6px 14px;margin-bottom:10px;align-items:center}
+#kpibar .i span{display:block;font-size:11px;color:var(--mut)}#kpibar .i b{font-size:14px}
+.prog{background:#e5e7eb;border-radius:5px;height:8px;overflow:hidden;min-width:70px}.prog i{display:block;height:100%;background:var(--brand)}
+/* form */
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 12px}
+.fg label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+.fg label input,.fg label select,.fg label textarea{color:var(--text);font-size:13.5px;width:100%}
+.fg .full{grid-column:1/-1}
+.req:after{content:" *";color:var(--bad)}
+/* modal */
+#modals .ov{position:fixed;inset:0;background:rgba(17,24,39,.45);display:flex;align-items:flex-start;justify-content:center;padding:4vh 10px;z-index:60;overflow:auto}
+#modals .md{background:#fff;border-radius:10px;width:min(560px,100%);box-shadow:0 20px 50px rgba(0,0,0,.3)}
+#modals .md.wide{width:min(900px,100%)}
+#modals .mh{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center}#modals .mh b{flex:1}
+#modals .mb{padding:14px}#modals .mf{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+#toasts{position:fixed;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;z-index:100;max-width:min(460px,90vw)}
+.toast{background:#111827;color:#fff;border-radius:8px;padding:9px 12px;box-shadow:0 6px 18px rgba(0,0,0,.3)}.toast.err{background:#b91c1c}
+/* dòng hàng */
+table.le{border-collapse:collapse;width:100%;min-width:720px}
+table.le th{background:#f3f4f6;font-size:12px;padding:5px;border:1px solid var(--line);white-space:nowrap}
+table.le td{border:1px solid var(--line);padding:2px}
+table.le input{width:100%;border:1px solid transparent;background:transparent;padding:4px 5px}table.le input:hover{border-color:#d1d5db}table.le input:focus{background:#fff}
+table.le td.n input{text-align:right}
+.pick{position:relative}.pick .dd{position:absolute;left:0;right:0;top:100%;background:#fff;border:1px solid #d1d5db;border-radius:6px;max-height:280px;overflow:auto;z-index:25;box-shadow:0 8px 20px rgba(0,0,0,.15)}
+.pick .dd div{padding:6px 9px;cursor:pointer;border-bottom:1px solid #f3f4f6}.pick .dd div:hover{background:#fff1f3}.pick .dd small{color:var(--mut)}
+.chart text{font-size:10px;fill:#6b7280}
+/* ===== Giao diện HATO: đỏ #E31E24 (hành động chính), xanh #0B5CA8 (liên kết, tiêu đề bảng), navy #10294A (menu), nền #F4F6F9 ===== */
+:root{--brand:#e31e24;--blue:#0b5ca8;--navy:#10294a;--bg:#f4f6f9;--line:#dde3ea;--text:#1b2430;--mut:#5b6877;--ok:#15803d;--warn:#b45309;--bad:#b91c1c}
+body{font:14px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+a{color:var(--blue)}
+#nav{background:var(--navy)}#nav a:hover{background:#1c3d69}#nav .logo{border-bottom-color:#27456f}
+button.pri:hover{filter:none;background:#c4151b}
+button:hover{background:#eef3f9}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:3px solid #9cc4ec;outline-offset:1px}
+input:focus,select:focus,textarea:focus{outline:2px solid #9cc4ec;border-color:var(--blue)}
+table.t th{background:#fff;color:var(--blue);border-bottom:2px solid var(--blue);font-weight:600}
+table.t td,table.t th,table.le td,table.le input,.fg input,.fg select{font-variant-numeric:tabular-nums}
+table.t tr.rw:hover td{background:#eef5fc}
+table.le th{background:#fff;color:var(--blue);border-bottom:2px solid var(--blue)}
+.card{box-shadow:none}.card h3{color:var(--navy);font-size:15px}
+.card table{border-collapse:collapse;width:100%;min-width:520px;font-variant-numeric:tabular-nums}.card th{text-align:left;padding:5px 8px;color:var(--blue);border-bottom:2px solid var(--blue);font-size:12px;white-space:nowrap}.card th.r,.card td.r{text-align:right}.card td{padding:5px 8px;border-bottom:1px solid #edf0f4}
+td.rem{color:var(--warn);font-weight:600;background:#fff8ec}
+.b-ok{background:#dcfce7;color:#14532d}.b-warn{background:#fef3c7;color:#78350f}.b-bad{background:#fee2e2;color:#7f1d1d}.b-info{background:#dbeafe;color:#1e3a8a}
+input.flatpickr-input.form-control,.flatpickr-input[readonly],input.flatpickr-alt{width:100%}
+.flatpickr-day.selected{background:var(--blue);border-color:var(--blue)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.chips{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px}.chip{border:1px solid #e5e7eb;background:#fff;color:#6b7280;border-radius:12px;padding:0 7px;font-size:11px;line-height:18px;cursor:pointer;white-space:nowrap}.chip:hover{border-color:#3b5b92;color:#3b5b92;background:#f1f5fb}
+@media(max-width:760px){.hide-sm{display:none!important}}
+/* ô chọn có thể gõ tay */
+.cb{position:relative;display:flex}.cb>input{flex:1;min-width:0;border-top-right-radius:0;border-bottom-right-radius:0}
+.cb-btn{border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;padding:0 9px;color:var(--mut)}
+.cb-list{display:none;position:absolute;left:0;right:0;top:100%;z-index:60;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:230px;overflow:auto;margin-top:2px}
+.cb-it{padding:7px 10px;cursor:pointer}.cb-it:hover,.cb-it.hi{background:#f3f4f6}.cb-it.on{font-weight:600}.cb-new{color:#2563eb;border-top:1px solid var(--line)}
+/* nút thu / mở menu trái */
+.navtg{margin:6px;border:1px solid rgba(255,255,255,.18);background:transparent;color:#e5e7eb;font-size:16px;line-height:1;padding:7px 0;border-radius:6px}
+.navtg:hover{background:rgba(255,255,255,.08)}
+@media(max-width:760px){#nav{width:44px}#nav a{padding:10px 12px;gap:10px}#nav .logo{padding:0 10px}#nav.open{width:190px}}
+/* dòng vừa thêm / sửa */
+@keyframes flashrow{from{background:#fef9c3}to{background:transparent}}tr.flash td{animation:flashrow 2.5s ease-out}
+@media(max-width:700px){#view{padding:8px}.bar2 input[type=search]{min-width:150px;flex:1}}
+</style>

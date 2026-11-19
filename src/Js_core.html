@@ -1,0 +1,581 @@
+<script>
+'use strict';
+/* ================= Tiện ích ================= */
+var S = { ver: null, user: null, perms: {}, cfg: {}, customers: [], projects: [], roles: {} };
+function $(s, r) { return (r || document).querySelector(s); }
+function h(tag, a) {
+  var e = document.createElement(tag), kids = Array.prototype.slice.call(arguments, 2);
+  if (a) Object.keys(a).forEach(function (n) {
+    var v = a[n]; if (v == null || v === false) return;
+    if (n === 'class') e.className = v; else if (n === 'html') e.innerHTML = v;
+    else if (n.slice(0, 2) === 'on') e.addEventListener(n.slice(2), v);
+    else if (n === 'value' || n === 'checked' || n === 'disabled' || n === 'selected') e[n] = v;
+    else e.setAttribute(n, v === true ? '' : v);
+  });
+  (function add(list) { list.forEach(function (c) { if (c == null || c === false) return; if (Array.isArray(c)) return add(c); e.appendChild(c.nodeType ? c : document.createTextNode(String(c))); }); })(kids);
+  return e;
+}
+function N(n) { n = Number(n) || 0; return n.toLocaleString('vi-VN', { maximumFractionDigits: 3 }); }
+function M(n) { return Math.round(Number(n) || 0).toLocaleString('vi-VN'); }
+function P(x) { return (Math.round((Number(x) || 0) * 1000) / 10).toLocaleString('vi-VN') + '%'; }
+function D(s) { s = String(s || '').slice(0, 10); if (!s) return ''; var a = s.split('-'); return a.length === 3 ? a[2] + '/' + a[1] + '/' + a[0] : s; }
+function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function strip(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd'); }
+function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
+function by(arr, k) { var m = {}; (arr || []).forEach(function (x) { m[x[k]] = x; }); return m; }
+function num(v) { var n = parseFloat(v); return isFinite(n) ? n : 0; }
+function toast(msg, err) {
+  var t = h('div', { class: 'toast' + (err ? ' err' : '') }, msg);
+  $('#toasts').appendChild(t);
+  setTimeout(function () { t.remove(); }, err ? 20000 : 3200);   // lỗi giữ 20 giây
+  if (err) t.addEventListener('click', function () { t.remove(); });
+}
+function perfNote(a, tot, ms, ms0) {
+  var el = document.getElementById('perfst');
+  if (!el) { el = h('div', { id: 'perfst', style: 'position:fixed;right:14px;bottom:36px;color:#9ca3af;font-size:11px;z-index:40;pointer-events:none' }); document.body.appendChild(el); }
+  el.textContent = '⏱ ' + a + ': ' + (tot / 1000).toFixed(1) + 's' + (ms != null ? ' (máy chủ ' + (ms / 1000).toFixed(1) + 's, khởi tạo ' + ((ms0 || 0) / 1000).toFixed(1) + 's)' : '');
+}
+var busyN = 0;
+function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
+/* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
+var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, rfqList: 1, rfqGet: 1, rfqMaps: 1 };
+var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, rfqSave: 1, rfqRemove: 1, rfqToQuote: 1 };
+var MEMO_TTL = 300000, REVAL_AFTER = 15000;
+function raw(action, payload, quiet) {
+  return new Promise(function (res, rej) {
+    if (!quiet) busy(1);
+    var t0 = Date.now();
+    google.script.run
+      .withSuccessHandler(function (r) { if (!quiet) { busy(-1); perfNote(action, Date.now() - t0, r && r.ms, r && r.ms0); } if (r && r.ok) res(r.data); else { var m = (r && r.error) || 'Lỗi không xác định', er = new Error(m); if (!quiet) toast(m, true); er.shown = !quiet; rej(er); } })
+      .withFailureHandler(function (e) { if (!quiet) busy(-1); var m = (e && e.message) || 'Mất kết nối máy chủ', er = new Error(m); if (!quiet) toast(m, true); er.shown = !quiet; rej(er); })
+      .api(action, payload || {});
+  });
+}
+function clone(x) { return x === undefined ? x : JSON.parse(JSON.stringify(x)); }
+function safeToRefresh() { var hs = location.hash; return !document.querySelector('#modals .ov') && !/^#\/(quote|doc|delivery)\//.test(hs); }
+var refreshT; function softRefresh() { clearTimeout(refreshT); refreshT = setTimeout(function () { if (safeToRefresh()) route(); }, 200); }
+function call(action, payload) {
+  if (!READS[action]) return raw(action, payload).then(function (r) { if (WRITES[action]) { MEMO = {}; S.ver = null; try { localStorage.removeItem(CACHE_KEY); } catch (e) { } } return r; });
+  var key = memoKey(action, payload), m = MEMO[key], age = m ? Date.now() - m.t : 0;
+  if (m && age < MEMO_TTL) {
+    if (age > REVAL_AFTER && !m.rv) {            // có bản cũ → hiện ngay, hỏi lại máy chủ ngầm
+      m.rv = 1;
+      raw(action, payload, true).then(function (d) { var sd = JSON.stringify(d); if (MEMO[key] !== m) return; MEMO[key] = { t: Date.now(), s: sd, d: d }; if (sd !== m.s) softRefresh(); }, function () { m.rv = 0; });
+    }
+    return Promise.resolve(clone(m.d));
+  }
+  return raw(action, payload).then(function (d) { MEMO[key] = { t: Date.now(), s: JSON.stringify(d), d: d }; return clone(d); });
+}
+/* Tải sẵn các danh sách chính: GỘP thành 1 lượt gọi máy chủ, rồi lưu vào trình duyệt để lần mở sau hiện ngay */
+var CACHE_KEY = 'hato_cache_v2';
+function memoKey(action, payload) { return action + '|' + JSON.stringify(payload || {}); }
+function cacheSave() {
+  try {
+    var o = { t: Date.now(), ver: S.cfgVer || '', user: S.user && S.user.email, boot: S.boot, memo: {} };
+    Object.keys(MEMO).forEach(function (k) { if (/^(list|dashboard)\|/.test(k) && MEMO[k] && MEMO[k].s) o.memo[k] = MEMO[k].s; });
+    var txt = JSON.stringify(o); if (txt.length < 2500000) localStorage.setItem(CACHE_KEY, txt);
+  } catch (e) { }
+}
+function cacheLoad() {
+  try {
+    var o = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); if (!o || !o.boot) return null;
+    Object.keys(o.memo || {}).forEach(function (k) { MEMO[k] = { t: Date.now() - REVAL_AFTER - 1000, s: o.memo[k], d: JSON.parse(o.memo[k]) }; });   // coi là "cũ": hiện ngay rồi hỏi lại máy chủ ngầm
+    return o;
+  } catch (e) { return null; }
+}
+function prefetch() {
+  var jobs = [['list', { table: 'projects', customer_id: '' }, 'projects'], ['list', { table: 'docs' }, 'docs'], ['list', { table: 'quotes' }, 'quotes'], ['list', { table: 'deliveries' }, 'deliveries'], ['list', { table: 'customers' }, 'customers']];
+  if (S.perms.dashboard && S.perms.dashboard.view) jobs.unshift(['dashboard', { from: '', to: '', customer_id: '', project_id: '' }, 'dashboard']);
+  jobs = jobs.filter(function (j) { return S.perms[j[2]] && S.perms[j[2]].view; });
+  raw('batch', { calls: jobs.map(function (j) { return { a: j[0], p: j[1] }; }) }, true).then(function (rs) {
+    rs.forEach(function (r, i) { if (r && r.ok) { var d = r.data; MEMO[memoKey(jobs[i][0], jobs[i][1])] = { t: Date.now(), s: JSON.stringify(d), d: d }; } });
+    cacheSave();
+  }, function () { });
+}
+/* Cứ 60 giây hỏi máy chủ có ai vừa sửa dữ liệu không */
+function pollVersion() {
+  if (document.hidden) return;
+  raw('version', {}, true).then(function (v) {
+    if (S.ver == null) { S.ver = v; return; }
+    if (v !== S.ver) { S.ver = v; MEMO = {}; if (safeToRefresh()) route(); }
+  }, function () { });
+}
+/* safe(): lỗi đã hiện thông báo đỏ (20 giây) thì trả null để màn hình giữ nguyên (form không đóng, không báo "đã lưu").
+   Lỗi chưa được báo (lỗi chương trình) thì báo ra màn hình + ghi console — không có lỗi nào bị nuốt im lặng. */
+function safe(p) { return p.catch(function (e) { try { console.warn('[HATO]', e); } catch (x) { } if (!(e && e.shown)) toast('Lỗi: ' + ((e && e.message) || e), true); return null; }); }
+function dl(name, mime, b64) {
+  var bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  var blob = new Blob([arr], { type: mime });
+  function fallback() { var a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 500); }
+  if (window.showSaveFilePicker && window.top === window.self) {
+    var ext = name.split('.').pop();
+    window.showSaveFilePicker({ suggestedName: name }).then(function (fh) { return fh.createWritable().then(function (w) { return w.write(blob).then(function () { return w.close(); }); }); }).catch(function (e) { if (e && e.name !== 'AbortError') fallback(); });
+  } else fallback();
+}
+function exportDone(r) {          // báo kết quả xuất file: có liên kết mở file trên Drive
+  var body = h('div', null, h('p', null, 'Đã tạo file: ', h('b', null, r.name)),
+    r.url ? h('p', null, h('a', { href: r.url, target: '_blank', rel: 'noopener', style: 'color:#1d4ed8;font-weight:600' }, 'Mở file trên Drive')) : h('p', { class: 'mut' }, 'Không lưu được lên Drive; nếu máy không tự tải file, hãy dùng nút In > Lưu dạng PDF.'),
+    h('p', { class: 'mut' }, 'Nếu máy không tự tải xuống, mở file bằng liên kết trên. File được lưu trong thư mục HATO ERP > Xuất file.'));
+  modal({ title: 'Đã xuất file', body: body, dismiss: true });
+}
+function doExport(kind, id, format) {
+  if (format === 'pdf') return previewExport(kind, id);     // PDF: xem trước ngay trên màn hình, rồi in hoặc tải
+  return safe(call('export', { kind: kind, id: id, format: format, drive: 1 })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
+}
+function previewExport(kind, id) {
+  return safe(call('export', { kind: kind, id: id, format: 'html' })).then(function (r) {
+    if (!r) return;
+    var fr = h('iframe', { style: 'width:100%;height:72vh;border:1px solid #d1d5db;background:#fff' }); fr.srcdoc = r.html;
+    modal({
+      title: r.title, wide: true, body: fr,
+      buttons: [
+        { label: 'In', cls: 'pri', fn: function () { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (e) { toast('Trình duyệt chặn in, hãy bấm Tải PDF.', true); } } },
+        { label: 'Tải PDF', fn: function () { safe(call('export', { kind: kind, id: id, format: 'pdf', drive: 1 })).then(function (x) { if (x) { dl(x.name, x.mime, x.base64); exportDone(x); } }); } }
+      ], closeLabel: 'Đóng'
+    });
+  });
+}
+function exportMenu(kind, id, formats) {
+  var wrap = h('span', { class: 'acts' });
+  (formats || ['xls', 'pdf', 'doc']).forEach(function (f) {
+    wrap.appendChild(h('button', { onclick: function () { doExport(kind, id, f); } }, { xls: 'Excel', pdf: 'PDF', doc: 'Word' }[f]));
+  });
+  return wrap;
+}
+function setTitle(t, acts) { $('#title').textContent = t; var a = $('#acts'); a.innerHTML = ''; (acts || []).forEach(function (x) { if (x) a.appendChild(x); }); document.title = t + ' - HA TO'; }
+function opt(list, labelFn, valFn) { return list.map(function (x) { return [valFn ? valFn(x) : x.id, labelFn ? labelFn(x) : x.name]; }); }
+function sel(options, value, onchange, blank) {
+  var s = h('select', { onchange: onchange });
+  if (blank != null) s.appendChild(h('option', { value: '' }, blank));
+  options.forEach(function (o) { s.appendChild(h('option', { value: o[0] }, o[1])); });
+  s.value = value == null ? '' : value; return s;
+}
+var STATUS_CLS = { 'Đang chào giá': 'b-info', 'Đang thực hiện': 'b-warn', 'Hoàn thành': 'b-ok', 'Hủy': 'b-bad', 'NHAP': '', 'DA_GIAO': 'b-ok', 'HUY': 'b-bad' };
+var STATUS_LB = { NHAP: 'Nháp', DA_GIAO: 'Đã giao', HUY: 'Hủy' };
+function badge(s) { return h('span', { class: 'badge ' + (STATUS_CLS[s] || '') }, STATUS_LB[s] || s); }
+var TYPE_LB = { HD: 'Hợp đồng', PO: 'PO', PLHD: 'Phụ lục HĐ' };
+function projLabel(p) { return p.code + ' · ' + p.name; }
+function pjCell(r) { return r.project_kind === 'LE' ? h('span', { class: 'badge b-info' }, 'Bán lẻ') : r.project_code + ' · ' + r.project_name; }
+function projOpts() { return S.projects.map(function (p) { return [p.id, projLabel(p)]; }); }
+function custName(id) { var c = by(S.customers, 'id')[id]; return c ? c.name : ''; }
+function reloadLookups() {
+  return call('bootstrap').then(function (b) { S.customers = b.customers; S.projects = b.projects; });
+}
+
+/* ================= Bản nháp (lưu tạm trên trình duyệt) ================= */
+var DR = {
+  key: function () { return 'hatoDraft:' + ((S.user && S.user.email) || ''); },
+  all: function () { try { var a = JSON.parse(localStorage.getItem(DR.key()) || '{}'), lim = Date.now() - 30 * 864e5; Object.keys(a).forEach(function (k) { if (!a[k] || a[k].ts < lim) delete a[k]; }); return a; } catch (e) { return {}; } },
+  save: function (a) { try { localStorage.setItem(DR.key(), JSON.stringify(a)); } catch (e) { } },
+  put: function (id, rec) { var a = DR.all(); a[id] = rec; DR.save(a); DR.badge(); },
+  del: function (id) { var a = DR.all(); if (a[id]) { delete a[id]; DR.save(a); } DR.badge(); },
+  badge: function () { var n = Object.keys(DR.all()).length, el = document.getElementById('draftnav'); if (el) { el.style.display = n ? '' : 'none'; el.querySelector('.lb').textContent = 'Bản nháp (' + n + ')'; } }
+};
+var ACTIVE_DRAFTS = [];
+function fmtTs(t) { var d = new Date(t), p = function (x) { return (x < 10 ? '0' : '') + x; }; return p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + p(d.getDate()) + '/' + p(d.getMonth() + 1); }
+function draftStatus(msg) {
+  var el = document.getElementById('draftst');
+  if (!el) { el = h('div', { id: 'draftst', style: 'position:fixed;right:14px;bottom:10px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:6px;padding:4px 10px;font-size:12px;z-index:50;display:none' }); document.body.appendChild(el); }
+  el.textContent = msg || ''; el.style.display = msg ? '' : 'none';
+}
+function formSet(f, d) {
+  Object.keys(d || {}).forEach(function (k) {
+    var e = f.inputs[k]; if (!e || e.disabled) return;
+    setVal(e, d[k]);
+    if (k === 'doc_id') e.dispatchEvent(new Event('change'));
+  });
+}
+function draftWatch(o) {
+  var ctl = { dirty: false, dead: false, t: null }, base = '';
+  try { base = JSON.stringify(o.get()); } catch (e) { }
+  var st = DR.all()[o.id];
+  if (st) {
+    try {
+      o.set(st.data); ctl.dirty = true;
+      var bn = h('div', { class: 'card', style: 'background:#fef3c7;border:1px solid #fcd34d;color:#92400e' }, h('b', null, '📝 Bản nháp chưa lưu'), ' (lưu lúc ' + fmtTs(st.ts) + '). Bấm Lưu để chính thức lưu. ',
+        h('button', { onclick: function () { ctl.clear(); draftStatus(''); toast('Đã bỏ bản nháp'); if (o.discard) o.discard(); else route(); } }, 'Bỏ nháp'));
+      o.root.insertBefore(bn, o.root.firstChild);
+    } catch (e) { }
+  }
+  ctl.flush = function () {
+    clearTimeout(ctl.t); if (ctl.dead || !ctl.dirty) return;
+    var cur; try { cur = JSON.stringify(o.get()); } catch (e) { return; }
+    if (cur === base) { DR.del(o.id); draftStatus(''); return; }
+    DR.put(o.id, { id: o.id, label: o.label, hash: o.hash, re: o.re || null, ts: Date.now(), data: JSON.parse(cur) });
+    draftStatus('📝 Nháp đã lưu lúc ' + fmtTs(Date.now()).slice(0, 5));
+  };
+  var mark = function () { if (ctl.dead) return; ctl.dirty = true; clearTimeout(ctl.t); ctl.t = setTimeout(ctl.flush, 700); };
+  ['input', 'change', 'click'].forEach(function (ev) { o.root.addEventListener(ev, mark); });
+  ctl.unreg = function () { var i = ACTIVE_DRAFTS.indexOf(ctl); if (i >= 0) ACTIVE_DRAFTS.splice(i, 1); };
+  ctl.end = function () { ctl.flush(); ctl.dead = true; ctl.unreg(); };
+  ctl.clear = function () { clearTimeout(ctl.t); ctl.dead = true; ctl.unreg(); DR.del(o.id); draftStatus(''); };
+  ACTIVE_DRAFTS.push(ctl);
+  return ctl;
+}
+window.addEventListener('beforeunload', function () { ACTIVE_DRAFTS.slice().forEach(function (c) { c.flush(); }); });
+function draftsModal() {
+  var a = DR.all(), ks = Object.keys(a).sort(function (x, y) { return a[y].ts - a[x].ts; }), body = h('div'), m;
+  if (!ks.length) body.appendChild(h('div', { class: 'mut' }, 'Không có bản nháp.'));
+  ks.forEach(function (k) {
+    var d = a[k], row = h('div', { class: 'bar2', style: 'justify-content:space-between' }, h('span', null, h('b', null, d.label), h('span', { class: 'mut' }, '  ' + fmtTs(d.ts))));
+    row.appendChild(h('span', null, h('button', { class: 'pri', onclick: function () { m.close(); draftOpen(d); } }, 'Mở tiếp'), ' ', h('button', { class: 'dng', onclick: function () { DR.del(k); row.remove(); } }, 'Xóa')));
+    body.appendChild(row);
+  });
+  m = modal({ title: 'Bản nháp chưa lưu', body: body, dismiss: true });
+}
+function draftOpen(d) {
+  var re = d.re;
+  if (location.hash !== d.hash) location.hash = d.hash;
+  if (!re) return;
+  setTimeout(function () {
+    if (re.t === 'customer') customerModal(null, route);
+    else if (re.t === 'project') projectModal(null, route);
+    else if (re.t === 'entity') entityModal(re.key, re.pid, null, route);
+  }, 500);
+}
+
+/* ================= Modal ================= */
+function modal(o) {
+  var ov = h('div', { class: 'ov' }), ctl = null;
+  var close = function () { if (ctl) ctl.end(); ov.remove(); if (o.onclose) o.onclose(); };
+  var closeSaved = function () { if (ctl) ctl.clear(); ov.remove(); if (o.onclose) o.onclose(); };
+  var foot = h('div', { class: 'mf' });
+  (o.buttons || []).forEach(function (b) { foot.appendChild(h('button', { class: b.cls || '', onclick: function () { b.fn(closeSaved); } }, b.label)); });
+  foot.appendChild(h('button', { onclick: close }, o.closeLabel || 'Đóng'));
+  var md = h('div', { class: 'md' + (o.wide ? ' wide' : '') }, h('div', { class: 'mh' }, h('b', null, o.title), h('button', { onclick: close }, '✕')), h('div', { class: 'mb' }, o.body), foot);
+  ov.appendChild(md); $('#modals').appendChild(ov);
+  ov.addEventListener('mousedown', function (e) { if (e.target === ov && o.dismiss) close(); });
+  if (o.draft && S.user) ctl = draftWatch(Object.assign({ root: md.querySelector('.mb'), discard: function () { ov.remove(); } }, o.draft));
+  return { close: close, el: md };
+}
+function confirmBox(msg, ok) { modal({ title: 'Xác nhận', body: h('div', null, msg), buttons: [{ label: 'Đồng ý', cls: 'pri', fn: function (c) { c(); ok(); } }], closeLabel: 'Hủy' }); }
+
+/* ================= Form ================= */
+/* Ô ngày: dùng Flatpickr (hiện dd/mm/yyyy, giá trị lưu yyyy-mm-dd); nếu không tải được thư viện thì dùng ô ngày mặc định của trình duyệt */
+function dateInput(v) {
+  var el = h('input', { type: 'date', value: v || '' });
+  try {
+    if (window.flatpickr) {
+      el.type = 'text'; el.value = v || '';
+      flatpickr(el, { dateFormat: 'Y-m-d', altInput: true, altFormat: 'd/m/Y', allowInput: true, locale: (flatpickr.l10ns && flatpickr.l10ns.vn) || 'default', disableMobile: true, defaultDate: v || null });
+    }
+  } catch (e) { }
+  return el;
+}
+function setVal(e, v) { v = v == null ? '' : v; if (e._flatpickr) e._flatpickr.setDate(v || null, false); else e.value = v; }
+/* Ô vừa chọn vừa gõ: bấm ▾ hiện cả danh sách, gõ chữ thì lọc; chữ không có trong danh sách vẫn được nhận như giá trị mới. */
+function combo(inp, list) {
+  var opts = [], seen = {};
+  (typeof list === 'function' ? list() : list || []).forEach(function (x) { x = String(x == null ? '' : x).trim(); var k = x.toLowerCase(); if (x && !seen[k]) { seen[k] = 1; opts.push(x); } });
+  var box = h('div', { class: 'cb-list', role: 'listbox' }), wrap = h('div', { class: 'cb' }), cur = -1, all = false;
+  var btn = h('button', { type: 'button', class: 'cb-btn', tabindex: '-1', title: 'Chọn từ danh sách', onmousedown: function (e) { e.preventDefault(); }, onclick: function () { if (box.style.display === 'block') close(); else { if (document.activeElement !== inp) inp.focus(); all = true; open(); } } }, '▾');
+  inp.setAttribute('autocomplete', 'off'); inp.setAttribute('role', 'combobox');
+  wrap.append(inp, btn, box); inp._combo = wrap;
+  function items() { var q = strip(inp.value); return all || !q ? opts : opts.filter(function (x) { return strip(x).indexOf(q) >= 0; }); }
+  function open() {
+    var it = items(), v = inp.value.trim(); box.innerHTML = ''; cur = -1;
+    it.slice(0, 200).forEach(function (x) { box.appendChild(h('div', { class: 'cb-it' + (x === v ? ' on' : ''), onmousedown: function (e) { e.preventDefault(); pick(x); } }, x)); });
+    if (v && !opts.some(function (x) { return x.toLowerCase() === v.toLowerCase(); })) box.appendChild(h('div', { class: 'cb-it cb-new', onmousedown: function (e) { e.preventDefault(); pick(v); } }, 'Dùng giá trị mới: «' + v + '»'));
+    if (!box.children.length) box.appendChild(h('div', { class: 'cb-it mut' }, 'Chưa có — gõ để thêm mới'));
+    box.style.display = 'block';
+  }
+  function close() { box.style.display = 'none'; all = false; }
+  function pick(x) { inp.value = x; close(); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true })); }
+  function mv(d) { var k = box.querySelectorAll('.cb-it:not(.mut)'); if (!k.length) return; cur = (cur + d + k.length) % k.length; k.forEach(function (e, i) { e.classList.toggle('hi', i === cur); }); k[cur].scrollIntoView({ block: 'nearest' }); }
+  inp.addEventListener('focus', function () { all = false; open(); });
+  inp.addEventListener('input', function () { all = false; if (document.activeElement === inp) open(); });
+  inp.addEventListener('blur', function () { setTimeout(close, 120); });
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (box.style.display !== 'block') open(); mv(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); mv(-1); }
+    else if (e.key === 'Enter' && box.style.display === 'block' && cur >= 0) { e.preventDefault(); var k = box.querySelectorAll('.cb-it:not(.mut)')[cur]; if (k) k.dispatchEvent(new Event('mousedown')); }
+    else if (e.key === 'Escape' && box.style.display === 'block') { e.stopPropagation(); close(); }
+  });
+  return inp;
+}
+function form(fields, vals) {
+  var inputs = {}, root = h('div', { class: 'fg' });
+  fields.forEach(function (f) {
+    var v = vals[f.k], el;
+    if (f.type === 'select') el = sel(f.opts, v, f.onchange, f.blank);
+    else if (f.type === 'textarea') el = h('textarea', { value: v || '' });
+    else if (f.type === 'number') el = h('input', { type: 'number', step: 'any', value: v == null ? '' : v });
+    else if (f.type === 'date') el = dateInput(v);
+    else el = h('input', { type: 'text', value: v == null ? '' : v, placeholder: f.ph || '' });
+    if (f.list) el = combo(el, f.list);
+    if (f.disabled) el.disabled = true;
+    if (f.oninput) el.addEventListener('input', f.oninput);
+    inputs[f.k] = el;
+    root.appendChild(h('label', { class: f.full ? 'full' : '' }, h('span', { class: f.req ? 'req' : '' }, f.label), el._combo || el));
+    if (el._flatpickr && el._flatpickr.altInput && !el._flatpickr.altInput.parentNode) el.parentNode.insertBefore(el._flatpickr.altInput, el.nextSibling);   // ô ngày hiển thị dd/mm/yyyy (flatpickr chỉ chèn khi ô đã có cha)
+  });
+  return {
+    el: root, inputs: inputs,
+    get: function () {
+      var o = {};
+      fields.forEach(function (f) { var e = inputs[f.k]; o[f.k] = f.type === 'number' ? (e.value === '' ? '' : num(e.value)) : e.value; });
+      return o;
+    },
+    set: function (k, v) { setVal(inputs[k], v); }
+  };
+}
+
+/* ================= Bảng dữ liệu ================= */
+/* Trạng thái tìm kiếm / bộ lọc / trang / sắp xếp của từng bảng, theo địa chỉ trang: sau khi thêm, sửa, xóa,
+   trang vẽ lại nhưng vẫn giữ đúng chỗ đang xem. TSEQ đánh số các bảng trong một trang, đặt lại mỗi lần route(). */
+var TSTATE = {}, TSEQ = 0;
+function table(o) {
+  /* o: cols[{k,label,fmt(row)->node|string,cls,sort}], rows, search(row)->string, filters[{label,opts,get}], onRow, pageSize, foot(rows)->tr */
+  var skey = location.hash + '|' + (TSEQ++), st = TSTATE[skey] || (TSTATE[skey] = { q: '', page: 1, sort: null, dir: 1, f: {} }), root = h('div'), body = h('tbody'), pager = h('div', { class: 'pager' }), foot = h('tfoot');
+  var ps = o.pageSize || 50;
+  function filtered() {
+    var rows = o.rows.slice(), toks = strip(st.q).split(/\s+/).filter(Boolean);
+    if (toks.length && o.search) rows = rows.filter(function (r) { var s = strip(o.search(r)); return toks.every(function (t) { return s.indexOf(t) >= 0; }); });
+    (o.filters || []).forEach(function (f, i) { var v = st.f[i]; if (v) rows = rows.filter(function (r) { return String(f.get(r)) === v; }); });
+    if (st.sort) {
+      var c = o.cols.filter(function (x) { return x.k === st.sort; })[0], key = c && (c.val || function (r) { return r[c.k]; });
+      if (key) rows.sort(function (a, b) { var x = key(a), y = key(b); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x == null ? '' : x).localeCompare(String(y == null ? '' : y), 'vi')) * st.dir; });
+    }
+    return rows;
+  }
+  function draw() {
+    var rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) st.page = pages;
+    body.innerHTML = '';
+    rows.slice((st.page - 1) * ps, st.page * ps).forEach(function (r) {
+      var tr = h('tr', { class: o.onRow ? 'rw' : '', onclick: o.onRow ? function () { o.onRow(r); } : null });
+      o.cols.forEach(function (c) { tr.appendChild(h('td', { class: c.cls || '' }, c.fmt ? c.fmt(r) : (r[c.k] == null ? '' : r[c.k]))); });
+      body.appendChild(tr);
+    });
+    if (!rows.length) body.appendChild(h('tr', null, h('td', { colspan: o.cols.length, class: 'mut c', style: 'padding:18px' }, o.empty || 'Chưa có dữ liệu')));
+    foot.innerHTML = ''; if (o.foot && rows.length) { var f = o.foot(rows); if (f) foot.appendChild(f); }
+    pager.innerHTML = '';
+    pager.appendChild(h('span', null, rows.length + ' dòng'));
+    if (pages > 1) pager.append(h('button', { disabled: st.page <= 1, onclick: function () { st.page--; draw(); } }, '‹'), h('span', null, st.page + '/' + pages), h('button', { disabled: st.page >= pages, onclick: function () { st.page++; draw(); } }, '›'));
+  }
+  var bar = h('div', { class: 'bar2' });
+  if (o.search) bar.appendChild(h('input', { type: 'search', placeholder: 'Tìm kiếm…', value: st.q, oninput: debounce(function (e) { st.q = e.target.value; st.page = 1; draw(); }, 150) }));
+  (o.filters || []).forEach(function (f, i) { bar.appendChild(sel(f.opts, st.f[i] || '', function (e) { st.f[i] = e.target.value; st.page = 1; draw(); }, f.label)); });
+  (o.tools || []).forEach(function (t) { bar.appendChild(t); });
+  var head = h('tr', null, o.cols.map(function (c) {
+    return h('th', { class: (c.cls || '') + (c.sort === false ? '' : ' s'), onclick: c.sort === false ? null : function () { if (st.sort === c.k) st.dir = -st.dir; else { st.sort = c.k; st.dir = 1; } draw(); } }, c.label);
+  }));
+  root.append(bar, h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, head), body, foot)), pager);
+  draw();
+  root.redraw = draw;
+  return root;
+}
+
+/* ================= Biểu đồ ================= */
+function barChart(data, keys, colors, labelKey) {
+  var W = 520, H = 190, pl = 44, pb = 22, max = 0;
+  data.forEach(function (d) { keys.forEach(function (k) { max = Math.max(max, d[k] || 0); }); });
+  if (!data.length || !max) return h('div', { class: 'mut', style: 'padding:30px 0;text-align:center' }, 'Chưa có dữ liệu');
+  var bw = (W - pl) / data.length, g = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%">';
+  for (var i = 0; i <= 4; i++) { var y = (H - pb) - (H - pb - 8) * i / 4; g += '<line x1="' + pl + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eee"/><text x="' + (pl - 4) + '" y="' + (y + 3) + '" text-anchor="end">' + (max * i / 4 >= 1e9 ? (max * i / 4e9).toFixed(1) + ' tỷ' : max * i / 4 >= 1e6 ? Math.round(max * i / 4e6) + ' tr' : Math.round(max * i / 4)) + '</text>'; }
+  data.forEach(function (d, j) {
+    var sw = Math.min(26, bw * .7 / keys.length);
+    keys.forEach(function (k, ki) { var v = d[k] || 0, bh = (H - pb - 8) * v / max, x = pl + j * bw + (bw - sw * keys.length) / 2 + ki * sw; g += '<rect x="' + x + '" y="' + (H - pb - bh) + '" width="' + (sw - 2) + '" height="' + bh + '" fill="' + colors[ki] + '"><title>' + esc(d[labelKey]) + ': ' + M(v) + '</title></rect>'; });
+    g += '<text x="' + (pl + j * bw + bw / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(String(d[labelKey]).slice(2)) + '</text>';
+  });
+  return h('div', { html: g + '</svg>' });
+}
+var CHARTJS = null;
+function loadChartJs() {          // chỉ tải khi mở trang Tổng quan
+  if (window.Chart) return Promise.resolve(true);
+  if (!CHARTJS) CHARTJS = new Promise(function (res) { var sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js'; sc.onload = function () { res(!!window.Chart); }; sc.onerror = function () { CHARTJS = null; res(false); }; document.head.appendChild(sc); });
+  return CHARTJS;
+}
+function monthChart(data) {       // biểu đồ cột Chart.js; không tải được thì dùng biểu đồ cột tự vẽ
+  var box = h('div', { style: 'position:relative;height:220px' }), cv = h('canvas');
+  if (!data || !data.length) return h('div', { class: 'mut', style: 'padding:20px 0;text-align:center' }, 'Chưa có dữ liệu');
+  box.appendChild(barChart(data, ['quote', 'converted'], ['#94a3b8', '#e31e24'], 'm'));
+  loadChartJs().then(function (ok) {
+    if (!ok || !box.isConnected) return;
+    box.innerHTML = ''; box.appendChild(cv);
+    new Chart(cv, { type: 'bar', data: { labels: data.map(function (x) { return x.m; }), datasets: [{ label: 'Báo giá', data: data.map(function (x) { return x.quote; }), backgroundColor: '#94a3b8' }, { label: 'Đã chuyển thành HĐ/PO/PLHD', data: data.map(function (x) { return x.converted; }), backgroundColor: '#e31e24' }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + M(c.parsed.y) + ' đ'; } } } }, scales: { y: { ticks: { callback: function (v) { return v >= 1e6 ? v / 1e6 + ' tr' : v; } } } } } });
+  });
+  return box;
+}
+function hbars(data, labelFn, valFn, fmt, color) {
+  if (!data.length) return h('div', { class: 'mut', style: 'padding:20px 0;text-align:center' }, 'Chưa có dữ liệu');
+  var max = Math.max.apply(null, data.map(valFn)) || 1;
+  return h('div', null, data.map(function (d) {
+    return h('div', { style: 'display:grid;grid-template-columns:minmax(110px,40%) 1fr 56px;gap:8px;align-items:center;margin:5px 0' },
+      h('span', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: labelFn(d) }, labelFn(d)),
+      h('div', { class: 'prog' }, h('i', { style: 'width:' + Math.max(2, valFn(d) / max * 100) + '%;background:' + (color || 'var(--brand)') })), h('span', { class: 'r', style: 'text-align:right' }, fmt(valFn(d))));
+  }));
+}
+
+/* ================= Bộ sửa dòng hàng ================= */
+/* mode: quote | doc | delivery */
+function lineEditor(o) {
+  var lines = o.lines, mode = o.mode, canPrice = S.perms.canPrice, root = h('div'), body = h('tbody'), foot = h('tfoot');
+  var cols = {
+    quote: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 110], ['model', 'Model', 'text', 90], ['brand', 'Hãng', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 65], ['cost', 'Giá mua (nội bộ)', 'n', 100], ['coef', 'Hệ số', 'n', 62], ['price', 'Đơn giá', 'n', 100], ['disc_pct', 'CK %', 'n', 55], ['amount', 'Thành tiền', 'ro', 110], ['note', 'Ghi chú', 'text', 100]],
+    doc: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['origin', 'Xuất xứ', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 70], ['price_offer', 'Đơn giá chào', 'ro', 100], ['price', 'Đơn giá chốt', 'n', 100], ['cost_list', 'Giá mua (bảng giá)', 'ro', 100], ['cost', 'Giá mua (chốt, sửa được)', 'n', 110], ['_rs', '', 'rs', 28], ['amount', 'Thành tiền', 'ro', 110], ['source', 'Nguồn', 'src', 80], ['note', 'Ghi chú', 'text', 90]],
+    delivery: [['doc_code', 'Văn bản', 'ro', 90], ['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL giao', 'n', 80], ['note', 'Ghi chú', 'text', 120]]
+  }[mode];
+  function rp(c, f) { return Math.round(num(c) * num(f) / 100) * 100; }
+  function recalc(l, k) {      // giá mua / hệ số → đơn giá; đơn giá → hệ số
+    if (k === 'price') { if (num(l.cost) > 0) l.coef = Math.round(num(l.price) / num(l.cost) * 100) / 100; }
+    else if (num(l.cost) > 0 && num(l.coef) > 0) l.price = rp(l.cost, l.coef);
+  }
+  lines.forEach(function (l) { if (mode === 'quote' && (l.coef == null || l.coef === '' || num(l.coef) === 0) && num(l.cost) > 0 && num(l.price) > 0) l.coef = Math.round(num(l.price) / num(l.cost) * 100) / 100; });
+  function amt(l) { return mode === 'quote' ? num(l.qty) * num(l.price) * (1 - num(l.disc_pct) / 100) : num(l.qty) * num(l.price); }
+  function total() { var t = 0; lines.forEach(function (l) { t += amt(l); }); return t; }
+  function drawFoot() {
+    foot.innerHTML = '';
+    if (mode === 'delivery') return;
+    var t = total(), ai = 0; cols.forEach(function (x, i) { if (x[0] === 'amount') ai = i; });
+    var cs = ai + 1, tail = cols.length - ai - 1 + 1;          // # + các cột trước "Thành tiền"; các cột sau + cột xóa
+    function row(label, val) { var r = h('tr', null, h('td', { colspan: cs, class: 'r' }, label), h('td', { class: 'r' }, val)); if (tail > 0) r.appendChild(h('td', { colspan: tail })); return r; }
+    if (mode === 'quote') {
+      var vat = o.getVat ? num(o.getVat()) : 0;
+      foot.append(row('Cộng tiền hàng', M(t)), row('Thuế GTGT ' + N(vat) + '%', M(t * vat / 100)), row('Tổng thanh toán', M(t + t * vat / 100)));
+      var tc = 0; lines.forEach(function (l) { tc += num(l.qty) * num(l.cost); });
+      if (tc > 0 && canPrice) { var rr = function (a, b) { var r = row(a, b); r.style.cssText = 'color:#6b7280;background:#f9fafb;font-size:12px'; r.classList.add('hide-sm'); return r; };
+        foot.append(rr('Nội bộ (không in) — Tổng giá mua', M(tc)), rr('Lãi gộp', M(t - tc)), rr('Hệ số trung bình (bán/mua)', N(Math.round(t / tc * 100) / 100))); }
+    } else foot.append(row('Tổng giá trị (chưa VAT)', M(t)));
+  }
+  function draw() {
+    body.innerHTML = '';
+    lines.forEach(function (l, i) {
+      var tr = h('tr', null, h('td', { class: 'c mut', style: 'width:28px' }, i + 1));
+      cols.forEach(function (c) {
+        var k = c[0], type = c[2], td = h('td', { class: (type === 'n' || type === 'ro' ? 'n' : '') + (mode === 'quote' && (k === 'cost' || k === 'coef') ? ' hide-sm' : ''), style: 'min-width:' + c[3] + 'px' });
+        if (type === 'rs') { var diff = mode === 'doc' && l.cost_list != null && l.cost_list !== '' && num(l.cost) !== num(l.cost_list); td.appendChild(diff ? h('button', { title: 'Đặt lại giá mua theo bảng giá (' + M(l.cost_list) + ')', style: 'border:none;background:none;color:#d97706', onclick: function () { l.cost = l.cost_list; draw(); if (o.onChange) o.onChange(); } }, '↺') : h('span')); }
+        else if (type === 'ro') td.appendChild(h('span', { style: 'padding:4px 5px;display:block;text-align:' + (k === 'doc_code' ? 'left' : 'right') }, k === 'amount' ? M(amt(l)) : k === 'doc_code' ? (l.doc_code || '—') : k === 'cost_list' ? M(l.cost_list != null && l.cost_list !== '' ? l.cost_list : l.cost) : M(l[k])));
+        else if (type === 'src') td.appendChild(h('span', { class: 'badge ' + (l.source === 'QUOTE' ? 'b-info' : 'b-warn'), style: 'margin:4px' }, l.source === 'QUOTE' ? 'Trong BG' : 'Ngoài BG'));
+        else {
+          var priceLocked = (k === 'price' || k === 'disc_pct' || k === 'cost' || k === 'coef') && !canPrice;
+          var inp = h('input', { type: type === 'n' ? 'number' : 'text', step: 'any', value: l[k] == null ? '' : l[k], disabled: priceLocked, style: k === 'coef' && mode === 'quote' ? (num(l.coef) > 0 && num(l.coef) < 1 ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : '') : k === 'cost' && mode === 'doc' ? (num(l.cost) === 0 ? 'background:#fee2e2' : (l.cost_list != null && l.cost_list !== '' && num(l.cost) !== num(l.cost_list) ? 'background:#fef3c7' : '')) : '',
+            oninput: function (e) { l[k] = type === 'n' ? (e.target.value === '' ? '' : num(e.target.value)) : e.target.value; if (type === 'n') { drawFoot(); var a = tr.querySelector('[data-amt]'); if (a) a.textContent = M(amt(l)); } if (o.onChange) o.onChange(); }, onchange: function () { if (mode === 'quote' && (k === 'cost' || k === 'coef' || k === 'price')) { recalc(l, k); draw(); if (o.onChange) o.onChange(); } else if (k === 'cost' && mode === 'doc') draw(); } });
+          td.appendChild(inp);
+        }
+        if (k === 'amount') { td.firstChild.setAttribute('data-amt', '1'); }
+        tr.appendChild(td);
+      });
+      tr.appendChild(h('td', { class: 'c', style: 'width:30px' }, h('button', { title: 'Xóa dòng', style: 'border:none;background:none;color:#b91c1c', onclick: function () { lines.splice(i, 1); draw(); if (o.onChange) o.onChange(); } }, '✕')));
+      body.appendChild(tr);
+    });
+    if (!lines.length) body.appendChild(h('tr', null, h('td', { colspan: cols.length + 2, class: 'mut c', style: 'padding:14px' }, 'Chưa có dòng hàng. Tìm hàng trong bảng giá bên dưới hoặc thêm dòng trống.')));
+    drawFoot();
+  }
+  function add(l) {
+    var base = { id: '', code: '', name: '', spec: '', coef: '', model: '', brand: '', origin: '', unit: '', qty: 1, price: 0, cost: 0, disc_pct: 0, note: '', source: 'EXTRA' };
+    lines.push(Object.assign(base, l)); draw(); if (o.onChange) o.onChange();
+  }
+  /* ô tìm hàng trong bảng giá */
+  var dd = h('div', { class: 'dd', style: 'display:none' }), q = h('input', { type: 'search', placeholder: 'Gõ để tìm hàng (tên, model, hãng, size)…', style: 'width:100%' });
+  var fGroup = h('select', { title: 'Lọc theo nhóm hàng' }, h('option', { value: '' }, 'Mọi nhóm')), fBrand = h('select', { title: 'Lọc theo hãng' }, h('option', { value: '' }, 'Mọi hãng'));
+  call('catalogList', { size: 1 }).then(function (r) { (r.groups || []).forEach(function (x) { if (x) fGroup.appendChild(h('option', { value: x }, x)); }); (r.brands || []).forEach(function (x) { if (x) fBrand.appendChild(h('option', { value: x }, x)); }); }).catch(function () { });
+  var RK = 'hato_recent_items';
+  function recent() { try { return JSON.parse(localStorage.getItem(RK) || '[]'); } catch (e) { return []; } }
+  function remember(r) { try { var a = recent().filter(function (x) { return x.code !== r.code || x.name !== r.name; }); a.unshift(r); localStorage.setItem(RK, JSON.stringify(a.slice(0, 8))); } catch (e) { } }
+  function pickRow(r) {
+    return h('div', { onclick: function () {
+      remember(r);
+      var qc = o.getCoef ? num(o.getCoef()) : 0, pr = qc > 0 && num(r.cost) > 0 ? rp(r.cost, qc) : r.price, cf = qc > 0 ? qc : (r.coef || '');
+      add({ code: r.code, name: r.name, spec: r.spec || '', coef: cf, model: r.model, brand: r.brand, origin: r.origin, unit: r.unit, price: pr, cost: r.cost, cost_list: r.cost, price_offer: pr, source: mode === 'doc' ? 'EXTRA' : 'QUOTE' });
+      dd.style.display = 'none'; q.value = '';
+    } }, h('b', null, r.name), h('br'), h('small', null, [r.brand, r.model, r.size, 'ĐVT: ' + r.unit, 'Bán ' + M(r.price) + (r.price ? '' : ' (chưa có giá)') + ' · Mua ' + M(r.cost)].filter(Boolean).join(' · ')));
+  }
+  function showRecent() {
+    var rc = recent(); dd.innerHTML = '';
+    if (!rc.length) { dd.style.display = 'none'; return; }
+    dd.appendChild(h('div', { class: 'mut' }, 'Hàng dùng gần đây'));
+    rc.forEach(function (r) { dd.appendChild(pickRow(r)); }); dd.style.display = 'block';
+  }
+  var search = debounce(function () {
+    var v = q.value.trim(), g = fGroup.value, b = fBrand.value;
+    if (v.length < 2 && !g && !b) { showRecent(); return; }
+    safe(call('catalogSearch', { q: v, group: g, brand: b, limit: 20 })).then(function (rows) {
+      dd.innerHTML = ''; if (!rows) return;
+      if (!rows.length) dd.appendChild(h('div', { class: 'mut' }, 'Không tìm thấy. Thử bỏ bớt bộ lọc hoặc gõ từ khóa khác.'));
+      rows.forEach(function (r) { dd.appendChild(pickRow(r)); });
+      if (rows.length >= 20) dd.appendChild(h('div', { class: 'mut' }, 'Hiện 20 dòng đầu. Gõ thêm từ khóa hoặc chọn nhóm/hãng để thu hẹp.'));
+      dd.style.display = 'block';
+    });
+  }, 300);
+  q.addEventListener('focus', function () { if (!q.value.trim() && !fGroup.value && !fBrand.value) showRecent(); });
+  fGroup.addEventListener('change', search); fBrand.addEventListener('change', search);
+  q.addEventListener('input', search);
+  document.addEventListener('click', function (e) { if (!root.contains(e.target)) dd.style.display = 'none'; });
+  var thead = h('thead', null, h('tr', null, h('th', null, '#'), cols.map(function (c) { return h('th', { class: (c[2] === 'n' || (c[2] === 'ro' && c[0] !== 'doc_code') ? 'r' : '') + (mode === 'quote' && (c[0] === 'cost' || c[0] === 'coef') ? ' hide-sm' : '') }, c[1]); }), h('th')));
+  root.append(h('div', { class: 'tw' }, h('table', { class: 'le' }, thead, body, foot)),
+    h('div', { class: 'bar2', style: 'margin-top:8px' }, fGroup, fBrand, h('div', { class: 'pick', style: 'flex:1;min-width:260px' }, q, dd), h('button', { onclick: function () { add({ source: 'EXTRA', price: 0 }); } }, '+ Dòng trống'), mode === 'delivery' ? null : h('button', { onclick: function () { importLines(root, mode); } }, 'Nhập file')));
+  root.add = add; root.redraw = draw; root.total = total;
+  root.applyCoef = function (c) { c = num(c); if (!(c > 0)) return 0; var n = 0; lines.forEach(function (l) { if (num(l.cost) > 0) { l.coef = c; l.price = rp(l.cost, c); n++; } }); draw(); if (o.onChange) o.onChange(); return n; };
+  draw();
+  return root;
+}
+/* bộ sửa dòng đơn giản (bảo hành / xuất xưởng) */
+function rowsEditor(cols, rows) {
+  var root = h('div'), body = h('tbody');
+  function draw() {
+    body.innerHTML = '';
+    rows.forEach(function (r, i) {
+      var tr = h('tr');
+      cols.forEach(function (c) { tr.appendChild(h('td', null, h('input', { type: c.type || 'text', step: 'any', value: r[c.k] == null ? '' : r[c.k], oninput: function (e) { r[c.k] = c.type === 'number' ? num(e.target.value) : e.target.value; } }))); });
+      tr.appendChild(h('td', { class: 'c' }, h('button', { style: 'border:none;background:none;color:#b91c1c', onclick: function () { rows.splice(i, 1); draw(); } }, '✕')));
+      body.appendChild(tr);
+    });
+  }
+  root.append(h('div', { class: 'tw' }, h('table', { class: 'le' }, h('thead', null, h('tr', null, cols.map(function (c) { return h('th', null, c.label); }), h('th'))), body)),
+    h('div', { style: 'margin-top:6px' }, h('button', { onclick: function () { rows.push({ qty: 1 }); draw(); } }, '+ Thêm dòng')));
+  root.draw = draw; draw();
+  return root;
+}
+
+/* ================= Điều hướng ================= */
+var MENU = [['dashboard', '📊', 'Dashboard'], ['pricelist', '💲', 'Bảng giá'], ['customers', '👥', 'Khách hàng'], ['projects', '📁', 'Dự án'], ['quotes', '📝', 'Báo giá'], ['docs', '📄', 'HĐ / PO / Phụ lục HĐ'], ['deliveries', '🚚', 'Giao hàng'], ['costs', '💰', 'Chi phí dự án'], ['advances', '💵', 'Tạm ứng'], ['payments', '🧾', 'Thanh toán'], ['warranties', '🛡️', 'Bảo hành'], ['certs', '🏭', 'Xuất xưởng'], ['config', '⚙️', 'Cấu hình']];
+function buildNav() {
+  var nav = $('#nav'); nav.innerHTML = '';
+  var pinned = false; try { pinned = localStorage.getItem('navOpen') === '1'; } catch (e) { }
+  nav.classList.toggle('open', pinned);
+  nav.appendChild(h('div', { class: 'logo', title: 'Ghim / thu gọn menu', onclick: function () { var o = nav.classList.toggle('open'); try { localStorage.setItem('navOpen', o ? '1' : '0'); } catch (e) { } var t = nav.querySelector('.navtg'); if (t) t.textContent = o ? '«' : '»'; } }, h('b', null, 'H'), h('span', { class: 'lb' }, 'HA TO ☰')));
+  MENU.forEach(function (m) { if (S.perms[m[0]] && S.perms[m[0]].view) nav.appendChild(h('a', { href: '#/' + m[0], 'data-k': m[0], title: m[2] }, h('span', { class: 'ic' }, m[1]), h('span', { class: 'lb' }, m[2]))); });
+  nav.appendChild(h('a', { id: 'draftnav', href: 'javascript:void(0)', title: 'Bản nháp chưa lưu', style: 'display:none', onclick: function () { draftsModal(); } }, h('span', { class: 'ic' }, '📝'), h('span', { class: 'lb' }, 'Bản nháp')));
+  DR.badge();
+  nav.appendChild(h('div', { class: 'spacer' }));
+  nav.appendChild(h('div', { class: 'me' }, S.user.name + ' · ' + S.user.roleName));
+  var tg = h('button', { class: 'navtg', type: 'button' }), setTg = function () { var o = nav.classList.contains('open'); tg.textContent = o ? '«' : '»'; tg.title = o ? 'Thu gọn menu' : 'Mở rộng menu'; tg.setAttribute('aria-label', tg.title); };
+  tg.onclick = function () { var o = nav.classList.toggle('open'); nav.classList.remove('hover'); try { localStorage.setItem('navOpen', o ? '1' : '0'); } catch (e) { } setTg(); };
+  nav.appendChild(tg); setTg();
+  var canHover = window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches;   // điện thoại: không tự mở rộng khi chạm
+  if (canHover) { nav.addEventListener('mouseenter', function () { nav.classList.add('hover'); }); nav.addEventListener('mouseleave', function () { nav.classList.remove('hover'); }); }
+  nav.addEventListener('click', function (e) { var a = e.target.closest('a[data-k]'); if (a) { var hs = a.getAttribute('href'); Object.keys(TSTATE).forEach(function (k) { if (k.indexOf(hs + '|') === 0) delete TSTATE[k]; }); if (a.getAttribute('data-k') === 'pricelist') PL_ST = null; } });
+  nav.addEventListener('click', function (e) { if (!canHover && e.target.closest('a') && nav.classList.contains('open') && innerWidth < 760) { nav.classList.remove('open'); try { localStorage.setItem('navOpen', '0'); } catch (x) { } setTg(); } });
+}
+function parseHash() { var s = location.hash.replace(/^#\/?/, ''), a = s.split('?'), q = {}; (a[1] || '').split('&').forEach(function (kv) { if (kv) { var p = kv.split('='); q[p[0]] = decodeURIComponent(p[1] || ''); } }); return { path: a[0].split('/').filter(Boolean), q: q }; }
+function backToList(def) { var h0 = S.lastList && S.lastList.length > 2 ? S.lastList : '#/' + def; if (h0 === location.hash) route(); else location.hash = h0; }
+function go(path) { location.hash = '#/' + path; }
+function route() {
+  if (!S.user) return;
+  var r = parseHash(), p = r.path, page = p[0] || (S.perms.dashboard.view ? 'dashboard' : 'projects');
+  var k = page === 'quote' || page === 'rfq' || page === 'rfqs' ? 'quotes' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page;
+  document.querySelectorAll('#nav a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-k') === k); });
+  if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
+  if (S.draftCtl) { S.draftCtl.end(); S.draftCtl = null; draftStatus(''); }
+  window.__quoteCheck = null;
+  // Mỗi lần đổi trang dùng một khung #view mới: trang cũ tải chậm xong thì chỉ vẽ vào khung đã bỏ, không chèn lẫn vào trang mới
+  var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; old.parentNode.replaceChild(v, old);
+  v.innerHTML = '<div class="mut" style="padding:20px">Đang tải…</div>';
+  var fn = PAGES[page]; if (!fn) { v.textContent = 'Không có trang này.'; return; }
+  if (!S.perms[k] || !S.perms[k].view) { v.textContent = 'Bạn không có quyền xem mục này.'; return; }
+  TSEQ = 0;
+  var same = location.hash === S.lastHash, keepY = same ? ($('#main').scrollTop || window.scrollY || 0) : 0; S.lastHash = location.hash;
+  if (!same) { window.scrollTo(0, 0); $('#main').scrollTop = 0; }
+  Promise.resolve(fn(p, r.q)).then(function () { if (keepY) restoreScroll(keepY); }).catch(function (e) { v.innerHTML = ''; v.appendChild(h('div', { class: 'card neg' }, 'Lỗi: ' + (e && e.message))); });
+}
+window.addEventListener('hashchange', route);
+function restoreScroll(y) { var m = $('#main'), n = 0; (function t() { m.scrollTop = y; if (m.scrollTop < y - 2 && n++ < 10) setTimeout(t, 80); })(); }
+
+/* ================= Trang ================= */
+var PAGES = {};
+var THIS_YEAR = new Date().getFullYear();
+
+</script>

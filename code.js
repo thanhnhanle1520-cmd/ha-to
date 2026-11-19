@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.11.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -35,30 +35,31 @@ const DEFAULT_IMG = { logo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAggAA
 
 const TABLES = {
   USERS: ['email', 'name', 'role', 'active', 'phone'],
-  CUSTOMERS: ['id', 'code', 'name', 'tax_code', 'address', 'contact', 'phone', 'email', 'status', 'created_at', 'updated_at', 'short_name', 'rep_name', 'rep_title', 'bank_account', 'terms_pref'],
+  CUSTOMERS: ['id', 'code', 'name', 'tax_code', 'address', 'contact', 'phone', 'email', 'status', 'created_at', 'updated_at', 'short_name', 'rep_name', 'rep_title', 'bank_account', 'terms_pref', 'rfq_maps'],
   PROJECTS: ['id', 'code', 'name', 'customer_id', 'owner_email', 'start_date', 'end_date', 'status', 'rep_name', 'rep_phone', 'receiver', 'note', 'created_by', 'created_at', 'updated_at', 'kind'],
-  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'coef', 'status'],
-  QUOTE_ITEMS: ['id', 'quote_id', 'line_no', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price', 'cost', 'disc_pct', 'note', 'spec', 'coef'],
+  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'coef', 'status', 'rfq_id'],
+  QUOTE_ITEMS: ['id', 'quote_id', 'line_no', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price', 'cost', 'disc_pct', 'note', 'spec', 'coef', 'updated_at', 'src_rows'],
   DOCS: ['id', 'code', 'type', 'project_id', 'parent_id', 'doc_no', 'sign_date', 'delivery_date', 'pay_method', 'currency', 'vat_pct', 'terms', 'warranty_months', 'late_penalty', 'pay_docs', 'attached', 'source_quote_id', 'note', 'created_by', 'created_at', 'updated_at', 'ext'],
-  DOC_ITEMS: ['id', 'doc_id', 'line_no', 'ref_item_id', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price_offer', 'price', 'cost', 'source', 'note', 'cost_list', 'spec'],
+  DOC_ITEMS: ['id', 'doc_id', 'line_no', 'ref_item_id', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price_offer', 'price', 'cost', 'source', 'note', 'cost_list', 'spec', 'updated_at'],
   DELIVERIES: ['id', 'code', 'project_id', 'date', 'status', 'deliverer', 'place', 'receiver', 'note', 'created_by', 'created_at', 'updated_at', 'copies', 'copies_a', 'copies_b'],
-  DELIVERY_ITEMS: ['id', 'delivery_id', 'line_no', 'doc_id', 'doc_item_id', 'code', 'name', 'model', 'unit', 'qty', 'note'],
-  COSTS: ['id', 'project_id', 'doc_id', 'date', 'type', 'amount', 'payer', 'note', 'file_url', 'created_by', 'created_at', 'delivery_id'],
-  ADVANCES: ['id', 'code', 'project_id', 'doc_id', 'term_index', 'vat', 'pct', 'amount', 'date', 'note', 'created_by', 'created_at'],
-  PAYMENTS: ['id', 'code', 'project_id', 'doc_id', 'kind', 'term_index', 'amount', 'date', 'note', 'created_by', 'created_at', 'pct', 'delivery_id'],
-  WARRANTIES: ['id', 'code', 'project_id', 'doc_id', 'months', 'start_date', 'items', 'note', 'created_by', 'created_at', 'delivery_id'],
-  CERTS: ['id', 'code', 'project_id', 'doc_id', 'lot', 'issue_date', 'items', 'note', 'created_by', 'created_at', 'site', 'delivery_id'],
-  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size'],
+  DELIVERY_ITEMS: ['id', 'delivery_id', 'line_no', 'doc_id', 'doc_item_id', 'code', 'name', 'model', 'unit', 'qty', 'note', 'updated_at'],
+  COSTS: ['id', 'project_id', 'doc_id', 'date', 'type', 'amount', 'payer', 'note', 'file_url', 'created_by', 'created_at', 'delivery_id', 'updated_at'],
+  ADVANCES: ['id', 'code', 'project_id', 'doc_id', 'term_index', 'vat', 'pct', 'amount', 'date', 'note', 'created_by', 'created_at', 'updated_at'],
+  PAYMENTS: ['id', 'code', 'project_id', 'doc_id', 'kind', 'term_index', 'amount', 'date', 'note', 'created_by', 'created_at', 'pct', 'delivery_id', 'updated_at'],
+  WARRANTIES: ['id', 'code', 'project_id', 'doc_id', 'months', 'start_date', 'items', 'note', 'created_by', 'created_at', 'delivery_id', 'updated_at'],
+  CERTS: ['id', 'code', 'project_id', 'doc_id', 'lot', 'issue_date', 'items', 'note', 'created_by', 'created_at', 'site', 'delivery_id', 'updated_at'],
+  FILES: ['id', 'project_id', 'doc_id', 'name', 'url', 'mime', 'created_by', 'created_at', 'size', 'updated_at'],
   AUDIT: ['ts', 'user', 'action', 'table', 'rec_id', 'project_id', 'summary'],
   ERRLOG: ['ts', 'user', 'action', 'message'],
   TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note', 'type', 'priority', 'status', 'time', 'remind', 'repeat', 'done_at', 'updated_at'],
   PRICEHIST: ['id', 'code', 'date', 'old_cost', 'new_cost', 'user'],
+  RFQS: ['id', 'code', 'project_id', 'customer_id', 'file_name', 'file_id', 'file_url', 'sheet', 'header_row', 'header_last', 'map', 'opts', 'rows', 'groups', 'quote_id', 'n_rows', 'n_lines', 'created_by', 'created_at', 'updated_at'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
   COUNTERS: ['key', 'value']
 };
-const NUM = new Set(['qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
-const JSONCOLS = { DOCS: ['terms', 'attached', 'ext'], WARRANTIES: ['items'], CERTS: ['items'] };
+const NUM = new Set(['header_row', 'header_last', 'n_rows', 'n_lines', 'qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
+const JSONCOLS = { DOCS: ['terms', 'attached', 'ext'], WARRANTIES: ['items'], CERTS: ['items'], RFQS: ['map', 'opts', 'rows', 'groups'] };
 
 const DEFAULT_CONFIG = {
   company_name: 'CÔNG TY TNHH KỸ THUẬT VÀ THƯƠNG MẠI HA TO', tax_code: '0313049236', address: 'Số 94/11, Đường số 39, Phường Bình Trưng, TP. Hồ Chí Minh', phone: '028.37438551 - 028 37438556', hotline: '', email: '', website: 'hatoet.com',
@@ -301,9 +302,9 @@ function keepSystemCols_(out, rec, cols) {
   return out;
 }
 function toRow_(name, rec) {
-  var js = JSONCOLS[name] || [];
+  var js = JSONCOLS[name] || [], stamp = now_();      // mọi dòng được ghi đều có updated_at mới — dùng khi gộp dữ liệu giữa hai thiết bị
   return TABLES[name].map(function (c) {
-    var v = rec[c];
+    var v = c === 'updated_at' ? stamp : rec[c];
     if (js.indexOf(c) >= 0) return JSON.stringify(v == null ? [] : v);
     if (NUM.has(c)) return (v === '' || v == null) ? 0 : num_(v);
     return v == null ? '' : String(v);
@@ -670,9 +671,9 @@ ACTIONS.version = function (u) {
 ACTIONS.catalogList = function (u, p) {
   need_(u, 'pricelist', 'view');
   var rows = catalogFilter_(p.q, p.brand, p.group), size = Math.min(num_(p.size) || 50, 200), page = Math.max(1, num_(p.page) || 1);
-  var all = catalog_(), brands = {}, groups = {};
-  all.forEach(function (r) { brands[r.brand] = 1; groups[r.group] = 1; });
-  return { total: rows.length, page: page, size: size, rows: rows.slice((page - 1) * size, page * size).map(slimCat_), brands: Object.keys(brands).sort(), groups: Object.keys(groups).sort() };
+  var all = catalog_(), brands = {}, groups = {}, units = {}, origins = {};
+  all.forEach(function (r) { brands[r.brand] = 1; groups[r.group] = 1; if (r.unit) units[r.unit] = 1; if (r.origin) origins[r.origin] = 1; });
+  return { total: rows.length, page: page, size: size, rows: rows.slice((page - 1) * size, page * size).map(slimCat_), brands: Object.keys(brands).sort(), groups: Object.keys(groups).sort(), units: Object.keys(units).sort(), origins: Object.keys(origins).sort() };
 };
 
 // ---------- Sửa / nhập hàng loạt Bảng giá (dữ liệu nằm trong sheet bảng giá) ----------
@@ -981,7 +982,8 @@ ACTIONS.projectBundle = function (u, p) {
 function normItem_(it, i, extra) {
   var o = {
     id: it.id || '', line_no: i + 1, code: String(it.code || ''), name: String(it.name || '').trim(), model: String(it.model || ''),
-    brand: String(it.brand || ''), origin: String(it.origin || ''), unit: String(it.unit || ''), qty: num_(it.qty), note: String(it.note || ''), spec: String(it.spec || '').trim()
+    brand: String(it.brand || ''), origin: String(it.origin || ''), unit: String(it.unit || ''), qty: num_(it.qty), note: String(it.note || ''), spec: String(it.spec || '').trim(),
+    src_rows: String(it.src_rows || '')          // số dòng trong file Excel của khách (nhập từ Excel) — để điền giá ngược vào đúng dòng
   };
   if (!o.name) throw new Error('Dòng ' + (i + 1) + ': thiếu tên hàng.');
   if (o.qty < 0) throw new Error('Dòng ' + (i + 1) + ': số lượng âm.');
@@ -1268,7 +1270,7 @@ ACTIONS.dashboard = function (u, p) {
   need_(u, 'dashboard', 'view');
   var key = null;
   try {
-    var mt = cacheMeta_(), sig = Object.keys(TABLES).filter(function (n) { return n !== 'AUDIT' && n !== 'ERRLOG' && n !== 'FILES' && n !== 'TASKS' && n !== 'PRICEHIST'; }).map(function (n) { return mt['V:' + n] || '0'; }).join('.');
+    var mt = cacheMeta_(), sig = Object.keys(TABLES).filter(function (n) { return n !== 'AUDIT' && n !== 'ERRLOG' && n !== 'FILES' && n !== 'TASKS' && n !== 'PRICEHIST' && n !== 'RFQS'; }).map(function (n) { return mt['V:' + n] || '0'; }).join('.');
     var raw = JSON.stringify([p.from || '', p.to || '', p.customer_id || '', p.project_id || '', canCost_(u) ? 1 : 0, APP_VERSION, sig]);
     key = 'D:' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw)).slice(0, 22);
     var hit = CacheService.getScriptCache().get(key);
@@ -1920,4 +1922,74 @@ ACTIONS.export = function (u, p) {
     try { var f = exportFolder_().createFile(blob); out.url = f.getUrl(); } catch (e) { logError_('export', 'Lưu Drive: ' + String((e && e.message) || e)); }
   }
   return out;
+};
+
+
+/* ================= Nhập Excel của khách (RFQ) =================
+   Mỗi lần nhập = 1 dòng RFQS: file gốc (trên Drive), cách ghép cột, toàn bộ dòng đã đọc (rút gọn) và các hạng mục đã chọn / gộp.
+   Báo giá tạo từ RFQ mang rfq_id; mỗi dòng báo giá mang src_rows (các dòng nguồn) để xuất ngược đúng mẫu khách. */
+function rfqSig_(texts) { return (texts || []).map(function (t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }).filter(String).join('|').slice(0, 300); }
+function rfqMaps_(cu) { try { return JSON.parse((cu && cu.rfq_maps) || '{}') || {}; } catch (e) { return {}; } }
+ACTIONS.rfqList = function (u, p) {
+  need_(u, 'quotes', 'view');
+  var pj = mapBy_(readTable_('PROJECTS'), 'id'), qs = mapBy_(readTable_('QUOTES'), 'id');
+  return readTable_('RFQS').filter(function (r) { return !p.project_id || r.project_id === p.project_id; }).map(function (r) {
+    var q = qs[r.quote_id] || {}, pr = pj[r.project_id] || {};
+    return { id: r.id, code: r.code, project_id: r.project_id, project_name: pr.name || '', project_code: pr.code || '', file_name: r.file_name, sheet: r.sheet, n_rows: r.n_rows, n_lines: r.n_lines, quote_id: r.quote_id, quote_code: q.code || '', created_at: r.created_at, updated_at: r.updated_at };
+  }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+};
+ACTIONS.rfqGet = function (u, p) {
+  need_(u, 'quotes', 'view');
+  var r = readTable_('RFQS').filter(function (x) { return x.id === p.id; })[0];
+  if (!r) throw new Error('Không tìm thấy bản nhập Excel.');
+  return r;
+};
+ACTIONS.rfqMaps = function (u, p) {
+  need_(u, 'quotes', 'view');
+  var pr = readTable_('PROJECTS').filter(function (x) { return x.id === p.project_id; })[0];
+  var cu = pr ? readTable_('CUSTOMERS').filter(function (x) { return x.id === pr.customer_id; })[0] : null;
+  return { customer_id: cu ? cu.id : '', customer_name: cu ? cu.name : '', maps: rfqMaps_(cu) };
+};
+function rfqSave_(u, p) {
+  var r = p.rec || {}, old = r.id ? readTable_('RFQS').filter(function (x) { return x.id === r.id; })[0] : null;
+  var pr = readTable_('PROJECTS').filter(function (x) { return x.id === (r.project_id || (old && old.project_id)); })[0];
+  if (!pr) throw new Error('Hãy chọn dự án cho bản nhập Excel.');
+  var out = Object.assign({}, old || {}, r);
+  out.project_id = pr.id; out.customer_id = pr.customer_id || '';
+  out.n_rows = (out.rows || []).length; out.n_lines = (out.groups || []).length;
+  if (!old) { out.id = newId_('X'); out.code = nextCode_('XL', true); out.created_by = u.email; out.created_at = now_(); }
+  else { out.id = old.id; out.code = old.code; out.created_by = old.created_by; out.created_at = old.created_at; }
+  upsert_('RFQS', out);
+  if (out.file_url && (!old || old.file_url !== out.file_url))       // file gốc hiện trong mục Tệp của dự án
+    appendMany_('FILES', [{ id: newId_('F'), project_id: pr.id, doc_id: '', name: 'Excel khách – ' + (out.file_name || ''), url: out.file_url, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', created_by: u.email, created_at: now_(), size: num_(p.file_size) }]);
+  if (out.customer_id && p.sig && out.map) {                           // nhớ cách ghép cột theo khách (theo "chữ ký" dòng tiêu đề)
+    var cu = readTable_('CUSTOMERS').filter(function (x) { return x.id === out.customer_id; })[0];
+    if (cu) { var m = rfqMaps_(cu); m[p.sig] = out.map; var ks = Object.keys(m); if (ks.length > 30) delete m[ks[0]]; upsert_('CUSTOMERS', Object.assign({}, cu, { rfq_maps: JSON.stringify(m) })); }
+  }
+  audit_(u, old ? 'Sửa' : 'Tạo', 'RFQS', out.id, out.project_id, out.code + ' · ' + (out.file_name || ''));
+  return out;
+}
+ACTIONS.rfqSave = function (u, p) { need_(u, 'quotes', 'create'); return withLock_(function () { RT = { user: RT.user, ss: RT.ss }; var o = rfqSave_(u, p); return { id: o.id, code: o.code }; }); };
+ACTIONS.rfqRemove = function (u, p) {
+  need_(u, 'quotes', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var t = readTable_('RFQS').filter(function (x) { return x.id === p.id; })[0]; if (!t) return true;
+    var sh = ss_().getSheetByName('RFQS'), last = sh.getLastRow();
+    if (last >= 2) { var ids = sh.getRange(2, 1, last - 1, 1).getValues(); for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(p.id)) { sh.deleteRows(i + 2, 1); break; } }
+    bump_('RFQS'); audit_(u, 'Xóa', 'RFQS', t.id, t.project_id, t.code);
+    return true;
+  });
+};
+/* Tạo báo giá mới từ các hạng mục đã chọn (không ghi đè báo giá cũ). */
+ACTIONS.rfqToQuote = function (u, p) {
+  need_(u, 'quotes', 'create');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var x = rfqSave_(u, p);
+    if (!(p.lines || []).length) throw new Error('Chưa chọn hạng mục nào để báo giá.');
+    var res = saveQuote_(u, { rec: { project_id: x.project_id, rfq_id: x.id, note: 'Từ file khách: ' + (x.file_name || '') + (x.sheet ? ' (' + x.sheet + ')' : ''), coef: p.coef || 0 }, items: p.lines });
+    upsert_('RFQS', Object.assign({}, x, { quote_id: res.quote.id }));
+    return { quote_id: res.quote.id, quote_code: res.quote.code, rfq_id: x.id, rfq_code: x.code };
+  });
 };

@@ -1,0 +1,175 @@
+<script>
+/* ===== Nhập dữ liệu từ file Excel / CSV ===== */
+var XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+var IMPORT_MAX_ROWS = 300, IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+
+function loadXlsxLib() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise(function (res, rej) {
+    var s = document.createElement('script'); s.src = XLSX_URL; s.onload = res;
+    s.onerror = function () { rej(new Error('Không tải được thư viện đọc Excel. Hãy lưu file thành CSV rồi nhập lại.')); };
+    document.head.appendChild(s);
+  });
+}
+function parseDelimited(text) {            // CSV (dấu , hoặc ;) hoặc TSV
+  text = text.replace(/^﻿/, '');
+  var first = text.split(/\r?\n/)[0] || '', d = '\t';
+  if (first.indexOf('\t') < 0) d = (first.split(';').length > first.split(',').length) ? ';' : ',';
+  var rows = [], row = [], cur = '', q = false;
+  for (var i = 0; i < text.length; i++) {
+    var c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === d) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+function readTableFile(file) {              // -> Promise<mảng các dòng (mảng ô)>
+  if (file.size > IMPORT_MAX_BYTES) return Promise.reject(new Error('File quá lớn (tối đa 5MB).'));
+  var ext = (file.name.split('.').pop() || '').toLowerCase();
+  return new Promise(function (res, rej) {
+    var fr = new FileReader(); fr.onerror = function () { rej(new Error('Không đọc được file.')); };
+    if (ext === 'xlsx' || ext === 'xls' || ext === 'xlsm') {
+      fr.onload = function () {
+        loadXlsxLib().then(function () {
+          var wb = XLSX.read(fr.result, { type: 'array', cellDates: false });
+          var ws = wb.Sheets[wb.SheetNames[0]];
+          res(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }));
+        }).catch(rej);
+      };
+      fr.readAsArrayBuffer(file);
+    } else if (ext === 'csv' || ext === 'txt' || ext === 'tsv') {
+      fr.onload = function () { res(parseDelimited(String(fr.result))); }; fr.readAsText(file, 'utf-8');
+    } else rej(new Error('Chỉ nhận file .xlsx, .xls, .csv.'));
+  });
+}
+function normKey(s) { return String(s || '').toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+function numIn(v) {                          // "1.234,5" / "1,234.5" / "1234" -> số
+  var s = String(v == null ? '' : v).replace(/[^\d.,\-]/g, '');
+  if (!s) return 0;
+  var lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+  if (lc > -1 && ld > -1) s = lc > ld ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (lc > -1) s = /,\d{3}$/.test(s) && s.split(',').length > 1 && !/,\d{1,2}$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
+  else if (ld > -1 && /\.\d{3}$/.test(s) && s.split('.').length > 2) s = s.replace(/\./g, '');
+  var n = parseFloat(s); return isFinite(n) ? n : 0;
+}
+function dateIn(v) {                         // dd/mm/yyyy | yyyy-mm-dd -> yyyy-mm-dd
+  var s = String(v || '').trim(), m;
+  if ((m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/))) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  return '';
+}
+function downloadTemplate(name, fields, sample) {     // file mẫu CSV (UTF-8 có BOM để Excel đọc đúng tiếng Việt)
+  var q = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  var csv = '\uFEFF' + fields.map(function (f) { return q(f.label); }).join(',') + '\r\n' + fields.map(function (f) { return q(sample && sample[f.k] != null ? sample[f.k] : ''); }).join(',') + '\r\n';
+  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+/* fields: [{k,label,alias:[...],req,type:'n'|'d'}]; onImport(objs, setProgress) -> Promise<{ok,fail:[msg]}> */
+function importModal(o) {
+  var objs = [], info = h('div', { class: 'mut', style: 'margin:8px 0' }, 'Dòng đầu tiên của file là tiêu đề cột.'), prev = h('div'), busy = false;
+  var fi = h('input', { type: 'file', accept: '.xlsx,.xls,.csv,.tsv,.txt' });
+  var cols = o.fields.map(function (f) { return f.label + (f.req ? '*' : ''); }).join(' · ');
+  fi.onchange = function () {
+    var f = fi.files[0]; if (!f) return; objs = []; prev.innerHTML = ''; info.textContent = 'Đang đọc file…';
+    readTableFile(f).then(function (rows) {
+      rows = rows.filter(function (r) { return r.some(function (c) { return String(c).trim() !== ''; }); });
+      if (rows.length < 2) throw new Error('File không có dữ liệu (cần 1 dòng tiêu đề + ít nhất 1 dòng dữ liệu).');
+      var head = rows[0].map(normKey), idx = {}, miss = [];
+      o.fields.forEach(function (fd) {
+        var names = [fd.label].concat(fd.alias || []).map(normKey), j = -1;
+        names.forEach(function (n) { if (j < 0) j = head.indexOf(n); });
+        idx[fd.k] = j; if (j < 0 && fd.req) miss.push(fd.label);
+      });
+      if (miss.length) throw new Error('Thiếu cột bắt buộc: ' + miss.join(', ') + '. Tiêu đề cột trong file: ' + rows[0].join(' | '));
+      if (rows.length - 1 > IMPORT_MAX_ROWS) throw new Error('Tối đa ' + IMPORT_MAX_ROWS + ' dòng mỗi lần (file có ' + (rows.length - 1) + ').');
+      objs = rows.slice(1).map(function (r) {
+        var x = {}; o.fields.forEach(function (fd) { var v = idx[fd.k] < 0 ? '' : r[idx[fd.k]]; x[fd.k] = fd.type === 'n' ? numIn(v) : fd.type === 'd' ? dateIn(v) : String(v == null ? '' : v).trim(); }); return x;
+      }).filter(function (x) { return o.fields.some(function (fd) { return fd.req && x[fd.k] !== '' && x[fd.k] !== 0; }); });
+      var unmapped = o.fields.filter(function (fd) { return idx[fd.k] < 0; }).map(function (fd) { return fd.label; });
+      info.textContent = 'Đọc được ' + objs.length + ' dòng hợp lệ.' + (unmapped.length ? ' Không có cột: ' + unmapped.join(', ') + ' (bỏ trống).' : '');
+      prev.innerHTML = '';
+      prev.appendChild(h('div', { class: 'tw', style: 'max-height:240px;overflow:auto' }, h('table', { class: 't' },
+        h('thead', null, h('tr', null, o.fields.map(function (fd) { return h('th', null, fd.label); }))),
+        h('tbody', null, objs.slice(0, 8).map(function (x) { return h('tr', null, o.fields.map(function (fd) { return h('td', null, String(x[fd.k])); })); })))));
+      if (objs.length > 8) prev.appendChild(h('div', { class: 'mut' }, '… và ' + (objs.length - 8) + ' dòng nữa'));
+    }).catch(function (e) { objs = []; prev.innerHTML = ''; info.textContent = ''; toast(e.message || String(e), true); });
+  };
+  modal({
+    title: o.title, wide: true,
+    body: h('div', null, h('div', { class: 'mut' }, 'Cột nhận: ' + cols), o.hint ? h('div', { class: 'mut' }, o.hint) : null, h('div', { style: 'margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, fi, h('button', { onclick: function () { downloadTemplate(o.tpl || 'file_mau.csv', o.fields, o.sample); } }, '⬇ Tải file mẫu')), info, prev),
+    buttons: [{
+      label: 'Nhập', cls: 'pri', fn: function (close) {
+        if (busy) return; if (!objs.length) { toast('Chưa chọn file hợp lệ.', true); return; }
+        busy = true; info.textContent = 'Đang nhập…';
+        o.onImport(objs, function (i) { info.textContent = 'Đang nhập ' + i + '/' + objs.length + '…'; }).then(function (r) {
+          busy = false; close();
+          if (r.fail && r.fail.length) modal({ title: 'Kết quả nhập', dismiss: true, body: h('div', null, h('p', null, 'Thành công: ' + r.ok + ' · Lỗi: ' + r.fail.length), h('div', { style: 'max-height:260px;overflow:auto;font-size:13px' }, r.fail.map(function (m) { return h('div', { class: 'neg' }, m); }))) });
+          else toast('Đã nhập ' + r.ok + ' dòng');
+          o.done && o.done(r);
+        }).catch(function (e) { busy = false; info.textContent = ''; toast(e.message || String(e), true); });
+      }
+    }]
+  });
+}
+/* ghi lần lượt từng dòng bằng chính hàm lưu hiện có (giữ nguyên kiểm tra dữ liệu) */
+function importEach(objs, setP, build) {
+  var ok = 0, fail = [], i = 0;
+  return new Promise(function (res) {
+    (function next() {
+      if (i >= objs.length) return res({ ok: ok, fail: fail });
+      var n = i + 1, x = objs[i++]; setP(n);
+      var p; try { p = build(x); } catch (e) { fail.push('Dòng ' + (n + 1) + ': ' + e.message); return next(); }
+      call('save', p).then(function () { ok++; next(); }).catch(function (e) { fail.push('Dòng ' + (n + 1) + ': ' + ((e && e.message) || e)); next(); });
+    })();
+  });
+}
+function importCustomers(done) {
+  importModal({
+    title: 'Nhập khách hàng từ file', tpl: 'mau_khach_hang.csv', sample: { name: 'Công ty TNHH Ví dụ', code: '', tax_code: '0312345678', address: '12 Nguyễn Huệ, Q.1, TP.HCM', contact: 'Nguyễn Văn A', phone: '0901234567', email: 'a@vidu.vn' }, hint: 'Khách có MST đã tồn tại sẽ bị báo lỗi và bỏ qua.',
+    fields: [{ k: 'name', label: 'Tên khách hàng', alias: ['Tên', 'Khách hàng', 'Name'], req: true }, { k: 'code', label: 'Mã', alias: ['Mã KH', 'Code'] }, { k: 'tax_code', label: 'MST', alias: ['Mã số thuế', 'Tax'] },
+      { k: 'address', label: 'Địa chỉ', alias: ['Address'] }, { k: 'contact', label: 'Liên hệ', alias: ['Người liên hệ', 'Contact'] }, { k: 'phone', label: 'Điện thoại', alias: ['SĐT', 'Phone'] }, { k: 'email', label: 'Email' }],
+    onImport: function (objs, sp) { return importEach(objs, sp, function (x) { return { table: 'customers', rec: Object.assign({ status: 'Hoạt động' }, x) }; }); },
+    done: function () { reloadLookups().then(done); }
+  });
+}
+function importProjects(done) {
+  importModal({
+    title: 'Nhập dự án từ file', tpl: 'mau_du_an.csv', sample: { name: 'Hệ thống PCCC nhà xưởng ABC', customer: '0312345678', status: 'Đang chào giá', start_date: '01/12/2026', end_date: '30/03/2027', rep_name: 'Nguyễn Văn A', rep_phone: '0901234567', receiver: 'Anh B', note: '' }, hint: 'Cột Khách hàng khớp theo mã KH, MST hoặc tên khách hàng đã có trong hệ thống.',
+    fields: [{ k: 'name', label: 'Tên công trình', alias: ['Tên dự án', 'Dự án', 'Tên'], req: true }, { k: 'customer', label: 'Khách hàng', alias: ['Mã KH', 'MST', 'Tên khách hàng', 'Customer'], req: true },
+      { k: 'status', label: 'Trạng thái' }, { k: 'owner_email', label: 'Người phụ trách', alias: ['Email phụ trách'] }, { k: 'start_date', label: 'Ngày bắt đầu', type: 'd' }, { k: 'end_date', label: 'Ngày kết thúc', type: 'd' },
+      { k: 'rep_name', label: 'Đại diện khách hàng', alias: ['Đại diện'] }, { k: 'rep_phone', label: 'SĐT đại diện' }, { k: 'receiver', label: 'Người nhận hàng' }, { k: 'note', label: 'Ghi chú' }],
+    onImport: function (objs, sp) {
+      return importEach(objs, sp, function (x) {
+        var key = normKey(x.customer), c = S.customers.filter(function (k) { return normKey(k.code) === key || normKey(k.tax_code) === key || normKey(k.name) === key; });
+        if (c.length !== 1) throw new Error(c.length ? 'Khách hàng "' + x.customer + '" trùng nhiều bản ghi.' : 'Không tìm thấy khách hàng "' + x.customer + '".');
+        var rec = Object.assign({}, x, { customer_id: c[0].id }); delete rec.customer;
+        if (!rec.owner_email) delete rec.owner_email; if (!rec.status) delete rec.status; if (!rec.start_date) delete rec.start_date; if (!rec.end_date) delete rec.end_date;
+        return { table: 'projects', rec: rec };
+      });
+    },
+    done: function () { reloadLookups().then(done); }
+  });
+}
+/* nhập dòng hàng vào bộ sửa dòng của báo giá / hợp đồng / PO */
+function importLines(le, mode) {
+  importModal({
+    title: 'Nhập dòng hàng từ file', tpl: 'mau_dong_hang.csv', sample: { name: 'Tủ chữa cháy trong nhà', model: 'TCC-01', brand: 'Ha To', unit: 'Cái', qty: 5, price: 1500000, disc_pct: 0, note: '' },
+    hint: 'Dòng nhập được thêm vào cuối bảng, chưa lưu cho tới khi bạn bấm Lưu.',
+    fields: [{ k: 'name', label: 'Tên hàng', alias: ['Tên', 'Sản phẩm', 'Mô tả'], req: true }, { k: 'model', label: 'Model', alias: ['Mã hàng', 'Quy cách'] }, { k: 'brand', label: 'Hãng', alias: ['Thương hiệu'] },
+      { k: 'unit', label: 'ĐVT', alias: ['Đơn vị', 'Đơn vị tính'] }, { k: 'qty', label: 'SL', alias: ['Số lượng'], type: 'n' }, { k: 'price', label: 'Đơn giá', alias: ['Giá', 'Giá bán'], type: 'n' },
+      { k: 'disc_pct', label: 'CK %', alias: ['Chiết khấu', 'CK'], type: 'n' }, { k: 'note', label: 'Ghi chú' }],
+    onImport: function (objs) {
+      objs.forEach(function (x) {
+        var l = { source: 'EXTRA', name: x.name, model: x.model, brand: x.brand, unit: x.unit, qty: x.qty || 1, price: x.price, note: x.note };
+        if (mode === 'quote') l.disc_pct = x.disc_pct; else l.price_offer = x.price;
+        le.add(l);
+      });
+      return Promise.resolve({ ok: objs.length, fail: [] });
+    }
+  });
+}
+</script>
