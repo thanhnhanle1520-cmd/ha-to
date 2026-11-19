@@ -45,12 +45,12 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   const red = await pg.ev(`[...document.querySelectorAll('#view table.le input')].some(i=>i.style.background.includes('254, 226, 226')||i.style.backgroundColor==='rgb(254, 226, 226)')`);
   T('hệ số < 1 tô đỏ', red);
   await pg.ev(`MEMO={};location.hash='#/project/${pj.id}'`); await sleep(2000);
-  T('tổng quan dự án có khối Liên kết HĐ–Phụ lục HĐ–PO', await pg.ev(`/Liên kết HĐ – Phụ lục HĐ – PO/.test(document.querySelector('#view').innerText)`));
+  T('tổng quan dự án có khối Tài chính dự án', await pg.ev(`/Tài chính dự án/.test(document.querySelector('#view').innerText)`));
   r = await A('uploadFile', { project_id: pj.id, name: 'lon.zip', mime: 'application/zip', big_key: 'k1', size: 30 * 1024 * 1024 }); T('upload file lớn (khóa big_key) ghi bản ghi, size 30MB', r.ok && r.data.size === 31457280, r);
   r = await A('uploadFile', { project_id: pj.id, name: 'qua.zip', big_key: 'k2', size: 60 * 1024 * 1024 }); T('chặn file > 50MB', !r.ok, r);
   await pg.ev(`MEMO={};location.hash='#/delivery/new?project=${pj.id}'`); await sleep(2000);
   T('phiếu giao mới lấy địa điểm từ HĐ', await pg.ev(`[...document.querySelectorAll('#view input')].some(i=>i.value==='Kho khách')`));
-  await pg.ev(`MEMO={};location.hash='#/dashboard'`); await sleep(2500); await pg.shot('/tmp/dash2.png'); T('dashboard có báo cáo lãi lỗ', await pg.ev(`/Báo cáo lãi lỗ theo dự án/.test(document.querySelector('#view').innerText)`));
+  await pg.ev(`MEMO={};location.hash='#/dashboard'`); await sleep(2500); await pg.shot('/tmp/dash2.png'); T('dashboard có báo cáo lãi lỗ', await pg.ev(`/Tài chính theo dự án/.test(document.querySelector('#view').innerText)`));
 
   // ===== đợt cập nhật 1.9 =====
   r = await A('save', { table: 'quotes', rec: Object.assign({}, q, { status: 'Đã gửi', valid_text: '45 ngày', pay_method: 'Chuyển khoản 30%' }), items: (await A('get', { table: 'quotes', id: q.id })).data.items }); T('trạng thái báo giá Đã gửi', r.ok && r.data.quote.status === 'Đã gửi', r);

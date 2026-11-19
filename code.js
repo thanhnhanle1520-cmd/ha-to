@@ -578,18 +578,25 @@ function calcProject_(pid) {
   res.hd_value = hds.reduce(function (s, x) { return s + (res.docs[x.id].current_value || 0); }, 0); res.po_value = sumLines(poLines).v;
   // đã giao
   var delivered = deliveredMap_(pid, null);
-  var dv = 0;
+  var dv = 0, dc = 0, dvv = 0, sv = 0, vatOf = {};
+  docs.forEach(function (d) { vatOf[d.id] = 1 + num_(d.vat_pct) / 100; });
   res.lines.forEach(function (l) {
     var d = delivered[l.doc_id + '|' + l.id] || 0;
     l.delivered = d; l.remaining = l.qty - d;
-    if (l.in_basis) dv += Math.min(d, l.qty) * l.price;
+    if (l.in_basis) { var q = Math.min(d, l.qty); dv += q * l.price; dc += q * l.cost; dvv += q * l.price * (vatOf[l.doc_id] || 1); sv += l.qty * l.price * (vatOf[l.doc_id] || 1); }
   });
   res.delivered_value = dv; res.delivered_pct = res.value > 0 ? dv / res.value : 0;
+  /* Định nghĩa tài chính (thống nhất toàn app):
+     Giá trị ký = value · Doanh thu ghi nhận = giá trị hàng ĐÃ GIAO (revenue) · Giá vốn = giá mua của đúng phần đã giao (cogs)
+     Chi phí phát sinh = cost_hato · Lợi nhuận gộp = revenue − cogs − cost_hato · Lãi dự kiến = value − cost_goods − cost_hato */
+  res.revenue = dv; res.cogs = dc; res.revenue_vat = dvv; res.value_vat = sv;
   (idx.costsByProject[pid] || []).forEach(function (c) {
     if (c.payer === 'KHACH') res.cost_customer += num_(c.amount); else res.cost_hato += num_(c.amount);
   });
-  res.profit = res.value - res.cost_goods - res.cost_hato;
+  res.profit = res.value - res.cost_goods - res.cost_hato;            // lãi dự kiến (theo giá trị ký)
   res.margin = res.value > 0 ? res.profit / res.value : 0;
+  res.profit_real = res.revenue - res.cogs - res.cost_hato;           // lợi nhuận gộp thực tế (theo hàng đã giao)
+  res.margin_real = res.revenue > 0 ? res.profit_real / res.revenue : 0;
   res.ratio = res.cost_goods > 0 ? res.value / res.cost_goods : 0;
   RT[key] = res; return res;
 }
@@ -608,8 +615,8 @@ function deliveredMap_(pid, excludeId) {
 function customerName_(cid) { var c = readTable_('CUSTOMERS').filter(function (x) { return x.id === cid; })[0]; return c ? c.name : ''; }
 function mapBy_(arr, key) { var m = {}; arr.forEach(function (x) { m[x[key]] = x; }); return m; }
 function maskProjectCalc_(u, c) {
-  var o = { value: c.value, delivered_value: c.delivered_value, delivered_pct: c.delivered_pct };
-  if (canCost_(u)) { o.cost_goods = c.cost_goods; o.cost_hato = c.cost_hato; o.cost_customer = c.cost_customer; o.profit = c.profit; o.margin = c.margin; o.ratio = c.ratio; }
+  var o = { value: c.value, delivered_value: c.delivered_value, delivered_pct: c.delivered_pct, revenue: c.revenue, revenue_vat: c.revenue_vat, value_vat: c.value_vat };
+  if (canCost_(u)) { o.cost_goods = c.cost_goods; o.cost_hato = c.cost_hato; o.cost_customer = c.cost_customer; o.profit = c.profit; o.margin = c.margin; o.ratio = c.ratio; o.cogs = c.cogs; o.profit_real = c.profit_real; o.margin_real = c.margin_real; }
   return o;
 }
 
@@ -842,10 +849,12 @@ ACTIONS.list = function (u, p) {
   var cost = canCost_(u), dels = mapBy_(readTable_('DELIVERIES'), 'id');
   function pj(r) { var pr = projects[r.project_id] || {}; r.project_name = pr.name || ''; r.project_code = pr.code || ''; r.project_kind = pr.kind || 'DA'; r.customer_name = (customers[pr.customer_id] || {}).name || ''; r.doc_code = (docs[r.doc_id] || {}).code || ''; r.delivery_code = r.delivery_id ? (dels[r.delivery_id] || {}).code || '' : ''; }
   if (key === 'projects') {
+    var paidP = {}; readTable_('PAYMENTS').forEach(function (x) { if (x.kind !== 'PHAI_TRA') paidP[x.project_id] = (paidP[x.project_id] || 0) + num_(x.amount); });
     rows = rows.map(function (r) {
       var c = calcProject_(r.id), m = maskProjectCalc_(u, c);
       var o = Object.assign({}, r, m); o.customer_name = (customers[r.customer_id] || {}).name || '';
       o.doc_count = (index_().docsByProject[r.id] || []).length;
+      o.paid = paidP[r.id] || 0; o.receivable = round_(c.revenue_vat - o.paid);
       return o;
     });
   } else if (key === 'customers') {
@@ -1000,7 +1009,15 @@ ACTIONS.projectBundle = function (u, p) {
     delivered_pct: c.delivered_pct, paid_pct: mon.total_vat > 0 ? Math.min(1, mon.paid / mon.total_vat) : 0,
     warranties: readTable_('WARRANTIES').filter(function (x) { return x.project_id === pr.id; }).length
   };
-  return { project: pr, customer: cust, summary: maskProjectCalc_(u, c), lines: c.lines, docs: docsOut, breakdown: breakdown, money: mon, steps: steps };
+  var qiB = groupBy_(readTable_('QUOTE_ITEMS'), 'quote_id'), priceOf = {}; c.lines.forEach(function (l) { priceOf[l.doc_id + '|' + l.id] = l.price; });
+  var dItems = index_().delItems || {};
+  var flow = {
+    quotes: qsP.map(function (q) { var t = quoteTotals_(q, qiB[q.id] || []); return { id: q.id, code: q.code, version: q.version, date: q.date, status: q.status || '', converted: !!q.converted_to, total: t.total }; }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)) || a.version - b.version; }),
+    deliveries: (index_().delByProject[pr.id] || []).map(function (d) { var v = 0; (dItems[d.id] || []).forEach(function (x) { v += num_(x.qty) * num_(priceOf[x.doc_id + '|' + x.doc_item_id]); }); return { id: d.id, code: d.code, date: d.date, status: d.status, value: round_(v) }; }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); }),
+    payments: readTable_('PAYMENTS').filter(function (x) { return x.project_id === pr.id && x.kind !== 'PHAI_TRA'; }).map(function (x) { return { id: x.id, date: x.date, amount: num_(x.amount), note: x.note || '' }; }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); })
+  };
+  if (cost) flow.costs = (index_().costsByProject[pr.id] || []).map(function (x) { return { id: x.id, date: x.date, type: x.type, amount: num_(x.amount), payer: x.payer, note: x.note || '' }; }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); });
+  return { project: pr, customer: cust, summary: maskProjectCalc_(u, c), lines: c.lines, docs: docsOut, breakdown: breakdown, money: mon, steps: steps, flow: flow };
 };
 
 // ---------- Lưu ----------
@@ -1353,7 +1370,7 @@ function dashboardCalc_(u, p) {
       return (index_().docsByProject[pr.id] || []).some(function (d) { return inR(d.sign_date || d.created_at); });
     }).map(function (pr) {
       var c = calcProject_(pr.id);
-      return { id: pr.id, code: pr.code, name: pr.name, customer_name: (custs[pr.customer_id] || {}).name || '', value: c.value, cost_goods: c.cost_goods, cost_hato: c.cost_hato, profit: c.profit, margin: c.margin, ratio: c.ratio };
+      return { id: pr.id, code: pr.code, name: pr.name, customer_name: (custs[pr.customer_id] || {}).name || '', value: c.value, cost_goods: c.cost_goods, cost_hato: c.cost_hato, profit: c.profit, margin: c.margin, ratio: c.ratio, revenue: c.revenue, cogs: c.cogs, profit_real: c.profit_real, margin_real: c.margin_real };
     }).filter(function (x) { return x.value || x.cost_hato; }).sort(function (a, b) { return b.profit - a.profit; });
   }
   return out;

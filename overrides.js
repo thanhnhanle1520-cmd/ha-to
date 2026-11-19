@@ -18,14 +18,7 @@ function previewExport(kind, id) {                   // PDF = xem trước rồi
 }
 
 function loadXlsxLib() { return Promise.resolve(); }                // không cần thư viện ngoài
-var __readTableFile = readTableFile;
-function readTableFile(file) {                                       // Nhập file Excel: .xlsx đọc bằng bộ đọc nội bộ
-  var ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (ext === 'xls') return Promise.reject(new Error('File .xls cũ chưa hỗ trợ: hãy lưu lại thành .xlsx hoặc .csv.'));
-  if (ext !== 'xlsx' && ext !== 'xlsm') return __readTableFile(file);
-  if (file.size > IMPORT_MAX_BYTES) return Promise.reject(new Error('File quá lớn (tối đa 5MB).'));
-  return file.arrayBuffer().then(XlsxLite.read).then(function (book) { var n = Object.keys(book)[0]; return (book[n] || []).map(function (r) { return r.map(function (c) { return c === null || c === undefined ? '' : String(c); }); }); });
-}
+// readTableFile: đọc .xlsx bằng bộ đọc nội bộ đã chuyển vào Js_import (bản cũ ở đây gọi đệ quy chính nó khi nhập file .csv).
 
 var __doExport0 = doExport;
 doExport = function (kind, id, format) {     // báo giá: kiểm tra trước khi xuất

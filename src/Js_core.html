@@ -295,8 +295,10 @@ function combo(inp, list) {
   });
   return inp;
 }
+/* form(): ô chính luôn hiện; ô có more:true gom vào mục "Thông tin thêm" thu gọn.
+   check(): kiểm tra ô bắt buộc (req) và báo lỗi ngay dưới ô, trả về true nếu hợp lệ. */
 function form(fields, vals) {
-  var inputs = {}, root = h('div', { class: 'fg' });
+  var inputs = {}, labels = {}, root = h('div', { class: 'fg' }), moreGrid = null, moreBox = null, nMore = 0;
   fields.forEach(function (f) {
     var v = vals[f.k], el;
     if (f.type === 'select') el = sel(f.opts, v, f.onchange, f.blank);
@@ -308,11 +310,33 @@ function form(fields, vals) {
     if (f.disabled) el.disabled = true;
     if (f.oninput) el.addEventListener('input', f.oninput);
     inputs[f.k] = el;
-    root.appendChild(h('label', { class: f.full ? 'full' : '' }, h('span', { class: f.req ? 'req' : '' }, f.label), el._combo || el));
+    var lb = labels[f.k] = h('label', { class: f.full ? 'full' : '' }, h('span', { class: f.req ? 'req' : '' }, f.label), el._combo || el);
+    if (f.more) {
+      if (!moreGrid) { moreGrid = h('div', { class: 'fg' }); moreBox = h('details', { class: 'full fmore' }, h('summary', null, 'Thông tin thêm'), moreGrid); }
+      moreGrid.appendChild(lb); nMore++;
+      if (v != null && v !== '' && !f.disabled) moreBox.setAttribute('data-filled', (+moreBox.getAttribute('data-filled') || 0) + 1);
+    } else root.appendChild(lb);
     if (el._flatpickr && el._flatpickr.altInput && !el._flatpickr.altInput.parentNode) el.parentNode.insertBefore(el._flatpickr.altInput, el.nextSibling);   // ô ngày hiển thị dd/mm/yyyy (flatpickr chỉ chèn khi ô đã có cha)
+    var clr = function () { lb.classList.remove('bad'); var m = lb.querySelector('.ferr'); if (m) m.remove(); };
+    el.addEventListener('input', clr); el.addEventListener('change', clr);
   });
+  if (moreBox) {
+    var fl = +moreBox.getAttribute('data-filled') || 0;
+    moreBox.querySelector('summary').textContent = 'Thông tin thêm (' + nMore + ' mục' + (fl ? ', đã điền ' + fl : '') + ')';
+    root.appendChild(moreBox);
+  }
+  function check() {
+    var first = null;
+    fields.forEach(function (f) {
+      if (!f.req) return; var e = inputs[f.k], lb = labels[f.k], val = String(e.value == null ? '' : e.value).trim();
+      var m = lb.querySelector('.ferr'); if (m) m.remove(); lb.classList.remove('bad');
+      if (!val) { lb.classList.add('bad'); lb.appendChild(h('small', { class: 'ferr' }, 'Bắt buộc nhập ' + f.label.toLowerCase().replace(/\s*\(.*\)$/, ''))); if (!first) first = e; }
+    });
+    if (first) { var d = first.closest('details'); if (d) d.open = true; try { first.focus(); } catch (x) { } toast('Còn ô bắt buộc chưa nhập', true); return false; }
+    return true;
+  }
   return {
-    el: root, inputs: inputs,
+    el: root, inputs: inputs, check: check,
     get: function () {
       var o = {};
       fields.forEach(function (f) { var e = inputs[f.k]; o[f.k] = f.type === 'number' ? (e.value === '' ? '' : num(e.value)) : e.value; });
