@@ -123,9 +123,7 @@ function isRetail(pid) { var p = by(S.projects, 'id')[pid]; return !!(p && p.kin
 
 /* ---- Báo giá: danh sách & trình soạn ---- */
 PAGES.quotes = function () {
-  setTitle('Báo giá', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { pickProject(function (pid) { go('quote/new?project=' + pid); }); } }, '+ Báo giá') : null,
-    S.perms.quotes.create ? h('button', { title: 'Đọc file Excel khách gửi, chọn / gộp dòng rồi tạo báo giá', onclick: function () { pickProject(function (pid) { go('rfq/new?project=' + pid); }); } }, '+ Từ Excel khách') : null,
-    h('button', { onclick: function () { go('rfqs'); } }, 'Bản nhập Excel')]);
+  setTitle('Báo giá', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { pickProject(function (pid) { go('quote/new?project=' + pid); }); } }, '+ Báo giá') : null,]);
   return call('list', { table: 'quotes' }).then(function (rows) { var v = $('#view'); v.innerHTML = ''; v.appendChild(quotesTable(rows, true)); });
 };
 PAGES.quote = function (p, q) {
@@ -157,7 +155,6 @@ PAGES.quote = function (p, q) {
     var title = isNew ? 'Báo giá mới' : qt.code + ' · v' + qt.version;
     var acts = [];
     if (!isNew) acts.push(exportMenu('quote', qt.id));
-    if (!isNew && qt.rfq_id) acts.push(h('button', { title: 'Điền giá vào chính file Excel khách đã gửi (giữ nguyên định dạng)', onclick: function () { rfqExportCustomer(Object.assign({}, qt, pf.get()), lines); } }, '⬇ Xuất theo mẫu khách'));
     acts.push(h('button', { onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá nhanh'));
     acts.push(h('button', { onclick: function () { quoteCheck(cur(), lines, 'tiếp tục').then(function (ok) { if (ok) toast('Không có điểm bất thường'); }); } }, 'Kiểm tra'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('copyQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo bản sao ' + r.code); go('quote/' + r.id); } }); } }, 'Copy báo giá'));

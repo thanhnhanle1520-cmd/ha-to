@@ -53,6 +53,7 @@ const TABLES = {
   ERRLOG: ['ts', 'user', 'action', 'message'],
   TASKS: ['id', 'kind', 'ref', 'title', 'start_date', 'end_date', 'project_id', 'done', 'created_at', 'note', 'type', 'priority', 'status', 'time', 'remind', 'repeat', 'done_at', 'updated_at'],
   PRICEHIST: ['id', 'code', 'date', 'old_cost', 'new_cost', 'user'],
+  // RFQS: bảng của tính năng Nhập Excel khách (đã gỡ 19/11/2026) — giữ cột để không mất dữ liệu đã có
   RFQS: ['id', 'code', 'project_id', 'customer_id', 'file_name', 'file_id', 'file_url', 'sheet', 'header_row', 'header_last', 'map', 'opts', 'rows', 'groups', 'quote_id', 'n_rows', 'n_lines', 'created_by', 'created_at', 'updated_at'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
@@ -1925,71 +1926,3 @@ ACTIONS.export = function (u, p) {
 };
 
 
-/* ================= Nhập Excel của khách (RFQ) =================
-   Mỗi lần nhập = 1 dòng RFQS: file gốc (trên Drive), cách ghép cột, toàn bộ dòng đã đọc (rút gọn) và các hạng mục đã chọn / gộp.
-   Báo giá tạo từ RFQ mang rfq_id; mỗi dòng báo giá mang src_rows (các dòng nguồn) để xuất ngược đúng mẫu khách. */
-function rfqSig_(texts) { return (texts || []).map(function (t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }).filter(String).join('|').slice(0, 300); }
-function rfqMaps_(cu) { try { return JSON.parse((cu && cu.rfq_maps) || '{}') || {}; } catch (e) { return {}; } }
-ACTIONS.rfqList = function (u, p) {
-  need_(u, 'quotes', 'view');
-  var pj = mapBy_(readTable_('PROJECTS'), 'id'), qs = mapBy_(readTable_('QUOTES'), 'id');
-  return readTable_('RFQS').filter(function (r) { return !p.project_id || r.project_id === p.project_id; }).map(function (r) {
-    var q = qs[r.quote_id] || {}, pr = pj[r.project_id] || {};
-    return { id: r.id, code: r.code, project_id: r.project_id, project_name: pr.name || '', project_code: pr.code || '', file_name: r.file_name, sheet: r.sheet, n_rows: r.n_rows, n_lines: r.n_lines, quote_id: r.quote_id, quote_code: q.code || '', created_at: r.created_at, updated_at: r.updated_at };
-  }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
-};
-ACTIONS.rfqGet = function (u, p) {
-  need_(u, 'quotes', 'view');
-  var r = readTable_('RFQS').filter(function (x) { return x.id === p.id; })[0];
-  if (!r) throw new Error('Không tìm thấy bản nhập Excel.');
-  return r;
-};
-ACTIONS.rfqMaps = function (u, p) {
-  need_(u, 'quotes', 'view');
-  var pr = readTable_('PROJECTS').filter(function (x) { return x.id === p.project_id; })[0];
-  var cu = pr ? readTable_('CUSTOMERS').filter(function (x) { return x.id === pr.customer_id; })[0] : null;
-  return { customer_id: cu ? cu.id : '', customer_name: cu ? cu.name : '', maps: rfqMaps_(cu) };
-};
-function rfqSave_(u, p) {
-  var r = p.rec || {}, old = r.id ? readTable_('RFQS').filter(function (x) { return x.id === r.id; })[0] : null;
-  var pr = readTable_('PROJECTS').filter(function (x) { return x.id === (r.project_id || (old && old.project_id)); })[0];
-  if (!pr) throw new Error('Hãy chọn dự án cho bản nhập Excel.');
-  var out = Object.assign({}, old || {}, r);
-  out.project_id = pr.id; out.customer_id = pr.customer_id || '';
-  out.n_rows = (out.rows || []).length; out.n_lines = (out.groups || []).length;
-  if (!old) { out.id = newId_('X'); out.code = nextCode_('XL', true); out.created_by = u.email; out.created_at = now_(); }
-  else { out.id = old.id; out.code = old.code; out.created_by = old.created_by; out.created_at = old.created_at; }
-  upsert_('RFQS', out);
-  if (out.file_url && (!old || old.file_url !== out.file_url))       // file gốc hiện trong mục Tệp của dự án
-    appendMany_('FILES', [{ id: newId_('F'), project_id: pr.id, doc_id: '', name: 'Excel khách – ' + (out.file_name || ''), url: out.file_url, mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', created_by: u.email, created_at: now_(), size: num_(p.file_size) }]);
-  if (out.customer_id && p.sig && out.map) {                           // nhớ cách ghép cột theo khách (theo "chữ ký" dòng tiêu đề)
-    var cu = readTable_('CUSTOMERS').filter(function (x) { return x.id === out.customer_id; })[0];
-    if (cu) { var m = rfqMaps_(cu); m[p.sig] = out.map; var ks = Object.keys(m); if (ks.length > 30) delete m[ks[0]]; upsert_('CUSTOMERS', Object.assign({}, cu, { rfq_maps: JSON.stringify(m) })); }
-  }
-  audit_(u, old ? 'Sửa' : 'Tạo', 'RFQS', out.id, out.project_id, out.code + ' · ' + (out.file_name || ''));
-  return out;
-}
-ACTIONS.rfqSave = function (u, p) { need_(u, 'quotes', 'create'); return withLock_(function () { RT = { user: RT.user, ss: RT.ss }; var o = rfqSave_(u, p); return { id: o.id, code: o.code }; }); };
-ACTIONS.rfqRemove = function (u, p) {
-  need_(u, 'quotes', 'edit');
-  return withLock_(function () {
-    RT = { user: RT.user, ss: RT.ss };
-    var t = readTable_('RFQS').filter(function (x) { return x.id === p.id; })[0]; if (!t) return true;
-    var sh = ss_().getSheetByName('RFQS'), last = sh.getLastRow();
-    if (last >= 2) { var ids = sh.getRange(2, 1, last - 1, 1).getValues(); for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(p.id)) { sh.deleteRows(i + 2, 1); break; } }
-    bump_('RFQS'); audit_(u, 'Xóa', 'RFQS', t.id, t.project_id, t.code);
-    return true;
-  });
-};
-/* Tạo báo giá mới từ các hạng mục đã chọn (không ghi đè báo giá cũ). */
-ACTIONS.rfqToQuote = function (u, p) {
-  need_(u, 'quotes', 'create');
-  return withLock_(function () {
-    RT = { user: RT.user, ss: RT.ss };
-    var x = rfqSave_(u, p);
-    if (!(p.lines || []).length) throw new Error('Chưa chọn hạng mục nào để báo giá.');
-    var res = saveQuote_(u, { rec: { project_id: x.project_id, rfq_id: x.id, note: 'Từ file khách: ' + (x.file_name || '') + (x.sheet ? ' (' + x.sheet + ')' : ''), coef: p.coef || 0 }, items: p.lines });
-    upsert_('RFQS', Object.assign({}, x, { quote_id: res.quote.id }));
-    return { quote_id: res.quote.id, quote_code: res.quote.code, rfq_id: x.id, rfq_code: x.code };
-  });
-};

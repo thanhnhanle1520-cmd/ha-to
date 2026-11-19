@@ -37,7 +37,6 @@ PAGES.project = function (p) {
   return call('projectBundle', { id: id }).then(function (b) {
     var pj = b.project, s = b.summary, v = $('#view'); v.innerHTML = '';
     setTitle(pj.code + ' · ' + pj.name, [S.perms.projects.edit ? h('button', { onclick: function () { projectModal(pj, route); } }, 'Sửa dự án') : null,
-      S.perms.quotes.create ? h('button', { title: 'Đọc file Excel khách gửi để lập báo giá', onclick: function () { go('rfq/new?project=' + pj.id); } }, 'Nhập Excel khách') : null,
       h('button', { onclick: function () { reconModal(pj.id); } }, 'Gói đối chiếu'), h('button', { onclick: function () { projectSummaryPrint(b); } }, 'Tóm tắt 1 trang'),
       S.perms.projects.create && S.perms.quotes.create ? h('button', { onclick: function () { confirmBox('Tạo bản sao dự án (kèm báo giá mới nhất)?', function () { safe(call('copyProject', { id: pj.id })).then(function (r) { if (r) { toast('Đã tạo ' + r.code); reloadLookups().then(function () { go('project/' + r.id); }); } }); }); } }, 'Copy dự án') : null]);
     var kp = h('div', { id: 'kpibar' },

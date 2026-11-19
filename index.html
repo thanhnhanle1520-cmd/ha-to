@@ -176,8 +176,8 @@ function perfNote(a, tot, ms, ms0) {
 var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
-var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, rfqList: 1, rfqGet: 1, rfqMaps: 1 };
-var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, rfqSave: 1, rfqRemove: 1, rfqToQuote: 1 };
+var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1 };
+var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -693,7 +693,7 @@ function go(path) { location.hash = '#/' + path; }
 function route() {
   if (!S.user) return;
   var r = parseHash(), p = r.path, page = p[0] || (S.perms.dashboard.view ? 'dashboard' : 'projects');
-  var k = page === 'quote' || page === 'rfq' || page === 'rfqs' ? 'quotes' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page;
+  var k = page === 'quote' ? 'quotes' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page;
   document.querySelectorAll('#nav a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-k') === k); });
   if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
   if (S.draftCtl) { S.draftCtl.end(); S.draftCtl = null; draftStatus(''); }
@@ -990,7 +990,6 @@ PAGES.project = function (p) {
   return call('projectBundle', { id: id }).then(function (b) {
     var pj = b.project, s = b.summary, v = $('#view'); v.innerHTML = '';
     setTitle(pj.code + ' · ' + pj.name, [S.perms.projects.edit ? h('button', { onclick: function () { projectModal(pj, route); } }, 'Sửa dự án') : null,
-      S.perms.quotes.create ? h('button', { title: 'Đọc file Excel khách gửi để lập báo giá', onclick: function () { go('rfq/new?project=' + pj.id); } }, 'Nhập Excel khách') : null,
       h('button', { onclick: function () { reconModal(pj.id); } }, 'Gói đối chiếu'), h('button', { onclick: function () { projectSummaryPrint(b); } }, 'Tóm tắt 1 trang'),
       S.perms.projects.create && S.perms.quotes.create ? h('button', { onclick: function () { confirmBox('Tạo bản sao dự án (kèm báo giá mới nhất)?', function () { safe(call('copyProject', { id: pj.id })).then(function (r) { if (r) { toast('Đã tạo ' + r.code); reloadLookups().then(function () { go('project/' + r.id); }); } }); }); } }, 'Copy dự án') : null]);
     var kp = h('div', { id: 'kpibar' },
@@ -1386,9 +1385,7 @@ function isRetail(pid) { var p = by(S.projects, 'id')[pid]; return !!(p && p.kin
 
 /* ---- Báo giá: danh sách & trình soạn ---- */
 PAGES.quotes = function () {
-  setTitle('Báo giá', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { pickProject(function (pid) { go('quote/new?project=' + pid); }); } }, '+ Báo giá') : null,
-    S.perms.quotes.create ? h('button', { title: 'Đọc file Excel khách gửi, chọn / gộp dòng rồi tạo báo giá', onclick: function () { pickProject(function (pid) { go('rfq/new?project=' + pid); }); } }, '+ Từ Excel khách') : null,
-    h('button', { onclick: function () { go('rfqs'); } }, 'Bản nhập Excel')]);
+  setTitle('Báo giá', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { pickProject(function (pid) { go('quote/new?project=' + pid); }); } }, '+ Báo giá') : null,]);
   return call('list', { table: 'quotes' }).then(function (rows) { var v = $('#view'); v.innerHTML = ''; v.appendChild(quotesTable(rows, true)); });
 };
 PAGES.quote = function (p, q) {
@@ -1420,7 +1417,6 @@ PAGES.quote = function (p, q) {
     var title = isNew ? 'Báo giá mới' : qt.code + ' · v' + qt.version;
     var acts = [];
     if (!isNew) acts.push(exportMenu('quote', qt.id));
-    if (!isNew && qt.rfq_id) acts.push(h('button', { title: 'Điền giá vào chính file Excel khách đã gửi (giữ nguyên định dạng)', onclick: function () { rfqExportCustomer(Object.assign({}, qt, pf.get()), lines); } }, '⬇ Xuất theo mẫu khách'));
     acts.push(h('button', { onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá nhanh'));
     acts.push(h('button', { onclick: function () { quoteCheck(cur(), lines, 'tiếp tục').then(function (ok) { if (ok) toast('Không có điểm bất thường'); }); } }, 'Kiểm tra'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('copyQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo bản sao ' + r.code); go('quote/' + r.id); } }); } }, 'Copy báo giá'));
@@ -2219,308 +2215,5 @@ function remTimeCheck_unused() {
 (function () { var iv = setInterval(function () { if (S.user && S.perms && S.perms.dashboard && S.perms.dashboard.view) { clearInterval(iv); refreshReminders(); setInterval(refreshReminders, 300000);  } }, 1500); })();
 </script>
 
-<script>
-/* ================= Nhập Excel của khách → hạng mục báo giá → xuất ngược theo mẫu khách =================
-   Bước 1 chọn dự án + file · Bước 2 ghép cột (tự nhận, nhớ theo khách) · Bước 3 chọn / gộp / loại dòng · Bước 4 khớp Bảng giá → tạo báo giá.
-   Logic nhận diện nằm trong rfq-core.js (RfqCore), điền ngược trong xlsx-patch.js (XlsxPatch). */
-var RFQ_PAGE = 100;
-function rfqReadFile(file) {             // -> { sheets:[{name, path, rows, merges}], files (null nếu .xls) }
-  var ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (file.size > 25 * 1024 * 1024) return Promise.reject(new Error('File quá lớn (tối đa 25MB).'));
-  if (ext === 'xlsx' || ext === 'xlsm') return file.arrayBuffer().then(XlsxLite.readFull);
-  if (ext === 'xls') return loadXlsxLib().then(function () { return file.arrayBuffer(); }).then(function (ab) {
-    var wb = XLSX.read(ab, { type: 'array' });
-    return { files: null, sheets: wb.SheetNames.map(function (n) { var ws = wb.Sheets[n]; return { name: n, path: '', rows: XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }), merges: (ws['!merges'] || []).map(function (m) { return { r1: m.s.r, c1: m.s.c, r2: m.e.r, c2: m.e.c }; }) }; }) };
-  });
-  return Promise.reject(new Error('Chỉ nhận file Excel .xlsx hoặc .xls.'));
-}
-function rfqTrimRows(rows) {             // rút gọn để lưu: bỏ dòng trống cuối, cắt chữ quá dài
-  var out = rows.map(function (r) { r = (r || []).map(function (v) { return typeof v === 'string' && v.length > 1500 ? v.slice(0, 1500) : v; }); while (r.length && (r[r.length - 1] === '' || r[r.length - 1] == null)) r.pop(); return r; });
-  while (out.length && !out[out.length - 1].length) out.pop();
-  return out;
-}
-function rfqColName(c) { return XlsxPatch.colName(c); }
-function rfqSrcLabel(rows) { rows = rows.slice().sort(function (a, b) { return a - b; }); if (rows.length === 1) return 'dòng ' + rows[0]; var cont = rows[rows.length - 1] - rows[0] + 1 === rows.length; return (cont ? 'dòng ' + rows[0] + '–' + rows[rows.length - 1] : 'dòng ' + rows.slice(0, 4).join(', ') + (rows.length > 4 ? '…' : '')) + ' (' + rows.length + ' dòng)'; }
-
-PAGES.rfqs = function () {
-  setTitle('Bản nhập Excel khách', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { go('rfq/new'); } }, '+ Nhập Excel khách') : null]);
-  return call('rfqList', {}).then(function (rows) {
-    var v = $('#view'); v.innerHTML = '';
-    v.appendChild(table({ rows: rows, search: function (r) { return [r.code, r.file_name, r.project_name, r.project_code, r.quote_code].join(' '); }, onRow: function (r) { go('rfq/' + r.id); }, empty: 'Chưa có bản nhập nào. Bấm “+ Nhập Excel khách”.',
-      cols: [{ k: 'code', label: 'Mã' }, { k: 'created_at', label: 'Ngày', fmt: function (r) { return D(String(r.created_at).slice(0, 10)); } }, { k: 'file_name', label: 'File khách' }, { k: 'sheet', label: 'Trang tính' }, { k: 'project_name', label: 'Dự án', fmt: function (r) { return (r.project_code ? r.project_code + ' · ' : '') + r.project_name; } },
-        { k: 'n_rows', label: 'Số dòng', cls: 'r' }, { k: 'n_lines', label: 'Hạng mục', cls: 'r' }, { k: 'quote_code', label: 'Báo giá', fmt: function (r) { return r.quote_id ? h('a', { href: '#/quote/' + r.quote_id, onclick: function (e) { e.stopPropagation(); } }, r.quote_code) : h('span', { class: 'mut' }, 'chưa tạo'); } }] }));
-  });
-};
-
-PAGES.rfq = function (p, q) {
-  var id = p[1], isNew = !id || id === 'new', v = $('#view');
-  var R = { project_id: q.project || '', rows: [], merges: [], groups: [], map: {}, opts: { inherit: true, two: null }, sheet: '', sheets: [] };
-  var book = null, fileObj = null, cls = [], mapInfo = { conf: {}, warn: [] }, saved = { maps: {} }, chk = {}, lastClick = null, page = 1, filt = 'all', qtext = '', dirty = false;
-  var host = h('div');
-  function setDirty() { dirty = true; }
-  setTitle(isNew ? 'Nhập Excel khách' : 'Bản nhập Excel', [h('button', { onclick: function () { go('rfqs'); } }, 'Danh sách bản nhập')]);
-  v.innerHTML = ''; v.appendChild(host);
-
-  /* ---- nhận diện ---- */
-  function sig() { var h0 = R.header_row ? (R.rows[R.header_row - 1] || []) : []; return h0.map(function (x) { return RfqCore.strip(x); }).filter(Boolean).join('|').slice(0, 300); }
-  function detect(keepMap) {
-    var hd = RfqCore.findHeader(R.rows, R.merges);
-    if (R.opts.header_row) {                                    // người dùng chỉ định dòng tiêu đề
-      var r0 = R.opts.header_row, two = !!R.opts.two;
-      hd = { row: r0, last: r0 + (two ? 1 : 0), texts: [] };
-      var W = 0; R.rows.slice(r0 - 1, r0 + 1).forEach(function (r) { W = Math.max(W, (r || []).length); });
-      for (var c = 0; c < W; c++) { var a = String((R.rows[r0 - 1] || [])[c] || '').trim(), b = two ? String((R.rows[r0] || [])[c] || '').trim() : ''; hd.texts.push(b && b !== a ? (a ? a + ' / ' + b : b) : a); }
-    }
-    R.header_row = hd ? hd.row : 0; R.header_last = hd ? hd.last : 0; R.texts = hd ? hd.texts : [];
-    var start = hd ? hd.last + 1 : 1, sv = saved.maps[sig()] || null;
-    if (!keepMap) { mapInfo = RfqCore.mapColumns(R.texts, R.rows, start, sv); R.map = mapInfo.map; if (sv) mapInfo.warn.unshift('Đã dùng cách ghép cột lần trước của khách này.'); }
-    else mapInfo.warn = [];
-    R.width = Math.max(mapInfo.width || 0, (R.texts || []).length);
-    cls = RfqCore.classify(R.rows, start, R.map, { inherit: R.opts.inherit !== false });
-  }
-  function byR() { var m = {}; cls.forEach(function (x) { m[x.r] = x; }); return m; }
-  function inGroup() { var m = {}; R.groups.forEach(function (g, i) { g.rows.forEach(function (r) { m[r] = i; }); }); return m; }
-  function lineFrom(rowsList) {
-    var m = byR(), rs = rowsList.slice().sort(function (a, b) { return a - b; }), f = m[rs[0]] || {};
-    if (rs.length === 1) return { rows: rs, name: f.full || f.name || '', spec: f.spec || '', unit: f.unit || '', qty: f.qty || 1, model: f.model || '', brand: f.brand || '', origin: f.origin || '', code: '', price: 0, cost: 0, coef: 0, note: f.note || '' };
-    var sec = null; for (var i = cls.indexOf(f) - 1; i >= 0; i--) { if (cls[i].kind === 'section' || cls[i].kind === 'text') { sec = cls[i]; break; } }
-    return { rows: rs, name: sec ? sec.full || sec.name : (f.full || f.name || ''), spec: rs.map(function (r) { var x = m[r] || {}; return '- ' + (x.full || x.name || '') + (x.qty != null ? ': ' + N(x.qty) + ' ' + (x.unit || '') : ''); }).join('\n').slice(0, 1500), unit: 'Gói', qty: 1, model: '', brand: '', origin: '', code: '', price: 0, cost: 0, coef: 0, note: '' };
-  }
-  function defaultGroups() { var items = cls.filter(function (x) { return x.kind === 'item' && x.qty; }); R.groups = items.length <= 60 ? items.map(function (x) { return lineFrom([x.r]); }) : []; autoMatch(); }
-  function sortGroups() { R.groups.sort(function (a, b) { return Math.min.apply(null, a.rows) - Math.min.apply(null, b.rows); }); }
-
-  /* ---- khớp Bảng giá: có model / tên trùng thì tự gắn mã và giá ---- */
-  function autoMatch(onlyNew) {
-    var jobs = R.groups.filter(function (g) { return !g.code && !g.tried && (g.model || g.name); }).slice(0, 80);
-    return Promise.all(jobs.map(function (g) {
-      g.tried = 1; var key = g.model || g.name.slice(0, 50);
-      return raw('catalogSearch', { q: key, limit: 3 }, true).then(function (rs) {
-        var t = (rs || [])[0]; if (!t) return;
-        var same = g.model ? RfqCore.strip(t.model) === RfqCore.strip(g.model) : RfqCore.strip(t.name) === RfqCore.strip(g.name);
-        if (same) applyCat(g, t);
-      }, function () { });
-    })).then(function () { if (jobs.length) drawLines(); });
-  }
-  function applyCat(g, t) { g.code = t.code; g.price = num(t.price) || 0; g.cost = num(t.cost) || 0; g.coef = num(t.coef) || 0; if (!g.model) g.model = t.model || ''; if (!g.brand) g.brand = t.brand || ''; if (!g.origin) g.origin = t.origin || ''; g.cat = t.name; }
-
-  /* ---- vẽ ---- */
-  var srcCard = h('div', { class: 'card' }), mapCard = h('div', { class: 'card' }), rowCard = h('div', { class: 'card' }), lineCard = h('div', { class: 'card' }), actBar = h('div', { class: 'bar2', style: 'position:sticky;bottom:0;background:var(--bg);padding:8px 0;z-index:5' });
-  host.append(srcCard, mapCard, rowCard, lineCard, actBar);
-  function drawSrc() {
-    srcCard.innerHTML = '';
-    var ps = sel(projOpts(), R.project_id, function (e) { R.project_id = e.target.value; loadSaved().then(function () { if (R.rows.length) { detect(); defaultGroups(); drawAll(); } }); }, '— chọn dự án —');
-    if (!isNew) ps.disabled = true;
-    var fi = h('input', { type: 'file', accept: '.xlsx,.xls,.xlsm', onchange: function () { var f = fi.files[0]; if (f) openFile(f); } });
-    srcCard.appendChild(h('h3', null, '1. Dự án và file Excel của khách'));
-    srcCard.appendChild(h('div', { class: 'bar2' }, h('label', null, 'Dự án ', ps), R.file_name ? h('span', null, '📄 ', h('b', null, R.file_name)) : null, isNew ? h('label', null, R.file_name ? 'Đổi file ' : 'File khách ', fi) : null, R.file_url ? h('a', { href: R.file_url, target: '_blank' }, 'Mở file gốc trên Drive') : null));
-    if (!R.rows.length) { srcCard.appendChild(h('p', { class: 'mut' }, 'Chọn file .xlsx / .xls khách gửi. HA TO tự tìm dòng tiêu đề và ghép cột; bạn kiểm tra rồi chọn các dòng cần báo giá. File gốc được lưu lên Drive của dự án.')); return; }
-    var bar = h('div', { class: 'bar2' });
-    if (R.sheets.length > 1) bar.appendChild(h('label', null, 'Trang tính ', sel(R.sheets.map(function (n) { return [n, n]; }), R.sheet, function (e) { pickSheet(e.target.value); })));
-    var hr = h('input', { type: 'number', min: 1, style: 'width:70px', value: R.header_row || '' });
-    hr.onchange = function () { var n = Math.round(num(hr.value)); if (n >= 1) { R.opts.header_row = n; R.opts.two = R.header_last > R.header_row; detect(); defaultGroups(); drawAll(); setDirty(); } };
-    var two = h('input', { type: 'checkbox', checked: R.header_last > R.header_row }); two.onchange = function () { R.opts.header_row = R.header_row || 1; R.opts.two = two.checked; detect(); defaultGroups(); drawAll(); setDirty(); };
-    var inh = h('input', { type: 'checkbox', checked: R.opts.inherit !== false }); inh.onchange = function () { R.opts.inherit = inh.checked; detect(true); R.groups.forEach(function (g) { if (g.rows.length === 1) { var x = byR()[g.rows[0]]; if (x) g.name = x.full; } }); drawAll(); setDirty(); };
-    bar.append(h('label', null, 'Dòng tiêu đề ', hr), h('label', null, two, ' Tiêu đề 2 dòng'), h('label', { title: 'Dòng con chỉ ghi kích cỡ (VD “DN50”) sẽ mang thêm tên dòng cha phía trên' }, inh, ' Ghép tên dòng cha cho dòng con'),
-      h('span', { class: 'mut' }, R.header_row ? '' : 'Không thấy dòng tiêu đề — app đã đoán cột theo dữ liệu, hãy kiểm tra.'));
-    srcCard.appendChild(bar);
-  }
-  function drawMap() {
-    mapCard.innerHTML = ''; if (!R.rows.length) return;
-    mapCard.appendChild(h('h3', null, '2. Ghép cột'));
-    var used = {}; Object.keys(R.map).forEach(function (f) { used[R.map[f]] = f; });
-    var start = (R.header_last || 0), samples = R.rows.slice(start, start + 60), W = R.width || 0;
-    var opts = [['', '— bỏ qua —']].concat(RfqCore.FIELDS.map(function (f) { return [f[0], f[1]]; }));
-    var COL = { high: '#16a34a', saved: '#2563eb', low: '#d97706', guess: '#d97706' };
-    var grid = h('div', { style: 'display:flex;gap:8px;overflow-x:auto;padding-bottom:6px' });
-    for (var c = 0; c < W; c++) (function (c) {
-      var vals = samples.map(function (r) { return (r || [])[c]; }).filter(function (x) { return x !== '' && x != null; });
-      if (!vals.length && !(R.texts[c] || '').trim()) return;
-      var f = used[c] || '', s = sel(opts, f, function (e) {
-        Object.keys(R.map).forEach(function (k) { if (R.map[k] === c) delete R.map[k]; });
-        if (e.target.value) { R.map[e.target.value] = c; mapInfo.conf[e.target.value] = 'saved'; }
-        detect(true); defaultGroupsKeep(); drawAll(); setDirty();
-      });
-      s.style.width = '100%'; if (f) s.style.borderColor = COL[mapInfo.conf[f]] || ''; if (f) s.style.borderWidth = '2px';
-      grid.appendChild(h('div', { style: 'min-width:150px;max-width:190px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff' },
-        h('div', { class: 'mut', style: 'font-size:11px' }, 'Cột ' + rfqColName(c)), h('div', { style: 'font-weight:600;font-size:12px;min-height:30px;white-space:pre-wrap;overflow:hidden;max-height:48px' }, String(R.texts[c] || '(không tiêu đề)')), s,
-        h('div', { class: 'mut', style: 'font-size:11px;margin-top:4px;max-height:44px;overflow:hidden' }, vals.slice(0, 3).map(function (x) { return String(x).replace(/\s+/g, ' ').slice(0, 40); }).join(' · '))));
-    })(c);
-    mapCard.appendChild(grid);
-    mapCard.appendChild(h('div', { class: 'mut', style: 'font-size:12px' }, 'Viền xanh lá: nhận chắc chắn · xanh dương: theo lần trước / bạn chọn · cam: cần kiểm tra. Cách ghép được nhớ cho khách này khi lưu.'));
-    mapInfo.warn.forEach(function (w) { mapCard.appendChild(h('div', { class: 'neg', style: 'font-size:13px;margin-top:4px' }, '⚠ ' + w)); });
-  }
-  function defaultGroupsKeep() { var ok = byR(); R.groups = R.groups.filter(function (g) { return g.rows.every(function (r) { return ok[r]; }); }); R.groups.forEach(function (g) { if (g.rows.length === 1 && !g.edited) { var n = lineFrom(g.rows); ['name', 'spec', 'unit', 'qty', 'model', 'brand', 'origin', 'note'].forEach(function (k) { g[k] = n[k]; }); } }); }
-  var KB = { item: ['Hàng', 'b-info'], section: ['Mục', 'b-warn'], text: ['Chữ', ''], total: ['Tổng', ''] };
-  function drawRows() {
-    rowCard.innerHTML = ''; if (!R.rows.length) return;
-    var ig = inGroup(), nChk = Object.keys(chk).length;
-    var list = cls.filter(function (x) { if (filt === 'item' && x.kind !== 'item') return false; if (filt === 'in' && ig[x.r] == null) return false; if (filt === 'out' && (x.kind !== 'item' || ig[x.r] != null)) return false; if (qtext && RfqCore.strip([x.full, x.spec, x.model, x.stt].join(' ')).indexOf(RfqCore.strip(qtext)) < 0) return false; return true; });
-    var pages = Math.max(1, Math.ceil(list.length / RFQ_PAGE)); if (page > pages) page = pages;
-    rowCard.appendChild(h('h3', null, '3. Chọn dòng cần báo giá (' + cls.filter(function (x) { return x.kind === 'item'; }).length + ' dòng hàng / ' + cls.length + ' dòng có nội dung)'));
-    var srch = h('input', { type: 'search', placeholder: 'Tìm trong file…', value: qtext, oninput: debounce(function (e) { qtext = e.target.value; page = 1; drawRows(); var s2 = rowCard.querySelector('input[type=search]'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 250) });
-    rowCard.appendChild(h('div', { class: 'bar2' }, srch, sel([['all', 'Tất cả dòng'], ['item', 'Chỉ dòng hàng'], ['in', 'Đã đưa vào báo giá'], ['out', 'Dòng hàng chưa đưa vào']], filt, function (e) { filt = e.target.value; page = 1; drawRows(); }),
-      h('span', { class: 'mut' }, nChk ? 'Đang chọn ' + nChk + ' dòng:' : 'Tích chọn dòng (giữ Shift để chọn một dải), rồi:'),
-      h('button', { class: 'pri', disabled: nChk < 2, onclick: doMerge, title: 'Nhiều dòng thành 1 hạng mục trọn gói' }, '⧉ Gộp thành 1 hạng mục'),
-      h('button', { disabled: !nChk, onclick: doAddEach }, '+ Đưa vào báo giá (mỗi dòng 1 hạng mục)'),
-      h('button', { disabled: !nChk, onclick: doRemove }, '− Loại khỏi báo giá'),
-      h('button', { disabled: !nChk, onclick: function () { chk = {}; drawRows(); } }, 'Bỏ chọn'),
-      h('button', { onclick: function () { cls.forEach(function (x) { if (x.kind === 'item' && filtOk(x)) chk[x.r] = 1; }); drawRows(); } }, 'Chọn mọi dòng hàng đang hiện')));
-    function filtOk(x) { return list.indexOf(x) >= 0; }
-    var tb = h('tbody');
-    list.slice((page - 1) * RFQ_PAGE, page * RFQ_PAGE).forEach(function (x) {
-      var gi = ig[x.r], cb = h('input', { type: 'checkbox', checked: !!chk[x.r] });
-      cb.onclick = function (e) {
-        if (e.shiftKey && lastClick != null) { var a = list.findIndex(function (y) { return y.r === lastClick; }), b = list.indexOf(x); if (a >= 0) { var lo = Math.min(a, b), hi = Math.max(a, b); for (var i = lo; i <= hi; i++) if (list[i].kind === 'item') { if (cb.checked) chk[list[i].r] = 1; else delete chk[list[i].r]; } } }
-        else { if (cb.checked) chk[x.r] = 1; else delete chk[x.r]; }
-        lastClick = x.r; drawRows();
-      };
-      var kb = KB[x.kind] || ['', ''], isSec = x.kind === 'section';
-      var tr = h('tr', { style: isSec ? 'background:#eef2ff;font-weight:600' : (x.kind === 'item' ? '' : 'color:#6b7280') },
-        h('td', null, x.kind === 'item' ? cb : (isSec || x.kind === 'text' ? h('a', { href: 'javascript:void(0)', title: 'Chọn tất cả dòng hàng thuộc mục này', onclick: function () { selectUnder(x); } }, 'chọn mục') : '')),
-        h('td', { class: 'mut' }, x.r), h('td', null, kb[0] ? h('span', { class: 'badge ' + kb[1] }, kb[0]) : ''), h('td', null, x.stt),
-        h('td', { style: 'min-width:260px;white-space:pre-wrap' }, (x.full || '').slice(0, 300)), h('td', { style: 'min-width:160px;white-space:pre-wrap;font-size:12px' }, (x.spec || '').slice(0, 200)),
-        h('td', null, x.unit), h('td', { class: 'r' }, x.qty != null ? N(x.qty) : ''),
-        h('td', null, gi != null ? h('span', { class: 'badge b-ok', title: R.groups[gi].name }, 'HM ' + (gi + 1) + (R.groups[gi].rows.length > 1 ? ' (gộp)' : '')) : ''));
-      tb.appendChild(tr);
-    });
-    rowCard.appendChild(h('div', { class: 'tw', style: 'max-height:560px;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['', 'Dòng', 'Loại', 'STT', 'Tên / mô tả', 'Quy cách', 'ĐVT', 'SL', 'Hạng mục'].map(function (t) { return h('th', null, t); }))), tb)));
-    rowCard.appendChild(h('div', { class: 'pager' }, h('span', null, list.length + ' dòng'), pages > 1 ? [h('button', { disabled: page <= 1, onclick: function () { page--; drawRows(); } }, '‹'), h('span', null, page + '/' + pages), h('button', { disabled: page >= pages, onclick: function () { page++; drawRows(); } }, '›')] : null));
-  }
-  function selectUnder(x) {
-    var i = cls.indexOf(x) + 1, lvlSec = x.kind === 'section';
-    for (; i < cls.length; i++) { var y = cls[i]; if (y.kind === 'section' || y.kind === 'total' || (!lvlSec && y.kind === 'text' && y.r !== x.r && !y.parent && cls[i + 1] && cls[i + 1].parent !== y.r && !(cls[i + 1].kind === 'item'))) break; if (lvlSec && y.kind === 'section') break; if (y.kind === 'item') chk[y.r] = 1; }
-    drawRows();
-  }
-  function takeChecked() { var rs = Object.keys(chk).map(Number); chk = {}; return rs; }
-  function detach(rs) { R.groups.forEach(function (g) { g.rows = g.rows.filter(function (r) { return rs.indexOf(r) < 0; }); }); R.groups = R.groups.filter(function (g) { return g.rows.length; }); }
-  function doMerge() { var rs = takeChecked(); if (rs.length < 2) return; detach(rs); R.groups.push(lineFrom(rs)); sortGroups(); setDirty(); autoMatch(); drawRows(); drawLines(); toast('Đã gộp ' + rs.length + ' dòng thành 1 hạng mục — sửa tên, ĐVT, SL bên dưới'); }
-  function doAddEach() { var rs = takeChecked(); detach(rs); rs.forEach(function (r) { R.groups.push(lineFrom([r])); }); sortGroups(); setDirty(); autoMatch(); drawRows(); drawLines(); }
-  function doRemove() { var rs = takeChecked(); detach(rs); setDirty(); drawRows(); drawLines(); }
-  function drawLines() {
-    lineCard.innerHTML = ''; if (!R.rows.length) return;
-    var tot = 0; R.groups.forEach(function (g) { tot += num(g.qty) * num(g.price); });
-    lineCard.appendChild(h('h3', null, '4. Hạng mục đưa vào báo giá (' + R.groups.length + ')', h('span', { class: 'mut', style: 'font-weight:400;font-size:13px;margin-left:8px' }, S.perms.canPrice && tot ? 'Tạm tính theo Bảng giá: ' + M(tot) : '')));
-    if (!R.groups.length) { lineCard.appendChild(h('p', { class: 'mut' }, 'Chưa có hạng mục. Tích chọn các dòng ở bước 3 rồi bấm “Gộp thành 1 hạng mục” hoặc “Đưa vào báo giá”.')); return; }
-    var tb = h('tbody');
-    R.groups.forEach(function (g, i) {
-      function inp(k, w, type) { var e = h(type === 'ta' ? 'textarea' : 'input', { type: type === 'n' ? 'number' : 'text', value: g[k] == null ? '' : g[k], style: 'width:' + w + (type === 'ta' ? ';min-height:34px' : '') }); e.oninput = function () { g[k] = type === 'n' ? num(e.value) : e.value; g.edited = 1; setDirty(); if (k === 'qty' || k === 'price') { var t2 = 0; R.groups.forEach(function (x) { t2 += num(x.qty) * num(x.price); }); } }; return e; }
-      var catBtn = h('button', { onclick: function () { pickCat(g); } }, g.code ? g.code : 'Tìm mã');
-      tb.appendChild(h('tr', null, h('td', { class: 'mut' }, i + 1), h('td', { class: 'mut', style: 'font-size:12px;white-space:nowrap' }, rfqSrcLabel(g.rows)),
-        h('td', null, inp('name', '260px', 'ta')), h('td', null, inp('spec', '200px', 'ta')), h('td', null, inp('unit', '60px')), h('td', null, inp('qty', '70px', 'n')),
-        h('td', null, catBtn, g.cat ? h('div', { class: 'mut', style: 'font-size:11px;max-width:180px' }, g.cat) : null), S.perms.canPrice ? h('td', null, inp('price', '110px', 'n')) : null,
-        h('td', null, g.rows.length > 1 ? h('button', { title: 'Tách lại thành từng dòng', onclick: function () { var rs = g.rows; R.groups.splice(i, 1); rs.forEach(function (r) { R.groups.push(lineFrom([r])); }); sortGroups(); setDirty(); autoMatch(); drawRows(); drawLines(); } }, 'Tách') : null,
-          h('button', { class: 'dng', title: 'Bỏ hạng mục này', onclick: function () { R.groups.splice(i, 1); setDirty(); drawRows(); drawLines(); } }, '✕'))));
-    });
-    lineCard.appendChild(h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['#', 'Nguồn', 'Tên hạng mục', 'Quy cách', 'ĐVT', 'SL', 'Mã Bảng giá'].concat(S.perms.canPrice ? ['Đơn giá'] : []).concat(['']).map(function (t) { return h('th', null, t); }))), tb)));
-    lineCard.appendChild(h('div', { class: 'mut', style: 'font-size:12px;margin-top:6px' }, 'Có model trùng Bảng giá thì app tự gắn mã và giá. Giá, hệ số, chiết khấu chỉnh tiếp trong báo giá. Khi xuất theo mẫu khách: hạng mục gộp ghi “Trọn gói” ở dòng đầu, các dòng còn lại ghi “Bao gồm trong mục trên”; dòng không báo giá để trống.'));
-  }
-  function pickCat(g) {
-    var res = h('div', { style: 'max-height:340px;overflow:auto' }), q0 = h('input', { type: 'search', value: g.model || g.name.slice(0, 40), style: 'width:100%' });
-    function run() { safe(call('catalogSearch', { q: q0.value, limit: 30 })).then(function (rs) { res.innerHTML = ''; (rs || []).forEach(function (t) { res.appendChild(h('div', { class: 'rw', style: 'padding:6px;border-bottom:1px solid var(--line);cursor:pointer', onclick: function () { applyCat(g, t); g.edited = 1; setDirty(); close0(); drawLines(); } }, h('b', null, t.code), ' ', t.name, ' · ', t.model || '', ' · ', t.brand || '', S.perms.canPrice ? h('span', { class: 'mut' }, ' · ' + M(t.price)) : null)); }); if (!res.children.length) res.appendChild(h('div', { class: 'mut' }, 'Không thấy hàng phù hợp.')); }); }
-    q0.oninput = debounce(run, 250);
-    var md = modal({ title: 'Chọn hàng trong Bảng giá', body: h('div', null, q0, res), dismiss: true, buttons: g.code ? [{ label: 'Bỏ mã đã gắn', fn: function (c) { g.code = ''; g.cat = ''; g.price = 0; g.cost = 0; c(); drawLines(); } }] : [] }), close0 = md.close;
-    run(); setTimeout(function () { q0.focus(); }, 50);
-  }
-  function drawActs() {
-    actBar.innerHTML = ''; if (!R.rows.length) return;
-    [h('button', { onclick: function () { doSave(false); } }, '💾 Lưu bản nhập'),
-      h('button', { class: 'pri', disabled: !R.groups.length, onclick: function () { doSave(true); } }, 'Tạo báo giá từ ' + R.groups.length + ' hạng mục →'),
-      R.quote_id ? h('a', { href: '#/quote/' + R.quote_id, style: 'margin-left:8px' }, 'Mở báo giá đã tạo') : null,
-      !isNew && S.perms.quotes.edit ? h('button', { class: 'dng', onclick: function () { confirmBox('Xóa bản nhập ' + (R.code || '') + '? (báo giá đã tạo vẫn giữ nguyên)', function () { safe(call('rfqRemove', { id: R.id })).then(function (r) { if (r) go('rfqs'); }); }); } }, 'Xóa bản nhập') : null].forEach(function (x) { if (x) actBar.appendChild(x); });
-  }
-  function drawAll() { drawSrc(); drawMap(); drawRows(); drawLines(); drawActs(); }
-
-  /* ---- mở file / trang tính ---- */
-  function loadSaved() { if (!R.project_id) { saved = { maps: {} }; return Promise.resolve(); } return safe(call('rfqMaps', { project_id: R.project_id })).then(function (m) { saved = m || { maps: {} }; }); }
-  function pickSheet(name) {
-    var sh = book.sheets.filter(function (s) { return s.name === name; })[0] || book.sheets[0];
-    R.sheet = sh.name; R.sheet_path = sh.path; R.rows = rfqTrimRows(sh.rows); R.merges = sh.merges || []; R.opts.header_row = null; R.opts.two = null; chk = {}; page = 1;
-    detect(); defaultGroups(); drawAll(); setDirty();
-  }
-  function openFile(f) {
-    var t0 = Date.now();
-    busy(1);
-    rfqReadFile(f).then(function (bk) {
-      busy(-1); book = bk; fileObj = f; R.file_name = f.name; R.file_size = f.size; R.xls = !bk.files; R.opts.file_key = 'rfq' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      R.sheets = bk.sheets.map(function (s) { return s.name; });
-      var best = bk.sheets.slice().sort(function (a, b) { return b.rows.filter(function (r) { return r && r.length; }).length - a.rows.filter(function (r) { return r && r.length; }).length; })[0];
-      return loadSaved().then(function () { pickSheet(best.name); toast('Đã đọc ' + f.name + ' (' + R.rows.length + ' dòng, ' + ((Date.now() - t0) / 1000).toFixed(1) + 's)'); });
-    }).catch(function (e) { busy(-1); toast('Không đọc được file: ' + e.message, true); });
-  }
-
-  /* ---- lưu / tạo báo giá ---- */
-  function payload() {
-    return { rec: { id: R.id || '', project_id: R.project_id, file_name: R.file_name, file_id: R.file_id || '', file_url: R.file_url || '', sheet: R.sheet, header_row: R.header_row, header_last: R.header_last, map: R.map,
-      opts: { inherit: R.opts.inherit !== false, header_row: R.opts.header_row || null, two: R.opts.two, file_key: R.opts.file_key, sheet_path: R.sheet_path || R.opts.sheet_path || '', xls: !!R.xls, width: R.width, texts: R.texts },
-      rows: R.rows, groups: R.groups.map(function (g) { return { rows: g.rows, name: g.name, spec: g.spec, unit: g.unit, qty: g.qty, code: g.code, model: g.model, brand: g.brand, origin: g.origin, price: g.price, cost: g.cost, coef: g.coef, cat: g.cat || '', note: g.note || '', edited: g.edited ? 1 : 0 }; }) },
-      sig: sig(), file_size: R.file_size || 0 };
-  }
-  function ensureUpload() {
-    if (R.file_id || !fileObj) return Promise.resolve();
-    var pj = by(S.projects, 'id')[R.project_id] || {};
-    return HatoStore.putFile(R.opts.file_key, fileObj, ['Dự án', (pj.code ? pj.code + ' ' : '') + (pj.name || ''), 'Excel khách']).then(function (r) { if (r.id) { R.file_id = r.id; R.file_url = r.url; } else toast('Chưa tải được file gốc lên Drive (đang giữ trong máy này): ' + r.err, true); });
-  }
-  function doSave(makeQuote) {
-    if (!R.project_id) return toast('Hãy chọn dự án', true);
-    if (makeQuote && !R.groups.length) return toast('Chưa có hạng mục nào', true);
-    var p0 = payload();
-    return ensureUpload().then(function () {
-      p0 = payload();
-      if (!makeQuote) return safe(call('rfqSave', p0)).then(function (r) { if (r) { dirty = false; toast('Đã lưu bản nhập ' + r.code); if (isNew) { history.replaceState(null, '', '#/rfq/' + r.id); S.lastHash = location.hash; R.id = r.id; R.code = r.code; isNew = false; drawAll(); } } });
-      p0.lines = R.groups.map(function (g) { return { name: g.name, spec: g.spec, unit: g.unit, qty: num(g.qty) || 1, code: g.code || '', model: g.model || '', brand: g.brand || '', origin: g.origin || '', price: num(g.price), cost: num(g.cost), coef: num(g.coef), disc_pct: 0, note: g.note || '', src_rows: g.rows.slice().sort(function (a, b) { return a - b; }).join(',') }; });
-      return safe(call('rfqToQuote', p0)).then(function (r) { if (r) { dirty = false; reloadLookups(); toast('Đã tạo báo giá ' + r.quote_code + ' từ ' + r.rfq_code); go('quote/' + r.quote_id); } });
-    });
-  }
-
-  /* ---- mở lại bản đã lưu ---- */
-  if (isNew) { if (R.project_id) loadSaved(); drawAll(); return Promise.resolve(); }
-  return call('rfqGet', { id: id }).then(function (x) {
-    Object.assign(R, { id: x.id, code: x.code, project_id: x.project_id, file_name: x.file_name, file_id: x.file_id, file_url: x.file_url, sheet: x.sheet, sheets: [x.sheet], rows: x.rows || [], merges: [], quote_id: x.quote_id });
-    var o = (x.opts && !Array.isArray(x.opts)) ? x.opts : {}; R.opts = Object.assign({ inherit: true }, o); R.sheet_path = o.sheet_path; R.xls = o.xls; R.texts = o.texts || [];
-    R.map = (x.map && !Array.isArray(x.map)) ? x.map : {}; R.header_row = num(x.header_row); R.header_last = num(x.header_last) || R.header_row;
-    if (!R.opts.header_row && R.header_row) { R.opts.header_row = R.header_row; R.opts.two = R.header_last > R.header_row; }
-    detect(true); mapInfo.width = o.width; R.width = Math.max(o.width || 0, R.width || 0);
-    R.groups = (x.groups || []).map(function (g) { return Object.assign({ tried: 1 }, g); });
-    setTitle('Bản nhập ' + x.code, [h('button', { onclick: function () { go('rfqs'); } }, 'Danh sách bản nhập')]);
-    drawAll();
-  });
-};
-
-/* ================= Xuất ngược theo mẫu khách (từ báo giá có rfq_id) ================= */
-function rfqExportCustomer(qt, lines) {
-  if (!qt.rfq_id) return;
-  busy(1);
-  var rfq;
-  return call('rfqGet', { id: qt.rfq_id }).then(function (x) {
-    rfq = x; var o = (x.opts && !Array.isArray(x.opts)) ? x.opts : {};
-    if (o.xls) throw new Error('File gốc là .xls (Excel cũ) nên không điền ngược giữ định dạng được. Hãy mở file khách bằng Excel, lưu lại thành .xlsx rồi nhập lại.');
-    return HatoStore.getFile(o.file_key, x.file_id).then(XlsxLite.readFull).then(function (bk) {
-      var sh = bk.sheets.filter(function (s) { return s.name === x.sheet; })[0];
-      if (!sh) throw new Error('File gốc không còn trang tính “' + x.sheet + '”.');
-      var map = (x.map && !Array.isArray(x.map)) ? x.map : {};
-      var ls = [], noSrc = 0, noPrice = 0;
-      lines.forEach(function (l) {
-        var src = String(l.src_rows || '').split(',').map(Number).filter(function (n) { return n > 0; });
-        if (!src.length) { noSrc++; return; }
-        var pr = num(l.price) * (1 - num(l.disc_pct) / 100);
-        if (!pr) { noPrice++; return; }
-        ls.push({ src: src, qty: num(l.qty), price: Math.round(pr), model: l.model, brand: l.brand, origin: l.origin });
-      });
-      if (!ls.length) throw new Error('Báo giá chưa có dòng nào vừa có giá vừa thuộc file khách.');
-      var plan = RfqCore.fillPlan({ map: map, header_row: num(x.header_row), header_last: num(x.header_last), width: o.width }, ls, sh.rows);
-      return XlsxPatch.apply(bk.files, sh.path, plan.edits).then(function (blob) {
-        var base = String(x.file_name || 'Bao gia').replace(/\.(xlsx|xlsm|xls)$/i, '');
-        var a = h('a', { href: URL.createObjectURL(blob), download: base + ' - HA TO ' + qt.code + ' v' + qt.version + '.xlsx' }); document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 1000);
-        busy(-1);
-        var msg = 'Đã xuất theo mẫu khách: ' + ls.length + ' hạng mục, tổng ' + M(plan.total) + (plan.added.length ? '. File khách không có cột giá nên đã thêm cột ' + plan.added.map(function (a2) { return '“' + a2[1] + '” (' + rfqColName(a2[0]) + ')'; }).join(', ') : '');
-        if (noSrc) msg += '. ' + noSrc + ' dòng thêm tay không có trong file khách nên không điền.';
-        if (noPrice) msg += '. ' + noPrice + ' dòng chưa có giá nên để trống.';
-        toast(msg, !!(noSrc || noPrice));
-      });
-    });
-  }).catch(function (e) { busy(-1); toast('Không xuất được: ' + e.message, true); });
-}
-</script>
-
-<script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="xlsx-patch.js"></script><script src="rfq-core.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
+<script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
 </html>
