@@ -135,7 +135,7 @@ function reconModal(projectId) {
     var ctl = h('div', { class: 'bar2', style: 'flex-wrap:wrap;gap:10px' }), host = h('div');
     function cols() {
       var c = [{ k: 'stt', label: 'STT', g: function (r, i) { return i + 1; } }, { k: 'name', label: 'Tên hàng', g: function (r) { return r.name; } }, { k: 'model', label: 'Model / Mã', g: function (r) { return r.model || r.code || ''; } }, { k: 'unit', label: 'ĐVT', g: function (r) { return r.unit; } },
-        { k: 'qty', label: 'SL theo ' + (d.basis === 'PO' ? 'PO' : 'HĐ'), n: 1, g: function (r) { return r.qty; } }];
+        { k: 'qty', label: 'SL theo ' + (d.basis === 'PO' ? 'PO' : d.basis === 'MIX' ? 'HĐ / PO' : 'HĐ'), n: 1, g: function (r) { return r.qty; } }];
       d.dates.forEach(function (x) { c.push({ k: 'd:' + x.date, label: 'Giao ' + D(x.date), sub: x.codes, n: 1, g: function (r) { return r.by[x.date] || ''; } }); });
       c.push({ k: 'del', label: 'Tổng đã giao', n: 1, g: function (r) { return r.delivered; } }, { k: 'rem', label: 'Còn lại', n: 1, g: function (r) { return r.remaining; } });
       if (st.mode === 'ketoan') {
@@ -175,7 +175,7 @@ function reconModal(projectId) {
 function projectSummaryPrint(b) {
   var pj = b.project, s = b.summary, mo = b.money, vat = 1 + (num((b.docs[0] || {}).vat_pct) || 10) / 100, canP = S.perms.canPrice && s.profit !== undefined;
   var kv = function (k, v) { return '<tr><td>' + esc(k) + '</td><td class="r"><b>' + esc(v) + '</b></td></tr>'; };
-  var money = kv('Giá trị thực tế (chưa VAT) — theo ' + (mo.basis === 'PO' ? 'PO' : 'hợp đồng'), M(s.value)) + kv('Tổng phải thanh toán (có VAT)', M(mo.total_vat)) + kv('Đã thanh toán (có VAT)', M(mo.paid)) + kv('Còn phải thu (có VAT)', M(Math.max(0, mo.total_vat - mo.paid))) + kv('Đã giao (theo giá trị)', P(s.delivered_pct));
+  var money = kv('Giá trị thực tế (chưa VAT) — theo ' + (mo.basis === 'PO' ? 'PO' : mo.basis === 'MIX' ? 'HĐ + PO' : 'hợp đồng'), M(s.value)) + kv('Tổng phải thanh toán (có VAT)', M(mo.total_vat)) + kv('Đã thanh toán (có VAT)', M(mo.paid)) + kv('Còn phải thu (có VAT)', M(Math.max(0, mo.total_vat - mo.paid))) + kv('Đã giao (theo giá trị)', P(s.delivered_pct));
   if (canP) money += kv('Giá mua + chi phí', M(s.cost_goods + s.cost_hato)) + kv('Lãi gộp (chưa VAT)', M(s.profit) + ' (' + P(s.margin) + ')');
   var docs = b.docs.map(function (d) { return '<tr><td>' + esc(d.code) + '</td><td>' + esc(TYPE_LB[d.type] || d.type) + '</td><td>' + esc(d.doc_no || '') + '</td><td>' + D(d.sign_date) + '</td><td class="r">' + M(d.current_value != null ? d.current_value : d.value) + '</td></tr>'; }).join('');
   var lines = b.lines.filter(function (l) { return l.in_basis !== false; }).map(function (l, i) { return '<tr><td>' + (i + 1) + '</td><td>' + esc(l.name) + '</td><td>' + esc(l.unit || '') + '</td><td class="r">' + N(l.qty) + '</td><td class="r">' + N(l.delivered || 0) + '</td><td class="r">' + N(l.remaining != null ? l.remaining : l.qty) + '</td></tr>'; }).join('');

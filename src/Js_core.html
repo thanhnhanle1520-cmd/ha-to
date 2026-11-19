@@ -157,7 +157,7 @@ var STATUS_LB = { NHAP: 'Nháp', DA_GIAO: 'Đã giao', HUY: 'Hủy' };
 function badge(s) { return h('span', { class: 'badge ' + (STATUS_CLS[s] || '') }, STATUS_LB[s] || s); }
 var TYPE_LB = { HD: 'Hợp đồng', PO: 'PO', PLHD: 'Phụ lục HĐ' };
 function projLabel(p) { return p.code + ' · ' + p.name; }
-function pjCell(r) { return r.project_kind === 'LE' ? h('span', { class: 'badge b-info' }, 'Bán lẻ') : r.project_code + ' · ' + r.project_name; }
+function pjCell(r) { return r.project_kind === 'LE' ? h('span', { class: 'badge b-info', title: r.project_name }, 'Theo khách') : r.project_code + ' · ' + r.project_name; }
 function projOpts() { return S.projects.map(function (p) { return [p.id, projLabel(p)]; }); }
 function custName(id) { var c = by(S.customers, 'id')[id]; return c ? c.name : ''; }
 function reloadLookups() {

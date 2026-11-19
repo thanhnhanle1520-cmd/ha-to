@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -201,6 +201,10 @@ function ensureSheets_(force) {
       for (var ci = 0; ci < cols.length; ci++) if (!hdr[ci]) sh.getRange(1, ci + 1).setValue(cols[ci]);   // bổ sung cột mới của phiên bản
     }
   });
+  try {   // 1.12: "Bán lẻ – <khách>" đổi tên thành "Theo khách – <khách>" (mã, dữ liệu giữ nguyên)
+    var pjs = ss.getSheetByName('PROJECTS'), pc = TABLES.PROJECTS, ni = pc.indexOf('name'), ki = pc.indexOf('kind'), pl = pjs ? pjs.getLastRow() : 0;
+    if (pl >= 2) { var pv = pjs.getRange(2, 1, pl - 1, pc.length).getValues(), ch = false; pv.forEach(function (row) { if (row[ki] === 'LE' && /^Bán lẻ – /.test(String(row[ni]))) { row[ni] = String(row[ni]).replace(/^Bán lẻ – /, 'Theo khách – '); ch = true; } }); if (ch) { pjs.getRange(2, 1, pl - 1, pc.length).setValues(pv); bump_('PROJECTS'); } }
+  } catch (e) { }
   props.setProperty('SCHEMA', APP_VERSION);
   try { CacheService.getScriptCache().put('SCHEMA:' + APP_VERSION, '1', 21600); } catch (e) { }
 }
@@ -517,14 +521,15 @@ function calcProject_(pid) {
     return { id: it.id, doc_id: d.id, doc_code: d.code, doc_type: d.type, code: it.code, name: it.name, model: it.model, brand: it.brand, origin: it.origin, unit: it.unit, qty: num_(it.qty), price: num_(it.price), cost: num_(it.cost), source: it.source, line_no: num_(it.line_no) };
   }
   function sumLines(ls) { var v = 0, c = 0; ls.forEach(function (l) { v += l.qty * l.price; c += l.qty * l.cost; }); return { v: v, c: c }; }
-  var hd = docs.filter(function (d) { return d.type === 'HD'; })[0];
+  var hds = docs.filter(function (d) { return d.type === 'HD'; }), hd = hds[0];     // hồ sơ "theo khách" có thể có nhiều HĐ, dự án thường chỉ 1
+  var pjKind = ((readTable_('PROJECTS').filter(function (x) { return x.id === pid; })[0]) || {}).kind;
   var state = {};
-  if (hd) {
+  hds.forEach(function (hd) {
     var hits = (idx.itemsByDoc[hd.id] || []).slice().sort(byLine_), lines = [];
     hits.forEach(function (it) { var l = mk(hd, it); state[it.id] = l; lines.push(l); });
     var s0 = sumLines(lines);
     res.docs[hd.id] = { doc: hd, value: s0.v, cost_goods: s0.c, base_value: s0.v, lines: lines };
-  }
+  });
   var order = function (a, b) { return String(a.sign_date || a.created_at).localeCompare(String(b.sign_date || b.created_at)) || String(a.created_at).localeCompare(String(b.created_at)); };
   docs.filter(function (d) { return d.type === 'PLHD'; }).sort(order).forEach(function (pl) {
     var delta = 0, cdelta = 0, nl = [];
@@ -546,18 +551,31 @@ function calcProject_(pid) {
     var s = sumLines(ls);
     res.docs[po.id] = { doc: po, value: s.v, cost_goods: s.c, lines: ls };
   });
-  if (hd) {
+  hds.forEach(function (hd) {
     var fin = res.docs[hd.id].lines; // state đã cập nhật tại chỗ
     var s1 = sumLines(fin); res.docs[hd.id].current_value = s1.v; res.docs[hd.id].current_cost = s1.c;
-  }
+  });
   Object.keys(res.docs).forEach(function (id) { res.docs[id].lines.forEach(function (l) { res.lines.push(l); }); });
   // Có PO thì PO thực tế là cơ sở doanh thu / đối chiếu; không có thì lấy HĐ hiện hành (+ phụ lục HĐ)
   var poLines = res.lines.filter(function (l) { return l.doc_type === 'PO'; });
-  res.basis = poLines.length ? 'PO' : (hd ? 'HD' : 'NONE');
-  res.basis_lines = res.basis === 'PO' ? poLines : res.lines;
-  res.lines.forEach(function (l) { l.in_basis = res.basis !== 'PO' || l.doc_type === 'PO'; });
+  if (pjKind === 'LE' && hds.length) {
+    // Hồ sơ theo khách: mỗi HĐ tính riêng — HĐ có PO thuộc nó thì lấy PO, không thì lấy HĐ (+ PLHD của nó); PO đứng riêng luôn tính
+    var poBy = {}; docs.forEach(function (d) { if (d.type === 'PO' && d.parent_id) poBy[d.parent_id] = 1; });
+    var plParent = {}; docs.forEach(function (d) { if (d.type === 'PLHD') plParent[d.id] = d.parent_id || hd.id; });
+    res.lines.forEach(function (l) {
+      var owner = l.doc_type === 'HD' ? l.doc_id : l.doc_type === 'PLHD' ? plParent[l.doc_id] : null;
+      l.in_basis = l.doc_type === 'PO' ? true : !poBy[owner];
+    });
+    res.basis_lines = res.lines.filter(function (l) { return l.in_basis; });
+    var hasPO = res.basis_lines.some(function (l) { return l.doc_type === 'PO'; }), hasHD = res.basis_lines.some(function (l) { return l.doc_type !== 'PO'; });
+    res.basis = hasPO && hasHD ? 'MIX' : hasPO ? 'PO' : 'HD';
+  } else {
+    res.basis = poLines.length ? 'PO' : (hd ? 'HD' : 'NONE');
+    res.basis_lines = res.basis === 'PO' ? poLines : res.lines;
+    res.lines.forEach(function (l) { l.in_basis = res.basis !== 'PO' || l.doc_type === 'PO'; });
+  }
   var tv = sumLines(res.basis_lines); res.value = tv.v; res.cost_goods = tv.c;
-  res.hd_value = hd ? (res.docs[hd.id].current_value || 0) : 0; res.po_value = sumLines(poLines).v;
+  res.hd_value = hds.reduce(function (s, x) { return s + (res.docs[x.id].current_value || 0); }, 0); res.po_value = sumLines(poLines).v;
   // đã giao
   var delivered = deliveredMap_(pid, null);
   var dv = 0;
@@ -659,7 +677,7 @@ ACTIONS.ensureRetail = function (u, p) {
   var ex = readTable_('PROJECTS').filter(function (x) { return x.customer_id === cust.id && x.kind === 'LE'; })[0];
   if (ex) return { id: ex.id, code: ex.code, name: ex.name };
   need_(u, 'projects', 'create');
-  var r = saveProject_(u, { rec: { name: 'Bán lẻ – ' + cust.name, customer_id: cust.id, status: 'Đang thực hiện', kind: 'LE' } });
+  var r = saveProject_(u, { rec: { name: 'Theo khách – ' + cust.name, customer_id: cust.id, status: 'Đang thực hiện', kind: 'LE' } });
   return { id: r.id, code: r.code, name: r.name };
 };
 
@@ -838,7 +856,8 @@ ACTIONS.list = function (u, p) {
     var latest = {}; rows.forEach(function (q) { if (!latest[q.code] || q.version > latest[q.code]) latest[q.code] = q.version; });
     rows = rows.map(function (q) { var o = Object.assign({}, q); pj(o); var t = quoteTotals_(q, qi[q.id] || []); o.sub = t.sub; o.vat = t.vat; o.total = t.total; o.is_latest = q.version === latest[q.code]; o.line_count = (qi[q.id] || []).length; return o; });
   } else if (key === 'docs') {
-    var advSum = {}, advTerm = {}, paySum = {};
+    var advSum = {}, advTerm = {}, paySum = {}, nFiles = {};
+    readTable_('FILES').forEach(function (x) { if (x.doc_id) nFiles[x.doc_id] = (nFiles[x.doc_id] || 0) + 1; });
     readTable_('ADVANCES').forEach(function (x) { advSum[x.doc_id] = (advSum[x.doc_id] || 0) + num_(x.amount); (advTerm[x.doc_id] = advTerm[x.doc_id] || {})[x.term_index] = ((advTerm[x.doc_id] || {})[x.term_index] || 0) + num_(x.amount); });
     readTable_('PAYMENTS').forEach(function (x) { if (x.kind !== 'PHAI_TRA') paySum[x.doc_id] = (paySum[x.doc_id] || 0) + num_(x.amount); });
     rows = rows.map(function (d) {
@@ -852,8 +871,11 @@ ACTIONS.list = function (u, p) {
       (e ? e.lines : []).forEach(function (l) { qty += l.qty; del += Math.min(l.delivered || 0, l.qty); tot += l.qty; });
       o.qty = tot; o.delivered_qty = del; o.remaining_qty = tot - del;
       o.parent_code = (docs[d.parent_id] || {}).code || '';
+      o.n_files = nFiles[d.id] || 0;
       return o;
     });
+  } else if (key === 'files') {
+    rows = rows.map(function (r) { var o = Object.assign({}, r); pj(o); o.doc_code = r.doc_id ? ((docs[r.doc_id] || {}).code || '') : ''; o.doc_type = r.doc_id ? ((docs[r.doc_id] || {}).type || '') : ''; return o; });
   } else if (key === 'deliveries') {
     var di = index_().delItems;
     var lp = {}, vatOf = {};
@@ -889,7 +911,7 @@ ACTIONS.get = function (u, p) {
     var its = (index_().itemsByDoc[d.id] || []).slice().sort(byLine_);
     var out = { doc: d, items: its };
     if (d.type === 'PLHD') {      // các dòng HĐ hiện hành để chọn điều chỉnh
-      var c = calcProject_(d.project_id), hd = (index_().docsByProject[d.project_id] || []).filter(function (x) { return x.type === 'HD'; })[0];
+      var c = calcProject_(d.project_id), hd = index_().docById[d.parent_id] || (index_().docsByProject[d.project_id] || []).filter(function (x) { return x.type === 'HD'; })[0];
       out.hd_lines = hd && c.docs[hd.id] ? c.docs[hd.id].lines : [];
     }
     return out;
@@ -939,9 +961,10 @@ ACTIONS.projectBundle = function (u, p) {
   var pr = readTable_('PROJECTS').filter(function (x) { return x.id === p.id; })[0];
   if (!pr) throw new Error('Không tìm thấy dự án.');
   var cust = readTable_('CUSTOMERS').filter(function (x) { return x.id === pr.customer_id; })[0] || {};
-  var c = calcProject_(pr.id), docsOut = [], cost = canCost_(u);
+  var c = calcProject_(pr.id), docsOut = [], cost = canCost_(u), nF = {}, dById = index_().docById;
+  readTable_('FILES').forEach(function (x) { if (x.doc_id) nF[x.doc_id] = (nF[x.doc_id] || 0) + 1; });
   (index_().docsByProject[pr.id] || []).forEach(function (d) {
-    var e = c.docs[d.id], o = Object.assign({}, d, { value: e ? e.value : 0, current_value: e && e.current_value != null ? e.current_value : (e ? e.value : 0) });
+    var e = c.docs[d.id], o = Object.assign({}, d, { value: e ? e.value : 0, current_value: e && e.current_value != null ? e.current_value : (e ? e.value : 0), n_files: nF[d.id] || 0, parent_code: d.parent_id && dById[d.parent_id] ? dById[d.parent_id].code : '' });
     if (cost && e) o.cost_goods = e.cost_goods;
     docsOut.push(o);
   });
@@ -959,11 +982,12 @@ ACTIONS.projectBundle = function (u, p) {
   var mon = { base: 0, plhd: 0, current: 0, po: 0, n_po: 0, total_vat: 0, paid: 0, adv: 0, over_lines: 0, has_hd: false }, pays = {}, hdVat = 0, poVat = 0;
   docsOut.forEach(function (d) {
     var vat = 1 + num_(d.vat_pct) / 100;
-    if (d.type === 'HD') { mon.has_hd = true; mon.base = c.docs[d.id] ? num_(c.docs[d.id].base_value) : 0; mon.current = d.current_value; hdVat += d.current_value * vat; }
+    if (d.type === 'HD') { mon.has_hd = true; mon.base += c.docs[d.id] ? num_(c.docs[d.id].base_value) : 0; mon.current += num_(d.current_value); hdVat += d.current_value * vat; }
     else if (d.type === 'PLHD') mon.plhd += d.value;
     else if (d.type === 'PO') { mon.po += d.value; poVat += d.value * vat; mon.n_po++; }
   });
   mon.basis = c.basis; mon.total_vat = c.basis === 'PO' ? poVat : hdVat; mon.value = c.value;
+  if (c.basis === 'MIX') { var vatBy = {}; docsOut.forEach(function (d) { vatBy[d.id] = 1 + num_(d.vat_pct) / 100; }); mon.total_vat = c.basis_lines.reduce(function (t, l) { return t + l.qty * l.price * (vatBy[l.doc_id] || 1); }, 0); }
   mon.over_hd = !!(mon.has_hd && mon.po > 0 && mon.po > mon.current + 0.5);   // PO vượt giá trị HĐ hiện hành → cần Phụ lục HĐ
   mon.over_hd_by = mon.over_hd ? mon.po - mon.current : 0;
   (index_().payByProject ? index_().payByProject[pr.id] || [] : readTable_('PAYMENTS').filter(function (x) { return x.project_id === pr.id; })).forEach(function (x) { if (x.kind === 'PHAI_TRA') return; mon.paid += num_(x.amount); pays[x.doc_id] = (pays[x.doc_id] || 0) + num_(x.amount); });
@@ -1066,16 +1090,18 @@ function saveDoc_(u, p) {
   var out = keepSystemCols_(Object.assign({}, rec || {}, r), rec, ['id', 'code', 'project_id', 'created_by', 'created_at']);
   if (!isNew && rec.type !== out.type) throw new Error('Không đổi loại văn bản sau khi tạo.');
   var pjr = readTable_('PROJECTS').filter(function (x) { return x.id === out.project_id; })[0];
-  if (pjr && pjr.kind === 'LE' && out.type === 'PLHD' && !siblingsHD_(out.project_id)) throw new Error('Khách bán lẻ chưa có Hợp đồng nên chưa tạo được PLHD. Hãy dùng PO, hoặc tạo HĐ khi khách có thông tin công ty.');
-  var siblings = idx.docsByProject[out.project_id] || [];
-  if (out.type === 'HD' && siblings.some(function (d) { return d.type === 'HD' && d.id !== out.id; })) throw new Error('Dự án này đã có Hợp đồng. Mỗi dự án chỉ có tối đa 1 HĐ (các văn bản khác dùng PO hoặc PLHD).');
+  var isLE = !!(pjr && pjr.kind === 'LE');
+  if (isLE && out.type === 'PLHD' && !siblingsHD_(out.project_id)) throw new Error('Khách này chưa có Hợp đồng nên chưa tạo được Phụ lục HĐ. Hãy dùng PO, hoặc tạo HĐ trước.');
+  var siblings = idx.docsByProject[out.project_id] || [], hdList = siblings.filter(function (d) { return d.type === 'HD' && d.id !== out.id; });
+  if (out.type === 'HD' && !isLE && hdList.length) throw new Error('Dự án này đã có Hợp đồng. Mỗi dự án chỉ có tối đa 1 HĐ (các văn bản khác dùng PO hoặc PLHD). Ký nhiều HĐ với cùng khách mà không theo dự án: tạo theo khách hàng.');
+  var pick = hdList.filter(function (d) { return d.id === r.parent_id; })[0];      // HĐ gốc người dùng chọn
   if (out.type === 'PLHD') {
-    var hd = siblings.filter(function (d) { return d.type === 'HD'; })[0];
-    if (!hd) throw new Error('PLHD cần có Hợp đồng gốc trong dự án.');
+    var hd = pick || (hdList.length === 1 ? hdList[0] : null);
+    if (!hd) throw new Error(hdList.length ? 'Hãy chọn HĐ gốc cho Phụ lục HĐ.' : 'PLHD cần có Hợp đồng gốc trong dự án.');
     out.parent_id = hd.id;
   } else if (out.type === 'PO') {
-    var hd2 = siblings.filter(function (d) { return d.type === 'HD'; })[0];
-    out.parent_id = hd2 ? hd2.id : '';       // PO thuộc HĐ khung nếu dự án có HĐ; không thì đứng riêng
+    if (isLE) out.parent_id = pick ? pick.id : '';                    // theo khách: PO thuộc HĐ đã chọn, hoặc đứng riêng
+    else out.parent_id = hdList[0] ? hdList[0].id : '';                // dự án: PO thuộc HĐ khung nếu có; không thì đứng riêng
   } else out.parent_id = '';
   out.sign_date = out.sign_date || today_(); out.vat_pct = r.vat_pct == null ? 10 : num_(r.vat_pct);
   out.currency = out.currency || 'VND'; out.updated_at = now_();
@@ -1249,7 +1275,7 @@ ACTIONS.remove = function (u, p) {
       if (rec.converted_to) throw new Error('Báo giá đã chuyển thành văn bản (' + rec.converted_to + '), không xóa được.');
       replaceChildren_('QUOTE_ITEMS', 'quote_id', id, []);
     } else if (key === 'docs') {
-      if (rec.type === 'HD' && (idx.docsByProject[rec.project_id] || []).some(function (d) { return d.type === 'PLHD'; })) throw new Error('Hợp đồng đã có PLHD, hãy xóa PLHD trước.');
+      if (rec.type === 'HD' && (idx.docsByProject[rec.project_id] || []).some(function (d) { return d.type === 'PLHD' && (d.parent_id === rec.id || !d.parent_id); })) throw new Error('Hợp đồng đã có PLHD, hãy xóa PLHD trước.');
       var usedDel = Object.keys(idx.delItems).some(function (k) { return (idx.delItems[k] || []).some(function (x) { return x.doc_id === id; }); });
       if (usedDel) throw new Error('Văn bản đã có phiếu giao hàng, không xóa được.');
       if (readTable_('ADVANCES').concat(readTable_('PAYMENTS')).some(function (x) { return x.doc_id === id; })) throw new Error('Văn bản đã có tạm ứng/thanh toán, hãy xóa các khoản đó trước.');
