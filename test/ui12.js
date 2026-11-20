@@ -16,7 +16,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   const pj = (await A('save', { table: 'projects', rec: { name: 'Nhà xưởng ABC', customer_id: cu.id, status: 'Đang thực hiện' } })).data;
   await A('save', { table: 'docs', rec: { type: 'HD', project_id: pj.id, terms: [{ name: 'Đợt 1', pct: 100, days: 30 }] }, items: [line('X', 1, 100)] });
   r = await A('save', { table: 'docs', rec: { type: 'HD', project_id: pj.id, terms: [{ name: 'Đợt 1', pct: 100, days: 30 }] }, items: [line('Y', 1, 100)] });
-  T('dự án thường vẫn chỉ 1 HĐ', !r.ok && /tối đa 1 HĐ/.test(r.error), r.error);
+  T('dự án thường: cùng 1 khách vẫn chỉ 1 HĐ (khách khác ký gói riêng được — bản 22)', !r.ok && /Khách này đã có Hợp đồng/.test(r.error), r.error);
   r = await A('save', { table: 'docs', rec: { type: 'PLHD', project_id: le.id }, items: [line('Thêm', 1, 100000)] });
   T('PLHD khi có 2 HĐ phải chọn HĐ gốc', !r.ok && /chọn HĐ gốc/.test(r.error), r.error);
   r = await A('save', { table: 'docs', rec: { type: 'PLHD', status: 'DA_KY', project_id: le.id, parent_id: hd2.id }, items: [line('Kệ bình', 4, 250000)] });

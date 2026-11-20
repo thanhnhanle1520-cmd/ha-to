@@ -20,7 +20,7 @@ PAGES.projects = function (p, q) {
     if (kind !== 'ALL') rows = rows.filter(function (r) { return (r.kind || 'DA') === kind; });
     var cost = S.perms.canCost, v = $('#view'); v.innerHTML = '';
     var red = function (x) { return h('span', { class: x < 0 ? 'neg' : '' }, M(x)); };
-    var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên công trình', max: 30, maxw: '300px' }, { k: 'customer_name', label: 'Khách hàng', max: 26, maxw: '230px' }, { k: 'status', label: 'Trạng thái', fmt: function (r) { return badge(r.status); } },
+    var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên công trình', max: 30, maxw: '300px' }, { k: 'customer_name', label: 'Khách hàng', max: 26, maxw: '230px', fmt: function (r) { return r.n_other_customers ? h('span', null, r.customer_name, h('span', { class: 'badge b-info', style: 'margin-left:4px' }, '+' + r.n_other_customers)) : r.customer_name; } }, { k: 'status', label: 'Trạng thái', fmt: function (r) { return badge(r.status); } },
       { k: 'value', label: 'Giá trị ký', cls: 'r', fmt: function (r) { return M(r.value); }, val: function (r) { return r.value; } },
       { k: 'delivered_pct', label: 'Giao hàng (đã giao / giá trị ký)', fmt: function (r) { return progCell(r.delivered_value, r.value); }, val: function (r) { return r.delivered_pct; } },
       { k: 'revenue', label: 'Doanh thu ghi nhận', cls: 'r', fmt: function (r) { return M(r.revenue); }, val: function (r) { return r.revenue; } }];
@@ -44,7 +44,7 @@ PAGES.project = function (p) {
       h('button', { onclick: function () { reconModal(pj.id); } }, 'Gói đối chiếu'), h('button', { onclick: function () { projectSummaryPrint(b); } }, 'Tóm tắt 1 trang'),
       S.perms.projects.create && S.perms.quotes.create ? h('button', { onclick: function () { confirmBox('Tạo bản sao dự án (kèm báo giá mới nhất)?', function () { safe(call('copyProject', { id: pj.id })).then(function (r) { if (r) { toast('Đã tạo ' + r.code); reloadLookups().then(function () { go('project/' + r.id); }); } }); }); } }, 'Copy dự án') : null]);
     var kp = h('div', { id: 'kpibar' },
-      h('div', { class: 'i' }, h('span', null, 'Khách hàng'), h('b', null, b.customer.id ? h('a', { href: '#/customer/' + b.customer.id, title: 'Mở hồ sơ khách hàng' }, b.customer.name || '') : (b.customer.name || ''))),
+      h('div', { class: 'i' }, h('span', null, 'Khách hàng'), h('b', null, b.customer.id ? h('a', { href: '#/customer/' + b.customer.id, title: 'Mở hồ sơ khách hàng' }, b.customer.name || '') : (b.customer.name || ''), b.customers && b.customers.length > 1 ? h('span', { class: 'badge b-info', style: 'margin-left:6px', title: b.customers.map(function (c) { return c.name + (c.status ? ' (' + c.status + ')' : ''); }).join('\n') }, '+' + (b.customers.length - 1) + ' khách') : null)),
       h('div', { class: 'i' }, h('span', null, 'Trạng thái'), badge(pj.status)),
       h('div', { class: 'i' }, h('span', null, 'Giá trị ký' + (b.money && b.money.basis === 'PO' ? ' (theo PO)' : b.money && b.money.basis === 'MIX' ? ' (HĐ + PO)' : '')), h('b', null, M(s.value))),
       h('div', { class: 'i', style: 'min-width:200px' }, h('span', null, 'Giao hàng'), progCell(s.delivered_value, s.value)),
@@ -100,9 +100,27 @@ function sumCards(pid) {
   });
   return box;
 }
+/* Dự án nhiều khách (bản 22): chào giá cho nhiều nhà thầu, có thể nhiều khách cùng trúng (chia gói) */
+var BID_CLS = { 'Trúng': 'b-ok', 'Không trúng': 'b-bad', 'Đang chào': 'b-info' };
+function customersCard(b) {
+  var cost = b.customers.some(function (c) { return c.profit !== undefined; });
+  var cols = [{ k: 'name', label: 'Khách hàng', max: 34, fmt: function (r) { return h('span', null, h('a', { href: '#/customer/' + r.customer_id, onclick: function (e) { e.stopPropagation(); } }, r.name), r.main ? h('span', { class: 'mut', style: 'font-size:11px' }, ' · khách chính') : null); } },
+    { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge ' + (BID_CLS[r.status] || '') }, r.status) : ''; } },
+    { k: 'lq', label: 'Báo giá mới nhất', val: function (r) { return r.last_quote ? r.last_quote.date : ''; }, fmt: function (r) { var q = r.last_quote; return q ? h('span', null, h('a', { href: '#/quote/' + q.id, onclick: function (e) { e.stopPropagation(); } }, q.code + (q.version > 1 ? ' v' + q.version : '')), h('span', { class: 'mut' }, ' · ' + D(q.date) + ' · ' + M(q.total))) : '—'; } },
+    { k: 'n_quotes', label: 'Số BG', cls: 'r' }, { k: 'value', label: 'Giá trị ký', cls: 'r', fmt: function (r) { return r.value ? M(r.value) : ''; } }, { k: 'revenue', label: 'Đã giao (doanh thu)', cls: 'r', fmt: function (r) { return r.revenue ? M(r.revenue) : ''; } },
+    { k: 'paid', label: 'Đã thu', cls: 'r', fmt: function (r) { return r.paid ? M(r.paid) : ''; } }, { k: 'receivable', label: 'Còn phải thu', cls: 'r', fmt: function (r) { return r.receivable > 1 ? h('b', { class: 'neg' }, M(r.receivable)) : ''; } }];
+  if (cost) cols.push({ k: 'profit', label: 'Lãi gộp', cls: 'r', fmt: function (r) { return r.revenue ? h('span', { class: r.profit < 0 ? 'neg' : '' }, M(r.profit)) : ''; } });
+  var open = b.customers.some(function (c) { return c.status === 'Đang chào'; });
+  return h('div', { class: 'card' }, h('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, h('h3', { style: 'margin:0' }, 'Khách hàng của dự án (' + b.customers.length + ')'), h('span', { class: 'sp', style: 'flex:1' }),
+      S.perms.quotes.create ? h('button', { onclick: function () { newQuoteForCustomer(b.project); } }, '+ Báo giá cho khách khác') : null,
+      S.perms.quotes.edit && open ? h('button', { onclick: function () { confirmBox('Kết thúc chào giá: các khách chưa trúng (chưa có HĐ/PO) sẽ chuyển "Không trúng". Tiếp tục?', function () { safe(call('endBidding', { project_id: b.project.id })).then(function (r) { if (r) { toast('Đã chuyển ' + r.n + ' báo giá sang "Không trúng"'); route(); } }); }); } }, 'Kết thúc chào giá') : null),
+    h('div', { style: 'margin-top:8px' }, table({ rows: b.customers, cols: cols, pageSize: 50, onRow: function (r) { go('customer/' + r.customer_id); } })),
+    h('div', { class: 'mut', style: 'font-size:12px;margin-top:4px' }, 'Mỗi khách trúng ký HĐ / PO riêng (chia gói). Giá trị, giao hàng, thu tiền tính theo văn bản của từng khách. Lãi gộp từng khách = doanh thu − giá vốn, chưa trừ chi phí phát sinh (tính chung cho dự án).'));
+}
 TABS.overview = function (host, b) {
   var pj = b.project, s = b.summary;
   host.appendChild(financeCard(b));
+  if (b.customers && b.customers.length > 1) host.appendChild(customersCard(b));
   host.appendChild(flowCard(b));
   host.appendChild(sumCards(b.project.id));
   host.appendChild(h('div', { class: 'card' }, h('div', { class: 'fg' },
@@ -141,6 +159,7 @@ function plhdTag(r) { return r.type === 'PLHD' && r.status && r.status !== 'DA_K
 function docsTable(rows, showProject) {
   var cols = [{ k: 'code', label: 'Mã' }, { k: 'type', label: 'Loại', fmt: function (r) { return h('span', null, h('span', { class: 'badge b-info' }, TYPE_LB[r.type]), plhdTag(r)); } }, { k: 'doc_no', label: 'Số văn bản' }];
   if (showProject) cols.push({ k: 'project_name', label: 'Dự án', fmt: pjCell }, { k: 'customer_name', label: 'Khách hàng' });
+  else if (multiCust(rows)) cols.push({ k: 'customer_name', label: 'Khách hàng', max: 30 });
   if (rows.some(function (r) { return r.parent_code && r.type !== 'PO'; }) || rows.filter(function (r) { return r.type === 'HD'; }).length > 1) cols.push({ k: 'parent_code', label: 'Thuộc HĐ', fmt: function (r) { return r.parent_code || ''; } });
   cols.push({ k: 'sign_date', label: 'Ngày ký', fmt: function (r) { return D(r.sign_date); } }, { k: 'value', label: 'Giá trị', cls: 'r', fmt: function (r) { return M(r.value); } });
   cols.push({ k: 'n_files', label: '📎', cls: 'c', fmt: function (r) { return r.n_files ? h('span', { title: r.n_files + ' tệp đính kèm' }, '📎' + r.n_files) : ''; } });
@@ -150,14 +169,22 @@ function docsTable(rows, showProject) {
     filters: showProject ? [{ label: 'Mọi loại', opts: [['HD', 'Hợp đồng'], ['PO', 'PO'], ['PLHD', 'Phụ lục HĐ']], get: function (r) { return r.type; } }, { label: 'Mọi khách hàng', opts: opt(S.customers), get: function (r) { return ''; } }].slice(0, 1) : null });
 }
 TABS.quotes = function (host, b) {
-  var bar = h('div', { class: 'bar2' }, S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { go('quote/new?project=' + b.project.id); } }, '+ Báo giá') : null);
+  var bar = h('div', { class: 'bar2' }, S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { go('quote/new?project=' + b.project.id); } }, '+ Báo giá') : null,
+    S.perms.quotes.create && b.project.kind !== 'LE' ? h('button', { onclick: function () { newQuoteForCustomer(b.project); } }, '+ Báo giá cho khách khác') : null);
   host.appendChild(bar);
-  return call('list', { table: 'quotes', project_id: b.project.id }).then(function (rows) { host.appendChild(quotesTable(rows)); });
+  return call('list', { table: 'quotes', project_id: b.project.id }).then(function (rows) { host.appendChild(quotesTable(rows, false, multiCust(rows))); });
 };
 function clipCol() { return { k: 'n_files', label: '📎', cls: 'c', fmt: function (r) { return r.n_files ? h('span', { title: r.n_files + ' tệp đính kèm' }, '📎' + r.n_files) : ''; } }; }
-function quotesTable(rows, showProject) {
+function multiCust(rows) { var m = {}; rows.forEach(function (r) { m[r.customer_id] = 1; }); return Object.keys(m).length > 1; }
+function newQuoteForCustomer(pj) {
+  var cs = sel(custOpts(''), '', null, '— chọn khách hàng —');
+  modal({ title: 'Báo giá dự án ' + pj.code + ' cho khách khác', body: h('div', { class: 'fg' }, h('label', { class: 'full' }, 'Khách hàng (nhà thầu) hỏi giá', cs), h('div', { class: 'full mut' }, 'Báo giá mới thuộc dự án này nhưng gửi cho khách đã chọn. Muốn chép từ báo giá đã có: mở báo giá đó → "Báo giá cho khách khác".')),
+    buttons: [{ label: 'Tạo báo giá', cls: 'pri', fn: function (close) { if (!cs.value) return toast('Chọn khách hàng', true); close(); go('quote/new?project=' + pj.id + '&customer=' + cs.value); } }] });
+}
+function quotesTable(rows, showProject, showCust) {
   var cols = [{ k: 'code', label: 'Mã' }, { k: 'version', label: 'Bản', cls: 'c', fmt: function (r) { return 'v' + r.version + (r.is_latest ? '' : ''); } }];
   if (showProject) cols.push({ k: 'project_name', label: 'Dự án', fmt: pjCell }, { k: 'customer_name', label: 'Khách hàng' });
+  else if (showCust) cols.push({ k: 'customer_name', label: 'Khách hàng', max: 30 });
   cols.push({ k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'line_count', label: 'Số dòng', cls: 'r' }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } },
     { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.converted_to ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : h('span', { class: 'badge ' + (r.status === 'Đã gửi' ? 'b-info' : r.status === 'Không chốt' ? 'b-bad' : '') }, r.status || 'Nháp'); } }, { k: 'converted_to', label: 'Đã chuyển thành', fmt: function (r) { return r.converted_to ? h('span', { class: 'badge b-ok' }, r.converted_to) : ''; } });
   cols.push(clipCol());

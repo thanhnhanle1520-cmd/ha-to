@@ -267,7 +267,7 @@ PAGES.customer = function (p) {
     } else if (tab === 'projects') {
       host.appendChild(table({ rows: b.projects, search: function (r) { return r.code + ' ' + r.name; }, onRow: function (r) { go('project/' + r.id); }, empty: 'Khách hàng chưa có dự án.',
         cols: [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Dự án / hồ sơ', fmt: function (r) { return r.kind === 'LE' ? h('span', null, h('span', { class: 'badge b-info' }, 'Theo khách'), ' ', r.name) : r.name; } },
-          { k: 'status', label: 'Trạng thái', fmt: function (r) { return h('span', { class: 'badge' }, r.status || ''); } },
+          { k: 'status', label: 'Trạng thái', fmt: function (r) { return h('span', null, h('span', { class: 'badge' }, r.status || ''), r.share ? h('span', { class: 'badge ' + (BID_CLS[r.bid] || ''), style: 'margin-left:4px', title: 'Dự án nhiều khách — số liệu chỉ tính phần của khách này' }, 'Gói: ' + (r.bid || '—')) : null); } },
           { k: 'value', label: 'Giá trị ký', cls: 'r', fmt: function (r) { return M(r.value); } },
           { k: 'revenue', label: 'Doanh thu ghi nhận', cls: 'r', fmt: function (r) { return M(r.revenue); } },
           { k: 'delivered_pct', label: 'Tiến độ giao', fmt: function (r) { var pc = Math.round(num(r.delivered_pct) * 100); return h('span', { style: 'display:inline-flex;align-items:center;gap:6px' }, h('div', { class: 'prog', style: 'width:80px' }, h('i', { style: 'width:' + Math.min(100, pc) + '%' })), pc + '%'); } },
