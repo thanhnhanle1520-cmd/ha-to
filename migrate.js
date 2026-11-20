@@ -78,6 +78,7 @@
     btn('📜 Nhật ký đồng bộ', function () { d.close(); openLog(); });
     btn('📊 Hiệu năng', function () { d.close(); openPerf(); });
     btn('📥 Nhập dữ liệu từ HATO ERP cũ (.xlsx)', function () { d.close(); openImport(); });
+    if (typeof resetDataModal === 'function') btn('🧹 Xóa dữ liệu để dùng chính thức…', function () { d.close(); resetDataModal(); });
     btn('⎋ Đăng xuất Google (xóa dữ liệu trên máy này)', function () {
       d.close(); ask('Đăng xuất và xóa dữ liệu HA TO trên máy này? Dữ liệu vẫn còn nguyên trên Google Drive, lần sau đăng nhập sẽ tải lại.', function () { HatoStore.signOut().catch(function (e) { if (window.toast) toast(e.message, true); else alert(e.message); }); });
     }, 'color:#b91c1c');

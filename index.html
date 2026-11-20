@@ -243,7 +243,7 @@ var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
 var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
-var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1 };
+var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -256,11 +256,25 @@ function raw(action, payload, quiet) {
   });
 }
 function clone(x) { return x === undefined ? x : JSON.parse(JSON.stringify(x)); }
-function safeToRefresh() { var hs = location.hash; return !document.querySelector('#modals .ov') && !/^#\/(quote|doc|delivery)\//.test(hs); }
-var refreshT; function softRefresh() { clearTimeout(refreshT); refreshT = setTimeout(function () { if (safeToRefresh()) route(); }, 200); }
+function typing() { var a = document.activeElement; return !!(a && a.closest && a.closest('#view') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); }
+function safeToRefresh() { var hs = location.hash; return !document.querySelector('#modals .ov') && !/^#\/(quote|doc|delivery|purchase)\//.test(hs); }
+/* Vẽ lại trang khi có dữ liệu mới (bản 23): đang gõ trong ô lọc / tìm kiếm thì đợi gõ xong mới vẽ lại */
+var refreshT; function softRefresh() { clearTimeout(refreshT); refreshT = setTimeout(function () { if (!safeToRefresh()) return; if (typing()) return softRefresh(); route(); }, typing() ? 2500 : 200); }
+/* Có dữ liệu mới trên máy chủ: chỉ vẽ lại nếu dữ liệu của chính trang đang xem thay đổi */
+function refreshIfPageChanged() {
+  var keys = S.pageKeys || {}, ks = Object.keys(keys);
+  if (!ks.length) { MEMO = {}; return softRefresh(); }
+  Promise.all(ks.map(function (k) { return raw(keys[k][0], keys[k][1], true).then(function (d) { return [k, d]; }, function () { return [k, undefined]; }); })).then(function (rs) {
+    var changed = false;
+    rs.forEach(function (x) { if (x[1] === undefined) return; var sd = JSON.stringify(x[1]), m = MEMO[x[0]]; if (!m || m.s !== sd) changed = true; MEMO[x[0]] = { t: Date.now(), s: sd, d: x[1] }; });
+    Object.keys(MEMO).forEach(function (k) { if (!keys[k]) delete MEMO[k]; });       // dữ liệu trang khác: tải lại khi mở
+    if (changed) softRefresh();
+  });
+}
 function call(action, payload) {
   if (!READS[action]) return raw(action, payload).then(function (r) { if (WRITES[action]) { MEMO = {}; S.ver = null; try { localStorage.removeItem(CACHE_KEY); } catch (e) { } } return r; });
   var key = memoKey(action, payload), m = MEMO[key], age = m ? Date.now() - m.t : 0;
+  if (S.pageKeys) S.pageKeys[key] = [action, payload || {}];
   if (m && age < MEMO_TTL) {
     if (age > REVAL_AFTER && !m.rv) {            // có bản cũ → hiện ngay, hỏi lại máy chủ ngầm
       m.rv = 1;
@@ -301,7 +315,7 @@ function pollVersion() {
   if (document.hidden) return;
   raw('version', {}, true).then(function (v) {
     if (S.ver == null) { S.ver = v; return; }
-    if (v !== S.ver) { S.ver = v; MEMO = {}; if (safeToRefresh()) route(); }
+    if (v !== S.ver) { S.ver = v; refreshIfPageChanged(); }
   }, function () { });
 }
 /* safe(): lỗi đã hiện thông báo đỏ (20 giây) thì trả null để màn hình giữ nguyên (form không đóng, không báo "đã lưu").
@@ -828,18 +842,22 @@ function route() {
   if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
   if (S.draftCtl) { S.draftCtl.end(); S.draftCtl = null; draftStatus(''); }
   window.__quoteCheck = null;
+  // Ghi nhận vị trí cuộn TRƯỚC khi thay khung (bản 23): vẽ lại cùng trang (đồng bộ xong) giữ đúng chỗ đang xem, không giật về đầu trang
+  var same = location.hash === S.lastHash, keepY = same ? Math.max($('#main').scrollTop || 0, window.scrollY || 0) : 0, keepH = same ? $('#view').offsetHeight : 0;
+  S.pageKeys = {};
   // Mỗi lần đổi trang dùng một khung #view mới: trang cũ tải chậm xong thì chỉ vẽ vào khung đã bỏ, không chèn lẫn vào trang mới
-  var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; old.parentNode.replaceChild(v, old);
+  var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; if (keepH) v.style.minHeight = keepH + 'px'; old.parentNode.replaceChild(v, old);
   v.innerHTML = '<div class="mut" style="padding:20px">Đang tải…</div>';
   var fn = PAGES[page]; if (!fn) { v.textContent = 'Không có trang này.'; return; }
   if (!S.perms[k] || !S.perms[k].view) { v.textContent = 'Bạn không có quyền xem mục này.'; return; }
   TSEQ = 0;
-  var same = location.hash === S.lastHash, keepY = same ? ($('#main').scrollTop || window.scrollY || 0) : 0; S.lastHash = location.hash;
+  S.lastHash = location.hash;
   if (!same) { window.scrollTo(0, 0); $('#main').scrollTop = 0; }
-  Promise.resolve(fn(p, r.q)).then(function () { if (keepY) restoreScroll(keepY); }).catch(function (e) { v.innerHTML = ''; v.appendChild(h('div', { class: 'card neg' }, 'Lỗi: ' + (e && e.message))); });
+  else if (keepY) restoreScroll(keepY);
+  Promise.resolve(fn(p, r.q)).then(function () { v.style.minHeight = ''; if (keepY) restoreScroll(keepY); }).catch(function (e) { v.innerHTML = ''; v.appendChild(h('div', { class: 'card neg' }, 'Lỗi: ' + (e && e.message))); });
 }
 window.addEventListener('hashchange', route);
-function restoreScroll(y) { var m = $('#main'), n = 0; (function t() { m.scrollTop = y; if (m.scrollTop < y - 2 && n++ < 10) setTimeout(t, 80); })(); }
+function restoreScroll(y) { var m = $('#main'), n = 0; (function t() { m.scrollTop = y; if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); if (Math.max(m.scrollTop, window.scrollY) < y - 2 && n++ < 10) setTimeout(t, 80); })(); }
 
 /* ================= Trang ================= */
 var PAGES = {};
@@ -1769,7 +1787,7 @@ PAGES.quote = function (p, q) {
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(); } }, 'Lưu'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); } }, 'Phiên bản mới'));
     if (!isNew && S.perms.docs.create) acts.push(h('button', { onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO / Phụ lục HĐ'));
-    if (!isNew && S.perms.quotes.edit && !qt.converted_to) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa báo giá này?', function () { safe(call('remove', { table: 'quotes', id: qt.id })).then(function (r) { if (r) backToList('quotes'); }); }); } }, 'Xóa'));
+    if (!isNew && S.perms.quotes.edit) acts.push(h('button', { class: 'dng', onclick: function () { quoteDelete(qt, d.versions || []); } }, 'Xóa'));
     setTitle(title, acts);
     if (!isNew && d.versions.length > 1) v.appendChild(h('div', { class: 'bar2' }, h('span', { class: 'mut' }, 'Phiên bản:'), d.versions.map(function (x) { return h('a', { class: 'badge ' + (x.id === qt.id ? 'b-info' : ''), href: '#/quote/' + x.id }, 'v' + x.version); })));
     if (qt.converted_to) v.appendChild(h('div', { class: 'card' }, h('span', { class: 'badge b-ok' }, 'Đã chốt'), ' Đã chuyển thành: ', h('b', null, qt.converted_to)));
@@ -1782,6 +1800,21 @@ PAGES.quote = function (p, q) {
       set: function (d) { formSet(pf, d.f); lines.length = 0; (d.lines || []).forEach(function (x) { lines.push(x); }); le.redraw(); } });
   });
 };
+/* Xóa báo giá (bản 23): báo giá đã chốt cũng xóa được sau khi xác nhận; xóa 1 phiên bản hoặc tất cả phiên bản cùng mã */
+function quoteDelete(qt, versions) {
+  var all = versions.length > 1, conv = versions.filter(function (x) { return x.converted_to; }).map(function (x) { return 'v' + x.version + ' → ' + x.converted_to; });
+  if (qt.converted_to && conv.indexOf('v' + qt.version + ' → ' + qt.converted_to) < 0) conv.push('v' + qt.version + ' → ' + qt.converted_to);
+  var one = h('label', { style: 'display:flex;gap:6px;align-items:center' }, h('input', { type: 'radio', name: 'qdel', checked: true, value: 'one' }), 'Chỉ phiên bản đang mở (v' + qt.version + ')');
+  var every = h('label', { style: 'display:flex;gap:6px;align-items:center' }, h('input', { type: 'radio', name: 'qdel', value: 'all' }), 'Tất cả ' + versions.length + ' phiên bản của ' + qt.code);
+  modal({ title: 'Xóa báo giá ' + qt.code, body: h('div', null, all ? h('div', { style: 'display:grid;gap:6px;margin-bottom:8px' }, one, every) : null,
+      conv.length ? h('div', { class: 'card', style: 'background:#fff7ed;border-color:#fdba74' }, h('b', null, 'Báo giá đã chốt: '), conv.join(', '), h('div', null, 'HĐ / PO / Phụ lục vẫn giữ nguyên dòng hàng và giá — chỉ mất liên kết "tạo từ báo giá".')) : null,
+      h('p', null, 'Xóa không khôi phục được (trừ khi khôi phục bản sao lưu).')),
+    buttons: [{ label: 'Xóa', cls: 'dng', fn: function (close) {
+      var pick = all && every.querySelector('input').checked ? versions.map(function (x) { return x.id; }) : [qt.id];
+      pick.reduce(function (pr, id) { return pr.then(function (ok) { return ok && safe(call('remove', { table: 'quotes', id: id, force: true })); }); }, Promise.resolve(true))
+        .then(function (ok) { if (ok) { close(); toast('Đã xóa ' + pick.length + ' báo giá'); backToList('quotes'); } });
+    } }] });
+}
 function custOpts(keep) { return S.customers.filter(function (c) { return c.status !== 'Ngừng' || c.id === keep; }).map(function (c) { return [c.id, c.name + (c.short_name ? ' (' + c.short_name + ')' : '')]; }); }
 function quoteToCustomer(qt) {
   var cs = sel(custOpts('').filter(function (c) { return c[0] !== qt.customer_id; }), '', null, '— chọn khách hàng —');
@@ -2146,7 +2179,7 @@ function imgBox(name, label, maxW, outType) {
   return h('div', { style: 'margin-bottom:12px' }, h('b', null, label), pv, tools);
 }
 PAGES.config = function () {
-  setTitle('Cấu hình hệ thống');
+  setTitle('Cấu hình hệ thống', [S.perms.config.edit ? h('button', { class: 'dng', onclick: function () { resetDataModal(); } }, 'Xóa dữ liệu…') : null]);
   return call('getConfig').then(function (d) {
     var v = $('#view'), cfg = d.cfg, ed = S.perms.config.edit; v.innerHTML = '';
     var ff = form([{ k: 'company_name', label: 'Tên công ty', full: true }, { k: 'tax_code', label: 'MST' }, { k: 'address', label: 'Địa chỉ', full: true }, { k: 'phone', label: 'Điện thoại' }, { k: 'hotline', label: 'Hotline' }, { k: 'email', label: 'Email' }, { k: 'website', label: 'Website' },
@@ -2988,6 +3021,54 @@ function remTimeCheck_unused() {
   });
 }
 (function () { var iv = setInterval(function () { if (S.user && S.perms && S.perms.dashboard && S.perms.dashboard.view) { clearInterval(iv); refreshReminders(); setInterval(refreshReminders, 300000);  } }, 1500); })();
+
+/* ===== Xóa dữ liệu để dùng chính thức (bản 23): sao lưu trước → chọn nhóm → gõ XOA → xóa → đồng bộ ===== */
+function resetDataModal() {
+  if (!S.perms.config || !S.perms.config.edit) return toast('Chỉ quản trị mới xóa được dữ liệu', true);
+  safe(call('dataCounts', {})).then(function (cn) {
+    if (!cn) return;
+    var defs = [['projects', 1], ['purchases', 1], ['customers', 1], ['suppliers', 1], ['tasks', 1], ['pricelist', 0], ['config', 0]], cks = {};
+    var list = h('div', { style: 'display:grid;gap:6px' });
+    defs.forEach(function (d) {
+      var c = cn[d[0]], ck = h('input', { type: 'checkbox', checked: !!d[1] }); cks[d[0]] = ck;
+      ck.onchange = deps;
+      list.appendChild(h('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px' }, ck,
+        h('div', null, h('div', null, c.label, ' ', h('b', null, '(' + c.rows + ' dòng)')), c.detail ? h('div', { class: 'mut', style: 'font-size:12px' }, c.detail) : null, h('div', { class: 'mut dep', style: 'font-size:12px;color:#b45309' }))));
+    });
+    function deps() {   // nhóm phụ thuộc: khách → dự án → đơn mua; NCC → đơn mua
+      if (cks.customers.checked) cks.projects.checked = true;
+      if (cks.projects.checked || cks.suppliers.checked) cks.purchases.checked = true;
+      cks.projects.disabled = cks.customers.checked; cks.purchases.disabled = cks.projects.checked || cks.suppliers.checked;
+      Object.keys(cks).forEach(function (k) { var n = cks[k].parentNode.querySelector('.dep'); n.textContent = (k === 'projects' && cks.customers.checked) ? 'Bắt buộc xóa vì đã chọn xóa khách hàng' : (k === 'purchases' && cks.purchases.disabled) ? 'Bắt buộc xóa vì đơn mua gắn dự án / nhà cung cấp' : ''; });
+    }
+    deps();
+    var inp = h('input', { type: 'text', placeholder: 'Gõ XOA để xác nhận', style: 'width:200px;text-transform:uppercase' }), st = h('div', { class: 'mut', style: 'margin-top:6px' });
+    var body = h('div', null,
+      h('div', { class: 'card', style: 'background:#fef2f2;border-color:#fca5a5;margin-bottom:10px' }, h('b', null, 'Xóa vĩnh viễn trên Drive. '), 'App tự sao lưu toàn bộ dữ liệu lên Drive (thư mục "HA TO / Sao lưu") trước khi xóa — xóa nhầm thì vào menu ☁ → Khôi phục. Số chứng từ của nhóm đã xóa bắt đầu lại từ 001.'),
+      list,
+      h('div', { class: 'mut', style: 'font-size:12px;margin:8px 0' }, 'Tệp đính kèm: chỉ xóa danh sách trong app; file gốc vẫn nằm trong thư mục Drive "HA TO", tự xóa nếu muốn. Tài khoản đăng nhập không bị xóa.'),
+      h('label', null, 'Xác nhận: ', inp), st);
+    modal({ title: 'Xóa dữ liệu để dùng chính thức', wide: true, body: body, buttons: [{ label: 'Sao lưu rồi xóa', cls: 'dng', fn: function (close, btnEl) {
+      var groups = Object.keys(cks).filter(function (k) { return cks[k].checked; });
+      if (!groups.length) return toast('Chưa chọn nhóm nào', true);
+      if (inp.value.trim().toUpperCase() !== 'XOA') { inp.focus(); return toast('Gõ chữ XOA để xác nhận', true); }
+      var stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
+      st.textContent = 'Đang sao lưu lên Drive…';
+      var bk = window.HatoStore && HatoStore.backupNow ? HatoStore.backupNow('HA TO trước khi xóa dữ liệu ' + stamp + '.json') : Promise.reject(new Error('Bản này không có sao lưu tự động — hãy sao lưu trước bằng tay.'));
+      bk.then(function () {
+        st.textContent = 'Đã sao lưu. Đang xóa…';
+        return call('resetData', { groups: groups, confirm: 'XOA' });
+      }).then(function (r) {
+        try { localStorage.removeItem(DR.key()); localStorage.removeItem(CACHE_KEY); } catch (e) { }
+        MEMO = {}; S.ver = null; DR.badge();
+        st.textContent = 'Đã xóa. Đang đồng bộ lên Drive…';
+        return (window.HatoStore && HatoStore.syncNow ? Promise.resolve(HatoStore.syncNow()).catch(function () { }) : Promise.resolve()).then(function () { return r; });
+      }).then(function (r) {
+        close(); reloadLookups(); toast('Đã xóa ' + r.groups.length + ' nhóm dữ liệu. Sẵn sàng dùng chính thức.'); go(S.perms.dashboard.view ? 'dashboard' : 'projects'); route();
+      }, function (e) { st.textContent = ''; toast('Không xóa: ' + ((e && e.message) || e), true); });
+    } }] });
+  });
+}
 </script>
 
 <script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>

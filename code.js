@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.17.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -969,7 +969,7 @@ ACTIONS.get = function (u, p) {
     var q = readTable_('QUOTES').filter(function (x) { return x.id === p.id; })[0];
     if (!q) throw new Error('Không tìm thấy báo giá.');
     var items = readTable_('QUOTE_ITEMS').filter(function (x) { return x.quote_id === q.id; }).sort(byLine_);
-    var versions = readTable_('QUOTES').filter(function (x) { return x.code === q.code; }).map(function (x) { return { id: x.id, version: x.version }; }).sort(function (a, b) { return a.version - b.version; });
+    var versions = readTable_('QUOTES').filter(function (x) { return x.code === q.code; }).map(function (x) { return { id: x.id, version: x.version, converted_to: x.converted_to || '' }; }).sort(function (a, b) { return a.version - b.version; });
     return { quote: q, items: items, totals: quoteTotals_(q, items), versions: versions };
   }
   if (t === 'docs') {
@@ -1437,7 +1437,9 @@ ACTIONS.remove = function (u, p) {
       if (MGR.indexOf(u.role) < 0) throw new Error('Chỉ Quản trị / Giám đốc được xóa dự án.');
       if ((idx.docsByProject[id] || []).length || (idx.delByProject[id] || []).length || readTable_('QUOTES').some(function (x) { return x.project_id === id; })) throw new Error('Dự án đã có dữ liệu. Hãy chuyển trạng thái sang Hủy thay vì xóa.');
     } else if (key === 'quotes') {
-      if (rec.converted_to) throw new Error('Báo giá đã chuyển thành văn bản (' + rec.converted_to + '), không xóa được.');
+      // Báo giá đã chốt (bản 23): xóa được khi người dùng xác nhận — HĐ/PO giữ nguyên dòng hàng, chỉ bỏ liên kết nguồn báo giá
+      if (rec.converted_to && !p.force) throw new Error('Báo giá đã chuyển thành văn bản (' + rec.converted_to + '). Cần xác nhận để xóa.');
+      readTable_('DOCS').filter(function (d) { return d.source_quote_id === id; }).forEach(function (d) { upsert_('DOCS', Object.assign({}, d, { source_quote_id: '' })); });
       replaceChildren_('QUOTE_ITEMS', 'quote_id', id, []);
     } else if (key === 'docs') {
       if (rec.type === 'HD' && (idx.docsByProject[rec.project_id] || []).some(function (d) { return d.type === 'PLHD' && (d.parent_id === rec.id || !d.parent_id); })) throw new Error('Hợp đồng đã có PLHD, hãy xóa PLHD trước.');
@@ -2045,6 +2047,68 @@ ACTIONS.receiptRemove = function (u, p) {
   });
 };
 
+// ================= Xóa dữ liệu để dùng chính thức (bản 23) =================
+// Xóa theo nhóm; nhóm phụ thuộc tự kéo theo (xóa dự án → xóa luôn đơn mua; xóa khách → phải xóa dự án; xóa NCC → phải xóa đơn mua).
+// Client sao lưu toàn bộ lên Drive TRƯỚC khi gọi. Bảng USERS không bao giờ xóa.
+var RESET_GROUPS = {
+  projects: { label: 'Dự án và giao dịch (báo giá, HĐ / PO / Phụ lục, giao hàng, xuất xưởng, bảo hành, chi phí, tạm ứng, thanh toán, tệp đính kèm)', tables: ['PROJECTS', 'QUOTES', 'QUOTE_ITEMS', 'DOCS', 'DOC_ITEMS', 'DELIVERIES', 'DELIVERY_ITEMS', 'COSTS', 'ADVANCES', 'PAYMENTS', 'WARRANTIES', 'CERTS', 'FILES', 'RFQS'], counters: true },
+  purchases: { label: 'Mua hàng (đơn mua, đợt hàng về)', tables: ['PURCHASES', 'PURCHASE_ITEMS', 'RECEIPTS', 'RECEIPT_ITEMS'], prefixes: ['DM', 'NH'] },
+  customers: { label: 'Khách hàng', tables: ['CUSTOMERS'], prefixes: ['KH'] },
+  suppliers: { label: 'Nhà cung cấp', tables: ['SUPPLIERS'], prefixes: ['NCC'] },
+  tasks: { label: 'Công việc, nhật ký thao tác, nhật ký lỗi', tables: ['TASKS', 'AUDIT', 'ERRLOG'] },
+  pricelist: { label: 'Bảng giá và lịch sử giá', tables: ['PRICEHIST'], price: true },
+  config: { label: 'Cấu hình công ty (thông tin Ha To, mẫu in, logo, con dấu)', tables: ['CONFIG', 'IMAGES'] }
+};
+function resetPick_(g) {
+  var on = {}; (g || []).forEach(function (k) { if (RESET_GROUPS[k]) on[k] = 1; });
+  if (on.customers) on.projects = 1;          // dự án gắn khách hàng
+  if (on.projects || on.suppliers) on.purchases = 1;   // dòng đơn mua gắn dự án + NCC
+  return on;
+}
+function rowCount_(name) { var sh = ss_().getSheetByName(name); if (!sh) return 0; try { return readTable_(name).length; } catch (e) { return Math.max(0, sh.getLastRow() - 1); } }
+ACTIONS.dataCounts = function (u, p) {
+  need_(u, 'config', 'edit');
+  var out = {};
+  Object.keys(RESET_GROUPS).forEach(function (k) {
+    var g = RESET_GROUPS[k], n = 0, parts = [];
+    var VN = { PROJECTS: 'dự án', QUOTES: 'báo giá', DOCS: 'HĐ / PO / PL', DELIVERIES: 'phiếu giao', PAYMENTS: 'thanh toán', COSTS: 'chi phí', PURCHASES: 'đơn mua', RECEIPTS: 'đợt hàng về', CUSTOMERS: 'khách hàng', SUPPLIERS: 'nhà cung cấp', TASKS: 'công việc', AUDIT: 'nhật ký', PRICEHIST: 'lịch sử giá' };
+    g.tables.forEach(function (t) { var c = TABLES[t] ? rowCount_(t) : 0; n += c; if (c && VN[t]) parts.push(c + ' ' + VN[t]); });
+    if (g.price) { var pc = 0; try { pc = catalog_().length; } catch (e) { } n += pc; if (pc) parts.unshift('mã hàng: ' + pc); }
+    out[k] = { label: g.label, rows: n, detail: parts.join(' · ') };
+  });
+  return out;
+};
+ACTIONS.resetData = function (u, p) {
+  need_(u, 'config', 'edit');
+  if (String(p.confirm || '').trim().toUpperCase() !== 'XOA') throw new Error('Chưa gõ đúng chữ XOA để xác nhận.');
+  var on = resetPick_(p.groups), ks = Object.keys(on);
+  if (!ks.length) throw new Error('Chưa chọn nhóm dữ liệu nào.');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var ss = ss_(), done = {};
+    function wipe(name) {
+      var sh = ss.getSheetByName(name); if (!sh) return;
+      var last = sh.getLastRow(); if (last < 2) return;
+      try { sh.deleteRows(2, last - 1); } catch (e) { sh.getRange(2, 1, last - 1, Math.max(1, sh.getLastColumn())).clearContent(); }
+      done[name] = last - 1;
+      if (TABLES[name]) bump_(name);
+    }
+    ks.forEach(function (k) { RESET_GROUPS[k].tables.forEach(wipe); if (RESET_GROUPS[k].price) PRICE_SHEETS.forEach(wipe); });
+    delete RT.cat;
+    // Bộ đếm số chứng từ: bắt đầu lại từ 001 cho các nhóm đã xóa (giữ số của nhóm còn giữ để không cấp trùng mã)
+    var keepP = {}; Object.keys(RESET_GROUPS).forEach(function (k) { if (!on[k]) (RESET_GROUPS[k].prefixes || []).forEach(function (x) { keepP[x] = 1; }); });
+    var ct = ss.getSheetByName('COUNTERS');
+    if (ct && ct.getLastRow() >= 2) {
+      var vals = ct.getRange(2, 1, ct.getLastRow() - 1, 2).getValues();
+      var keep = vals.filter(function (r) { var pre = String(r[0]).split('-')[0]; return r[0] !== '' && (on.projects ? keepP[pre] : !on.purchases || ['DM', 'NH'].indexOf(pre) < 0) && !(on.customers && pre === 'KH') && !(on.suppliers && pre === 'NCC'); });
+      ct.getRange(2, 1, vals.length, 2).clearContent();
+      if (keep.length) ct.getRange(2, 1, keep.length, 2).setValues(keep);
+      try { if (vals.length > keep.length) ct.deleteRows(2 + keep.length, vals.length - keep.length); } catch (e) { }
+    }
+    if (!on.tasks) audit_(u, 'Xóa dữ liệu', '', '', '', ks.join(', '));
+    return { groups: ks, tables: done };
+  });
+};
 ACTIONS.setFileKind = function (u, p) {
   need_(u, 'files', 'edit');
   if (!FILE_KINDS_[p.kind]) throw new Error('Loại tệp không hợp lệ.');

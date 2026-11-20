@@ -336,4 +336,52 @@ function remTimeCheck_unused() {
   });
 }
 (function () { var iv = setInterval(function () { if (S.user && S.perms && S.perms.dashboard && S.perms.dashboard.view) { clearInterval(iv); refreshReminders(); setInterval(refreshReminders, 300000);  } }, 1500); })();
+
+/* ===== Xóa dữ liệu để dùng chính thức (bản 23): sao lưu trước → chọn nhóm → gõ XOA → xóa → đồng bộ ===== */
+function resetDataModal() {
+  if (!S.perms.config || !S.perms.config.edit) return toast('Chỉ quản trị mới xóa được dữ liệu', true);
+  safe(call('dataCounts', {})).then(function (cn) {
+    if (!cn) return;
+    var defs = [['projects', 1], ['purchases', 1], ['customers', 1], ['suppliers', 1], ['tasks', 1], ['pricelist', 0], ['config', 0]], cks = {};
+    var list = h('div', { style: 'display:grid;gap:6px' });
+    defs.forEach(function (d) {
+      var c = cn[d[0]], ck = h('input', { type: 'checkbox', checked: !!d[1] }); cks[d[0]] = ck;
+      ck.onchange = deps;
+      list.appendChild(h('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px' }, ck,
+        h('div', null, h('div', null, c.label, ' ', h('b', null, '(' + c.rows + ' dòng)')), c.detail ? h('div', { class: 'mut', style: 'font-size:12px' }, c.detail) : null, h('div', { class: 'mut dep', style: 'font-size:12px;color:#b45309' }))));
+    });
+    function deps() {   // nhóm phụ thuộc: khách → dự án → đơn mua; NCC → đơn mua
+      if (cks.customers.checked) cks.projects.checked = true;
+      if (cks.projects.checked || cks.suppliers.checked) cks.purchases.checked = true;
+      cks.projects.disabled = cks.customers.checked; cks.purchases.disabled = cks.projects.checked || cks.suppliers.checked;
+      Object.keys(cks).forEach(function (k) { var n = cks[k].parentNode.querySelector('.dep'); n.textContent = (k === 'projects' && cks.customers.checked) ? 'Bắt buộc xóa vì đã chọn xóa khách hàng' : (k === 'purchases' && cks.purchases.disabled) ? 'Bắt buộc xóa vì đơn mua gắn dự án / nhà cung cấp' : ''; });
+    }
+    deps();
+    var inp = h('input', { type: 'text', placeholder: 'Gõ XOA để xác nhận', style: 'width:200px;text-transform:uppercase' }), st = h('div', { class: 'mut', style: 'margin-top:6px' });
+    var body = h('div', null,
+      h('div', { class: 'card', style: 'background:#fef2f2;border-color:#fca5a5;margin-bottom:10px' }, h('b', null, 'Xóa vĩnh viễn trên Drive. '), 'App tự sao lưu toàn bộ dữ liệu lên Drive (thư mục "HA TO / Sao lưu") trước khi xóa — xóa nhầm thì vào menu ☁ → Khôi phục. Số chứng từ của nhóm đã xóa bắt đầu lại từ 001.'),
+      list,
+      h('div', { class: 'mut', style: 'font-size:12px;margin:8px 0' }, 'Tệp đính kèm: chỉ xóa danh sách trong app; file gốc vẫn nằm trong thư mục Drive "HA TO", tự xóa nếu muốn. Tài khoản đăng nhập không bị xóa.'),
+      h('label', null, 'Xác nhận: ', inp), st);
+    modal({ title: 'Xóa dữ liệu để dùng chính thức', wide: true, body: body, buttons: [{ label: 'Sao lưu rồi xóa', cls: 'dng', fn: function (close, btnEl) {
+      var groups = Object.keys(cks).filter(function (k) { return cks[k].checked; });
+      if (!groups.length) return toast('Chưa chọn nhóm nào', true);
+      if (inp.value.trim().toUpperCase() !== 'XOA') { inp.focus(); return toast('Gõ chữ XOA để xác nhận', true); }
+      var stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
+      st.textContent = 'Đang sao lưu lên Drive…';
+      var bk = window.HatoStore && HatoStore.backupNow ? HatoStore.backupNow('HA TO trước khi xóa dữ liệu ' + stamp + '.json') : Promise.reject(new Error('Bản này không có sao lưu tự động — hãy sao lưu trước bằng tay.'));
+      bk.then(function () {
+        st.textContent = 'Đã sao lưu. Đang xóa…';
+        return call('resetData', { groups: groups, confirm: 'XOA' });
+      }).then(function (r) {
+        try { localStorage.removeItem(DR.key()); localStorage.removeItem(CACHE_KEY); } catch (e) { }
+        MEMO = {}; S.ver = null; DR.badge();
+        st.textContent = 'Đã xóa. Đang đồng bộ lên Drive…';
+        return (window.HatoStore && HatoStore.syncNow ? Promise.resolve(HatoStore.syncNow()).catch(function () { }) : Promise.resolve()).then(function () { return r; });
+      }).then(function (r) {
+        close(); reloadLookups(); toast('Đã xóa ' + r.groups.length + ' nhóm dữ liệu. Sẵn sàng dùng chính thức.'); go(S.perms.dashboard.view ? 'dashboard' : 'projects'); route();
+      }, function (e) { st.textContent = ''; toast('Không xóa: ' + ((e && e.message) || e), true); });
+    } }] });
+  });
+}
 </script>

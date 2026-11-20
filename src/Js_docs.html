@@ -167,7 +167,7 @@ PAGES.quote = function (p, q) {
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(); } }, 'Lưu'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); } }, 'Phiên bản mới'));
     if (!isNew && S.perms.docs.create) acts.push(h('button', { onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO / Phụ lục HĐ'));
-    if (!isNew && S.perms.quotes.edit && !qt.converted_to) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa báo giá này?', function () { safe(call('remove', { table: 'quotes', id: qt.id })).then(function (r) { if (r) backToList('quotes'); }); }); } }, 'Xóa'));
+    if (!isNew && S.perms.quotes.edit) acts.push(h('button', { class: 'dng', onclick: function () { quoteDelete(qt, d.versions || []); } }, 'Xóa'));
     setTitle(title, acts);
     if (!isNew && d.versions.length > 1) v.appendChild(h('div', { class: 'bar2' }, h('span', { class: 'mut' }, 'Phiên bản:'), d.versions.map(function (x) { return h('a', { class: 'badge ' + (x.id === qt.id ? 'b-info' : ''), href: '#/quote/' + x.id }, 'v' + x.version); })));
     if (qt.converted_to) v.appendChild(h('div', { class: 'card' }, h('span', { class: 'badge b-ok' }, 'Đã chốt'), ' Đã chuyển thành: ', h('b', null, qt.converted_to)));
@@ -180,6 +180,21 @@ PAGES.quote = function (p, q) {
       set: function (d) { formSet(pf, d.f); lines.length = 0; (d.lines || []).forEach(function (x) { lines.push(x); }); le.redraw(); } });
   });
 };
+/* Xóa báo giá (bản 23): báo giá đã chốt cũng xóa được sau khi xác nhận; xóa 1 phiên bản hoặc tất cả phiên bản cùng mã */
+function quoteDelete(qt, versions) {
+  var all = versions.length > 1, conv = versions.filter(function (x) { return x.converted_to; }).map(function (x) { return 'v' + x.version + ' → ' + x.converted_to; });
+  if (qt.converted_to && conv.indexOf('v' + qt.version + ' → ' + qt.converted_to) < 0) conv.push('v' + qt.version + ' → ' + qt.converted_to);
+  var one = h('label', { style: 'display:flex;gap:6px;align-items:center' }, h('input', { type: 'radio', name: 'qdel', checked: true, value: 'one' }), 'Chỉ phiên bản đang mở (v' + qt.version + ')');
+  var every = h('label', { style: 'display:flex;gap:6px;align-items:center' }, h('input', { type: 'radio', name: 'qdel', value: 'all' }), 'Tất cả ' + versions.length + ' phiên bản của ' + qt.code);
+  modal({ title: 'Xóa báo giá ' + qt.code, body: h('div', null, all ? h('div', { style: 'display:grid;gap:6px;margin-bottom:8px' }, one, every) : null,
+      conv.length ? h('div', { class: 'card', style: 'background:#fff7ed;border-color:#fdba74' }, h('b', null, 'Báo giá đã chốt: '), conv.join(', '), h('div', null, 'HĐ / PO / Phụ lục vẫn giữ nguyên dòng hàng và giá — chỉ mất liên kết "tạo từ báo giá".')) : null,
+      h('p', null, 'Xóa không khôi phục được (trừ khi khôi phục bản sao lưu).')),
+    buttons: [{ label: 'Xóa', cls: 'dng', fn: function (close) {
+      var pick = all && every.querySelector('input').checked ? versions.map(function (x) { return x.id; }) : [qt.id];
+      pick.reduce(function (pr, id) { return pr.then(function (ok) { return ok && safe(call('remove', { table: 'quotes', id: id, force: true })); }); }, Promise.resolve(true))
+        .then(function (ok) { if (ok) { close(); toast('Đã xóa ' + pick.length + ' báo giá'); backToList('quotes'); } });
+    } }] });
+}
 function custOpts(keep) { return S.customers.filter(function (c) { return c.status !== 'Ngừng' || c.id === keep; }).map(function (c) { return [c.id, c.name + (c.short_name ? ' (' + c.short_name + ')' : '')]; }); }
 function quoteToCustomer(qt) {
   var cs = sel(custOpts('').filter(function (c) { return c[0] !== qt.customer_id; }), '', null, '— chọn khách hàng —');

@@ -17,7 +17,7 @@ function imgBox(name, label, maxW, outType) {
   return h('div', { style: 'margin-bottom:12px' }, h('b', null, label), pv, tools);
 }
 PAGES.config = function () {
-  setTitle('Cấu hình hệ thống');
+  setTitle('Cấu hình hệ thống', [S.perms.config.edit ? h('button', { class: 'dng', onclick: function () { resetDataModal(); } }, 'Xóa dữ liệu…') : null]);
   return call('getConfig').then(function (d) {
     var v = $('#view'), cfg = d.cfg, ed = S.perms.config.edit; v.innerHTML = '';
     var ff = form([{ k: 'company_name', label: 'Tên công ty', full: true }, { k: 'tax_code', label: 'MST' }, { k: 'address', label: 'Địa chỉ', full: true }, { k: 'phone', label: 'Điện thoại' }, { k: 'hotline', label: 'Hotline' }, { k: 'email', label: 'Email' }, { k: 'website', label: 'Website' },

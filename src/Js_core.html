@@ -40,7 +40,7 @@ var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
 var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
-var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1 };
+var WRITES = { save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -53,11 +53,25 @@ function raw(action, payload, quiet) {
   });
 }
 function clone(x) { return x === undefined ? x : JSON.parse(JSON.stringify(x)); }
-function safeToRefresh() { var hs = location.hash; return !document.querySelector('#modals .ov') && !/^#\/(quote|doc|delivery)\//.test(hs); }
-var refreshT; function softRefresh() { clearTimeout(refreshT); refreshT = setTimeout(function () { if (safeToRefresh()) route(); }, 200); }
+function typing() { var a = document.activeElement; return !!(a && a.closest && a.closest('#view') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); }
+function safeToRefresh() { var hs = location.hash; return !document.querySelector('#modals .ov') && !/^#\/(quote|doc|delivery|purchase)\//.test(hs); }
+/* Vẽ lại trang khi có dữ liệu mới (bản 23): đang gõ trong ô lọc / tìm kiếm thì đợi gõ xong mới vẽ lại */
+var refreshT; function softRefresh() { clearTimeout(refreshT); refreshT = setTimeout(function () { if (!safeToRefresh()) return; if (typing()) return softRefresh(); route(); }, typing() ? 2500 : 200); }
+/* Có dữ liệu mới trên máy chủ: chỉ vẽ lại nếu dữ liệu của chính trang đang xem thay đổi */
+function refreshIfPageChanged() {
+  var keys = S.pageKeys || {}, ks = Object.keys(keys);
+  if (!ks.length) { MEMO = {}; return softRefresh(); }
+  Promise.all(ks.map(function (k) { return raw(keys[k][0], keys[k][1], true).then(function (d) { return [k, d]; }, function () { return [k, undefined]; }); })).then(function (rs) {
+    var changed = false;
+    rs.forEach(function (x) { if (x[1] === undefined) return; var sd = JSON.stringify(x[1]), m = MEMO[x[0]]; if (!m || m.s !== sd) changed = true; MEMO[x[0]] = { t: Date.now(), s: sd, d: x[1] }; });
+    Object.keys(MEMO).forEach(function (k) { if (!keys[k]) delete MEMO[k]; });       // dữ liệu trang khác: tải lại khi mở
+    if (changed) softRefresh();
+  });
+}
 function call(action, payload) {
   if (!READS[action]) return raw(action, payload).then(function (r) { if (WRITES[action]) { MEMO = {}; S.ver = null; try { localStorage.removeItem(CACHE_KEY); } catch (e) { } } return r; });
   var key = memoKey(action, payload), m = MEMO[key], age = m ? Date.now() - m.t : 0;
+  if (S.pageKeys) S.pageKeys[key] = [action, payload || {}];
   if (m && age < MEMO_TTL) {
     if (age > REVAL_AFTER && !m.rv) {            // có bản cũ → hiện ngay, hỏi lại máy chủ ngầm
       m.rv = 1;
@@ -98,7 +112,7 @@ function pollVersion() {
   if (document.hidden) return;
   raw('version', {}, true).then(function (v) {
     if (S.ver == null) { S.ver = v; return; }
-    if (v !== S.ver) { S.ver = v; MEMO = {}; if (safeToRefresh()) route(); }
+    if (v !== S.ver) { S.ver = v; refreshIfPageChanged(); }
   }, function () { });
 }
 /* safe(): lỗi đã hiện thông báo đỏ (20 giây) thì trả null để màn hình giữ nguyên (form không đóng, không báo "đã lưu").
@@ -625,18 +639,22 @@ function route() {
   if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
   if (S.draftCtl) { S.draftCtl.end(); S.draftCtl = null; draftStatus(''); }
   window.__quoteCheck = null;
+  // Ghi nhận vị trí cuộn TRƯỚC khi thay khung (bản 23): vẽ lại cùng trang (đồng bộ xong) giữ đúng chỗ đang xem, không giật về đầu trang
+  var same = location.hash === S.lastHash, keepY = same ? Math.max($('#main').scrollTop || 0, window.scrollY || 0) : 0, keepH = same ? $('#view').offsetHeight : 0;
+  S.pageKeys = {};
   // Mỗi lần đổi trang dùng một khung #view mới: trang cũ tải chậm xong thì chỉ vẽ vào khung đã bỏ, không chèn lẫn vào trang mới
-  var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; old.parentNode.replaceChild(v, old);
+  var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; if (keepH) v.style.minHeight = keepH + 'px'; old.parentNode.replaceChild(v, old);
   v.innerHTML = '<div class="mut" style="padding:20px">Đang tải…</div>';
   var fn = PAGES[page]; if (!fn) { v.textContent = 'Không có trang này.'; return; }
   if (!S.perms[k] || !S.perms[k].view) { v.textContent = 'Bạn không có quyền xem mục này.'; return; }
   TSEQ = 0;
-  var same = location.hash === S.lastHash, keepY = same ? ($('#main').scrollTop || window.scrollY || 0) : 0; S.lastHash = location.hash;
+  S.lastHash = location.hash;
   if (!same) { window.scrollTo(0, 0); $('#main').scrollTop = 0; }
-  Promise.resolve(fn(p, r.q)).then(function () { if (keepY) restoreScroll(keepY); }).catch(function (e) { v.innerHTML = ''; v.appendChild(h('div', { class: 'card neg' }, 'Lỗi: ' + (e && e.message))); });
+  else if (keepY) restoreScroll(keepY);
+  Promise.resolve(fn(p, r.q)).then(function () { v.style.minHeight = ''; if (keepY) restoreScroll(keepY); }).catch(function (e) { v.innerHTML = ''; v.appendChild(h('div', { class: 'card neg' }, 'Lỗi: ' + (e && e.message))); });
 }
 window.addEventListener('hashchange', route);
-function restoreScroll(y) { var m = $('#main'), n = 0; (function t() { m.scrollTop = y; if (m.scrollTop < y - 2 && n++ < 10) setTimeout(t, 80); })(); }
+function restoreScroll(y) { var m = $('#main'), n = 0; (function t() { m.scrollTop = y; if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); if (Math.max(m.scrollTop, window.scrollY) < y - 2 && n++ < 10) setTimeout(t, 80); })(); }
 
 /* ================= Trang ================= */
 var PAGES = {};
