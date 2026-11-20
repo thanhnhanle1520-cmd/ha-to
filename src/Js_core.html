@@ -540,7 +540,7 @@ function lineEditor(o) {
   var thead = h('thead', null, h('tr', null, h('th', null, '#'), cols.map(function (c) { return h('th', { class: (c[2] === 'n' || (c[2] === 'ro' && c[0] !== 'doc_code') ? 'r' : '') + (mode === 'quote' && (c[0] === 'cost' || c[0] === 'coef') ? ' hide-sm' : '') }, c[1]); }), h('th')));
   root.append(h('div', { class: 'tw' }, h('table', { class: 'le' }, thead, body, foot)),
     h('div', { class: 'bar2', style: 'margin-top:8px' }, fGroup, fBrand, h('div', { class: 'pick', style: 'flex:1;min-width:260px' }, q, dd), h('button', { onclick: function () { add({ source: 'EXTRA', price: 0 }); } }, '+ Dòng trống'), mode === 'delivery' ? null : h('button', { onclick: function () { importLines(root, mode); } }, 'Nhập file')));
-  root.add = add; root.redraw = draw; root.total = total;
+  root.add = add; root.lines = function () { return lines; }; root.redraw = draw; root.total = total;
   root.applyCoef = function (c) { c = num(c); if (!(c > 0)) return 0; var n = 0; lines.forEach(function (l) { if (num(l.cost) > 0) { l.coef = c; l.price = rp(l.cost, c); n++; } }); draw(); if (o.onChange) o.onChange(); return n; };
   draw();
   return root;

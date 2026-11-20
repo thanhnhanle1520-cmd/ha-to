@@ -1,0 +1,48 @@
+// Bản 19: PO lấy dòng hàng từ HĐ (SL HĐ hiện hành / đã ở PO khác / còn lại)
+const { launch, open } = require('./cdp'); const sleep = ms => new Promise(r => setTimeout(r, ms));
+let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓', n); } else { bad++; console.log('  ✗ FAIL:', n, JSON.stringify(x === undefined ? '' : x).slice(0, 400)); } };
+(async () => {
+  const c = await launch(); const pg = await open(c.port, 'http://127.0.0.1:8765/index.html?local=1'); await sleep(4500);
+  const E = s => pg.ev(s), A = (a, p) => E(`api(${JSON.stringify(a)},${JSON.stringify(p || {})})`);
+  await pg.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 1000, deviceScaleFactor: 1, mobile: false });
+  const cu = (await A('save', { table: 'customers', rec: { name: 'Công ty Kiểm thử PO' } })).data;
+  const pj = (await A('save', { table: 'projects', rec: { name: 'Nhà xưởng PO', customer_id: cu.id, status: 'Đang thực hiện' } })).data;
+  const hd = (await A('save', { table: 'docs', rec: { type: 'HD', project_id: pj.id, vat_pct: 10, sign_date: '2026-11-01', terms: [{ name: 'Đợt 1', pct: 100, days: 30 }] }, items: [
+    { name: 'Bình ABC 8kg', model: 'MFZL8', unit: 'Bình', qty: 10, price: 300000, cost: 210000, spec: 'Đỏ' }, { name: 'Tủ chữa cháy', unit: 'Cái', qty: 5, price: 1500000, cost: 1000000 }] })).data.doc;
+  const hit = (await A('get', { table: 'docs', id: hd.id })).data.items;
+  const r0 = await A('save', { table: 'docs', rec: { type: 'PO', project_id: pj.id, vat_pct: 10, sign_date: '2026-11-05' }, items: [{ ref_item_id: hit[0].id, name: hit[0].name, unit: 'Bình', qty: 4, price: 300000, cost: 210000 }] });
+  T('PO-1 (4 bình, gắn dòng HĐ)', r0.ok, r0);
+  console.log('— Tạo PO mới'); await E('reloadLookups()');
+  await E(`MEMO={};location.hash='#/doc/new?project=${pj.id}&type=PO'`); await sleep(2000);
+  const sm = await E(`(()=>{const d=document.querySelector('details.pobox');return d?[d.open,d.querySelector('summary').textContent,d.textContent]:null})()`);
+  T('có khối "Lấy dòng hàng từ HĐ", mở sẵn khi tạo PO mới', sm && sm[0] && /Lấy dòng hàng từ HD-/.test(sm[1]) && /2 dòng còn lại/.test(sm[1]), sm);
+  const rows = await E(`[...document.querySelectorAll('details.pobox tbody tr')].map(tr=>[...tr.children].map(td=>td.querySelector('input[type=number]')?td.querySelector('input').value:td.textContent))`);
+  T('bình: HĐ 10, đã ở PO khác 4, còn lại 6, mặc định đưa 6', rows[0][3] === '10' && rows[0][4] === '4' && rows[0][6] === '6' && rows[0][7] === '6', rows[0]);
+  T('tủ: còn lại 5', rows[1][6] === '5' && rows[1][7] === '5', rows[1]);
+  await pg.shot('/tmp/s19_picker.png');
+  await E(`(()=>{const i=document.querySelectorAll('details.pobox tbody input[type=number]')[1];i.value='2'})()`);
+  await E(`[...document.querySelectorAll('details.pobox button')].find(b=>/Đưa dòng đã chọn/.test(b.textContent)).click()`); await sleep(1500);
+  const after = await E(`[...document.querySelectorAll('details.pobox tbody tr')].map(tr=>[...tr.children].map(td=>td.querySelector('input[type=number]')?td.querySelector('input').value:td.textContent))`);
+  T('sau khi đưa: bình "Đã trong PO này" 6, còn lại Đủ; tủ còn 3', after[0][5] === '6' && after[0][6] === 'Đủ' && after[1][5] === '2' && after[1][6] === '3', after);
+  await pg.shot('/tmp/s19_after.png');
+  await E(`[...document.querySelectorAll('#acts button')].find(b=>/^Lưu/.test(b.textContent)).click()`); await sleep(2000);
+  const docs = (await A('list', { table: 'docs', project_id: pj.id })).data.filter(d => d.type === 'PO');
+  const po2 = docs.find(d => d.id !== r0.data.doc.id);
+  const its = po2 ? (await A('get', { table: 'docs', id: po2.id })).data.items : [];
+  T('lưu PO-2: 2 dòng, giữ liên kết dòng HĐ, đơn giá / giá mua / quy cách theo HĐ', its.length === 2 && its[0].ref_item_id === hit[0].id && Number(its[0].qty) === 6 && Number(its[0].price) === 300000 && Number(its[0].cost) === 210000 && its[0].spec === 'Đỏ' && Number(its[1].qty) === 2, its);
+  console.log('— Mở lại PO-2');
+  await E(`MEMO={};location.hash='#/doc/${po2 && po2.id}'`); await sleep(2000);
+  const sm2 = await E(`(()=>{const d=document.querySelector('details.pobox');return d?[d.open,d.querySelector('summary').textContent]:null})()`);
+  T('PO đã lưu: khối thu gọn, còn 1 dòng (tủ 3)', sm2 && !sm2[0] && /1 dòng còn lại/.test(sm2[1]), sm2);
+  const r2 = await E(`[...document.querySelectorAll('details.pobox tbody tr')].map(tr=>[...tr.children].map(td=>td.querySelector('input[type=number]')?td.querySelector('input').value:td.textContent))`);
+  T('không tính PO đang mở vào "PO khác"', r2[0][4] === '4' && r2[0][5] === '6' && r2[1][6] === '3', r2);
+  console.log('— Khách nhiều HĐ');
+  const le = (await A('ensureRetail', { customer_id: cu.id })).data;
+  await A('save', { table: 'docs', rec: { type: 'HD', project_id: le.id, vat_pct: 10, sign_date: '2026-11-01' }, items: [{ name: 'Van A', unit: 'Cái', qty: 3, price: 100 }] });
+  await A('save', { table: 'docs', rec: { type: 'HD', project_id: le.id, vat_pct: 10, sign_date: '2026-11-02' }, items: [{ name: 'Van B', unit: 'Cái', qty: 7, price: 100 }] });
+  await E(`reloadLookups()`); await E(`MEMO={};location.hash='#/doc/new?project=${le.id}&type=PO'`); await sleep(2000);
+  T('nhiều HĐ chưa chọn "Thuộc HĐ" → nhắc chọn', /Chọn ô "Thuộc HĐ"/.test(await E(`document.querySelector('details.pobox').textContent`)));
+  await E(`(()=>{const s=[...document.querySelectorAll('#view label')].find(l=>/Thuộc HĐ/.test(l.textContent)).querySelector('select');s.value=s.options[2].value;s.dispatchEvent(new Event('change'))})()`); await sleep(1500);
+  T('chọn HĐ thứ 2 → hiện dòng Van B', /Van B/.test(await E(`document.querySelector('details.pobox').textContent`)) && !/Van A/.test(await E(`document.querySelector('details.pobox').textContent`)));
+  console.log('Lỗi console:', JSON.stringify(pg.logs)); console.log(ok + ' đạt, ' + bad + ' lỗi'); c.proc.kill(); process.exit(0);
+})().catch(e => { console.log('CRASH', e.message); process.exit(1); });

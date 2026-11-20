@@ -518,7 +518,7 @@ function calcProject_(pid) {
   var idx = index_(), docs = (idx.docsByProject[pid] || []).slice();
   var res = { docs: {}, lines: [], value: 0, cost_goods: 0, delivered_value: 0, delivered_pct: 0, cost_hato: 0, cost_customer: 0 };
   function mk(d, it) {
-    return { id: it.id, doc_id: d.id, doc_code: d.code, doc_type: d.type, code: it.code, name: it.name, model: it.model, brand: it.brand, origin: it.origin, unit: it.unit, qty: num_(it.qty), price: num_(it.price), cost: num_(it.cost), source: it.source, line_no: num_(it.line_no) };
+    return { id: it.id, doc_id: d.id, doc_code: d.code, doc_type: d.type, code: it.code, name: it.name, model: it.model, brand: it.brand, origin: it.origin, unit: it.unit, qty: num_(it.qty), price: num_(it.price), cost: num_(it.cost), source: it.source, line_no: num_(it.line_no), spec: it.spec || '', cost_list: it.cost_list, ref_item_id: it.ref_item_id || '' };
   }
   function sumLines(ls) { var v = 0, c = 0; ls.forEach(function (l) { v += l.qty * l.price; c += l.qty * l.cost; }); return { v: v, c: c }; }
   var hds = docs.filter(function (d) { return d.type === 'HD'; }), hd = hds[0];     // hồ sơ "theo khách" có thể có nhiều HĐ, dự án thường chỉ 1
