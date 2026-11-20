@@ -421,7 +421,7 @@ PAGES.delivery = function (p, q) {
       var rec = Object.assign({}, dv, f.get());
       return safe(call('save', { table: 'deliveries', rec: rec, items: lines, force: !!force })).then(function (r) {
         if (!r) return;
-        if (r.needConfirm) return modal({ title: 'Giao vượt khối lượng còn lại', body: h('div', null, h('p', null, 'Một số dòng vượt khối lượng còn lại:'), h('ul', null, r.warnings.map(function (w) { return h('li', null, w); })), h('p', null, 'Vẫn lưu phiếu?')), buttons: [{ label: 'Vẫn lưu', cls: 'pri', fn: function (c) { c(); save(true); } }], closeLabel: 'Quay lại sửa' });
+        if (r.needConfirm) return modal({ title: 'Cảnh báo khi giao hàng', body: h('div', null, h('p', null, 'Một số dòng vượt khối lượng còn lại hoặc vượt hàng đã về:'), h('ul', null, r.warnings.map(function (w) { return h('li', null, w); })), h('p', null, 'Vẫn lưu phiếu?')), buttons: [{ label: 'Vẫn lưu', cls: 'pri', fn: function (c) { c(); save(true); } }], closeLabel: 'Quay lại sửa' });
         if (S.draftCtl) S.draftCtl.clear(); toast('Đã lưu ' + r.delivery.code); backToList('deliveries');
       });
     }

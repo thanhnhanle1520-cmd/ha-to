@@ -97,7 +97,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   T('UI: báo giá có nút Gửi báo giá nhanh / Copy báo giá', await pg.ev(`/Gửi báo giá nhanh/.test(document.querySelector('#acts').innerText) && /Copy báo giá/.test(document.querySelector('#acts').innerText)`));
   T('UI: cột Giá mua/Hệ số có class hide-sm', await pg.ev(`document.querySelectorAll('#view table.le .hide-sm').length > 3`));
   await pg.ev(`MEMO={};location.hash='#/project/${pj.id}'`); await sleep(2200);
-  T('UI: thanh tiến trình dự án', await pg.ev(`/1\\. Báo giá/.test(document.querySelector('#view').innerText) && /5\\. Bảo hành/.test(document.querySelector('#view').innerText)`));
+  T('UI: thanh tiến trình dự án', await pg.ev(`/1\\. Báo giá/.test(document.querySelector('#view').innerText) && /6\\. Bảo hành/.test(document.querySelector('#view').innerText)`));
   T('UI: tab Công việc trong dự án', await pg.ev(`/Công việc/.test(document.querySelector('.tabs').innerText)`));
   T('UI: nút Gói đối chiếu / Copy dự án', await pg.ev(`/Gói đối chiếu/.test(document.querySelector('#acts').innerText) && /Copy dự án/.test(document.querySelector('#acts').innerText)`));
   await pg.ev(`reconModal('${pj.id}')`); await sleep(1500);

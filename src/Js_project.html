@@ -35,7 +35,7 @@ PAGES.projects = function (p, q) {
 };
 
 /* ---- Trang chi tiết dự án ---- */
-var PTABS = [['overview', 'Tổng quan'], ['docs', 'Văn bản'], ['quotes', 'Báo giá'], ['deliveries', 'Giao hàng'], ['costs', 'Chi phí'], ['advances', 'Tạm ứng'], ['payments', 'Thanh toán'], ['warranties', 'Bảo hành'], ['certs', 'Xuất xưởng'], ['tasks', 'Công việc'], ['files', 'Tệp đính kèm']];
+var PTABS = [['overview', 'Tổng quan'], ['docs', 'Văn bản'], ['quotes', 'Báo giá'], ['purchases', 'Mua hàng'], ['deliveries', 'Giao hàng'], ['costs', 'Chi phí'], ['advances', 'Tạm ứng'], ['payments', 'Thanh toán'], ['warranties', 'Bảo hành'], ['certs', 'Xuất xưởng'], ['tasks', 'Công việc'], ['files', 'Tệp đính kèm']];
 PAGES.project = function (p) {
   var id = p[1], tab = p[2] || 'overview';
   return call('projectBundle', { id: id }).then(function (b) {
@@ -54,7 +54,7 @@ PAGES.project = function (p) {
     if (b.money) kp.append(h('div', { class: 'i' }, h('span', null, 'Đã thu'), h('b', null, M(b.money.paid))), h('div', { class: 'i', title: 'Theo hàng đã giao, có VAT' }, h('span', null, 'Còn phải thu'), h('b', { class: s.revenue_vat - b.money.paid > 1 ? 'neg' : '' }, M(Math.round(s.revenue_vat - b.money.paid)))));
     v.appendChild(kp);
     if (b.steps) {
-      var st = b.steps, stp = [['Báo giá', st.quotes > 0 ? 1 : 0, st.quotes + ' BG'], ['Ký HĐ / PO', st.docs > 0 ? 1 : 0, st.docs + ' văn bản'], ['Giao hàng', st.delivered_pct, P(st.delivered_pct)], ['Thu tiền', st.paid_pct, P(st.paid_pct)], ['Bảo hành', st.warranties > 0 ? 1 : 0, st.warranties + ' phiếu']];
+      var st = b.steps, stp = [['Báo giá', st.quotes > 0 ? 1 : 0, st.quotes + ' BG'], ['Ký HĐ / PO', st.docs > 0 ? 1 : 0, st.docs + ' văn bản'], ['Mua hàng', st.buy ? st.buy.received_pct : 0, st.buy && st.buy.any ? 'đặt ' + P(st.buy.ordered_pct) + ' · về ' + P(st.buy.received_pct) : 'chưa đặt'], ['Giao hàng', st.delivered_pct, P(st.delivered_pct)], ['Thu tiền', st.paid_pct, P(st.paid_pct)], ['Bảo hành', st.warranties > 0 ? 1 : 0, st.warranties + ' phiếu']];
       v.appendChild(h('div', { class: 'card', style: 'display:flex;gap:6px;flex-wrap:wrap;padding:8px' }, stp.map(function (x, i) {
         var done = x[1] >= 0.999, part = x[1] > 0 && !done, bg = done ? '#dcfce7' : part ? '#fef3c7' : '#f3f4f6', fg = done ? '#166534' : part ? '#92400e' : '#6b7280';
         return h('div', { style: 'flex:1;min-width:110px;padding:6px 10px;border-radius:6px;background:' + bg + ';color:' + fg }, h('div', { style: 'font-weight:600;font-size:13px' }, (i + 1) + '. ' + x[0] + (done ? ' ✓' : '')), h('div', { style: 'font-size:12px' }, x[2]));
@@ -125,9 +125,9 @@ TABS.overview = function (host, b) {
         h('tbody', null, b.breakdown.map(function (r) { return h('tr', null, h('td', null, r.code), h('td', { class: 'r' }, M(r.value)), h('td', { class: 'r' }, M(r.cost_goods)), h('td', { class: 'r' }, M(r.cost_hato)), h('td', { class: 'r mut' }, M(r.cost_customer)), h('td', { class: 'r ' + (r.profit < 0 ? 'neg' : '') }, M(r.profit)), h('td', { class: 'r' }, r.value ? P(r.margin) : '')); })),
         h('tfoot', null, h('tr', null, h('td', null, 'Tổng'), h('td', { class: 'r' }, M(s.value)), h('td', { class: 'r' }, M(s.cost_goods)), h('td', { class: 'r' }, M(s.cost_hato)), h('td', { class: 'r' }, M(s.cost_customer)), h('td', { class: 'r' }, M(s.profit)), h('td', { class: 'r' }, P(s.margin))))))));
   }
-  host.appendChild(h('div', { class: 'card' }, h('h3', null, 'Khối lượng: ' + (b.money && b.money.basis === 'PO' ? 'theo PO' : b.money && b.money.basis === 'MIX' ? 'theo HĐ + PO' : 'hợp đồng') + ' / đã giao / còn lại'), table({
+  host.appendChild(h('div', { class: 'card' }, h('h3', null, 'Khối lượng: ' + (b.money && b.money.basis === 'PO' ? 'theo PO' : b.money && b.money.basis === 'MIX' ? 'theo HĐ + PO' : 'hợp đồng') + ' / đã đặt / đã về / đã giao / còn lại'), table({
     rows: b.lines.filter(function (l) { return l.in_basis !== false; }), pageSize: 100, search: function (r) { return r.name + ' ' + r.model + ' ' + r.doc_code; }, empty: 'Chưa có văn bản nào. Chuyển báo giá thành HĐ/PO để có khối lượng.',
-    cols: [{ k: 'doc_code', label: 'Văn bản' }, { k: 'name', label: 'Tên hàng' }, { k: 'model', label: 'Model' }, { k: 'unit', label: 'ĐVT' }, { k: 'qty', label: 'Số lượng', cls: 'r', fmt: function (r) { return N(r.qty); } }, { k: 'delivered', label: 'Đã giao', cls: 'r', fmt: function (r) { return N(r.delivered); } },
+    cols: [{ k: 'doc_code', label: 'Văn bản' }, { k: 'name', label: 'Tên hàng' }, { k: 'model', label: 'Model' }, { k: 'unit', label: 'ĐVT' }, { k: 'qty', label: 'Số lượng', cls: 'r', fmt: function (r) { return N(r.qty); } }, { k: 'ordered', label: 'Đã đặt', cls: 'r', fmt: function (r) { return r.ordered ? N(r.ordered) : ''; } }, { k: 'received', label: 'Đã về', cls: 'r', fmt: function (r) { return r.received ? h('span', { class: r.received + 1e-9 >= r.qty ? 'pos' : '' }, N(r.received)) : ''; } }, { k: 'delivered', label: 'Đã giao', cls: 'r', fmt: function (r) { return N(r.delivered); } },
       { k: 'remaining', label: 'Còn lại', cls: 'r', fmt: function (r) { return h('b', { class: r.remaining < 0 ? 'neg' : '' }, N(r.remaining)); } }, { k: 'price', label: 'Đơn giá', cls: 'r', fmt: function (r) { return M(r.price); } }]
   })));
 };
@@ -197,7 +197,7 @@ function deliveriesTable(rows, showProject) {
 /* ---- Tải tệp lên Drive (dùng chung cho tab Tệp của dự án và phần đính kèm của HĐ / PO / PLHD) ---- */
 var FILE_MAX = 50 * 1024 * 1024, FILE_BIG = 4 * 1024 * 1024;
 function fileSize(n) { n = num(n); return !n ? '' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
-var FILE_KINDS = [['BG', 'Báo giá PDF'], ['HD', 'Hợp đồng'], ['BV', 'Bản vẽ'], ['BBGH', 'BBGH'], ['BH', 'Bảo hành'], ['KHAC', 'Khác']];
+var FILE_KINDS = [['BG', 'Báo giá PDF'], ['HD', 'Hợp đồng'], ['BV', 'Bản vẽ'], ['BBGH', 'BBGH'], ['BH', 'Bảo hành'], ['DM', 'Đơn mua / HĐ NCC'], ['HDDV', 'Hóa đơn đầu vào'], ['KHAC', 'Khác']];
 function uploadFiles(fl, where, st) {          // where: { project_id, doc_id | ref_type+ref_id, kind } -> Promise<số tệp tải được>
   var okN = 0;
   return fl.reduce(function (pr, f, i) {
@@ -398,7 +398,7 @@ function financeCard(b) {
   var row = function (k, v, o) { o = o || {}; return h('div', { style: 'display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid #eef1f5' + (o.b ? ';font-weight:700' : '') }, h('span', { class: o.sub ? 'mut' : '', title: o.t || '' }, k), h('span', { class: (o.neg ? 'neg' : '') + ' r', style: 'font-variant-numeric:tabular-nums' }, v)); };
   var col = function (title, note, rows) { return h('div', { style: 'flex:1;min-width:280px' }, h('div', { style: 'font-weight:650;color:var(--navy)' }, title), h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:4px' }, note), rows); };
   var cols = [];
-  if (cost) cols.push(col('Thực tế', 'Tính trên hàng đã giao', [row('Doanh thu ghi nhận', M(s.revenue), { t: 'Giá trị hàng đã giao (chưa VAT)' }), row('− Giá vốn', M(s.cogs), { t: 'Giá mua của đúng phần hàng đã giao' }), row('− Chi phí phát sinh', M(s.cost_hato), { t: 'Chi phí Ha To trả (vận chuyển, nhân công…)' }), row('= Lợi nhuận gộp', M(s.profit_real) + (s.revenue ? ' (' + P(s.margin_real) + ')' : ''), { b: 1, neg: s.profit_real < 0 })]));
+  if (cost) cols.push(col('Thực tế', 'Tính trên hàng đã giao', [row('Doanh thu ghi nhận', M(s.revenue), { t: 'Giá trị hàng đã giao (chưa VAT)' }), row('− Giá vốn', M(s.cogs), { t: 'Phần hàng đã giao × giá mua thực theo đơn mua (dòng chưa mua: tạm tính giá mua dự kiến)' }), s.price_diff ? row('  trong đó chênh lệch giá mua', (s.price_diff > 0 ? '+' : '') + M(s.price_diff), { sub: 1, t: 'Giá vốn thực tế − giá vốn dự kiến của phần đã giao. Dương: mua đắt hơn dự kiến.' }) : null, row('− Chi phí phát sinh', M(s.cost_hato), { t: 'Chi phí Ha To trả (vận chuyển, nhân công…)' }), row('= Lợi nhuận gộp', M(s.profit_real) + (s.revenue ? ' (' + P(s.margin_real) + ')' : ''), { b: 1, neg: s.profit_real < 0 })]));
   else cols.push(col('Thực tế', 'Tính trên hàng đã giao', [row('Doanh thu ghi nhận', M(s.revenue), { b: 1 })]));
   if (cost) cols.push(col('Dự kiến', 'Tính trên giá trị ký (HĐ / PO)', [row('Giá trị ký', M(s.value)), row('− Giá vốn dự kiến', M(s.cost_goods)), row('− Chi phí phát sinh', M(s.cost_hato)), row('= Lãi dự kiến', M(s.profit) + ' (' + P(s.margin) + ')', { b: 1, neg: s.profit < 0 })]));
   cols.push(col('Thu tiền', 'Có VAT', [row('Tổng giá trị ký', M(Math.round(s.value_vat || mo.total_vat || 0))), row('Đã giao', M(Math.round(s.revenue_vat))), row('Đã thu', M(mo.paid || 0)), row('Còn phải thu (theo hàng đã giao)', M(Math.round(s.revenue_vat - (mo.paid || 0))), { b: 1, neg: s.revenue_vat - (mo.paid || 0) > 1 }), row('Chưa đến lượt thu (chưa giao)', M(Math.round(Math.max(0, (s.value_vat || 0) - s.revenue_vat))), { sub: 1 })]));
@@ -419,8 +419,10 @@ function flowCard(b) {
   var cs = cost ? f.costs.map(function (c) { return it('project/' + b.project.id + '/costs', c.type || 'Chi phí', D(c.date) + (c.payer === 'KHACH' ? ' · khách trả' : '') + (c.note ? ' · ' + c.note : ''), M(c.amount)); }) : [];
   var ps = (f.payments || []).map(function (p) { return it('project/' + b.project.id + '/payments', 'Thu tiền', D(p.date) + (p.note ? ' · ' + p.note : ''), M(p.amount)); });
   var sum = function (a, k) { return a.reduce(function (t, x) { return t + num(x[k]); }, 0); };
+  var pus = (f.purchases || []).map(function (pu) { return it('purchase/' + pu.id, pu.code, pu.supplier_name + (pu.order_date ? ' · ' + D(pu.order_date) : ''), M(pu.value), purBadge(pu.status)); });
   var steps = [step(1, 'Báo giá', qs.length + ' báo giá', qs, 'Chưa có báo giá'), step(2, 'HĐ / PO / Phụ lục', ds.length + ' văn bản', ds, 'Chưa ký HĐ / PO'),
-    step(3, 'Giao hàng', Math.round((b.summary.delivered_pct || 0) * 100) + '% giá trị', dl, 'Chưa giao hàng')];
+    step(3, 'Mua hàng', b.steps && b.steps.buy && b.steps.buy.any ? 'đặt ' + P(b.steps.buy.ordered_pct) + ' · về ' + P(b.steps.buy.received_pct) : '', pus, 'Chưa có đơn mua'),
+    step(4, 'Giao hàng', Math.round((b.summary.delivered_pct || 0) * 100) + '% giá trị', dl, 'Chưa giao hàng')];
   // Chi phí / Thu tiền: xem ở các khối tóm tắt bên dưới (bản 18), không lặp lại ở đây
   return h('div', { class: 'card' }, h('h3', null, 'Quy trình dự án'), h('div', { class: 'flow' }, steps));
 }
