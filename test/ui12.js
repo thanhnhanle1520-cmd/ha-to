@@ -19,7 +19,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   T('dự án thường vẫn chỉ 1 HĐ', !r.ok && /tối đa 1 HĐ/.test(r.error), r.error);
   r = await A('save', { table: 'docs', rec: { type: 'PLHD', project_id: le.id }, items: [line('Thêm', 1, 100000)] });
   T('PLHD khi có 2 HĐ phải chọn HĐ gốc', !r.ok && /chọn HĐ gốc/.test(r.error), r.error);
-  r = await A('save', { table: 'docs', rec: { type: 'PLHD', project_id: le.id, parent_id: hd2.id }, items: [line('Kệ bình', 4, 250000)] });
+  r = await A('save', { table: 'docs', rec: { type: 'PLHD', status: 'DA_KY', project_id: le.id, parent_id: hd2.id }, items: [line('Kệ bình', 4, 250000)] });
   T('PLHD gắn đúng HĐ 2', r.ok && r.data.doc.parent_id === hd2.id, r); const pl = r.data.doc;
   r = await A('save', { table: 'docs', rec: { type: 'PO', project_id: le.id, parent_id: hd1.id, doc_no: 'PO-01' }, items: [line('Bình ABC 8kg', 4, 300000)] });
   T('PO thuộc HĐ 1', r.ok && r.data.doc.parent_id === hd1.id, r); const po1 = r.data.doc;

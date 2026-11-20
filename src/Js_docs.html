@@ -194,7 +194,7 @@ PAGES.docs = function () {
 };
 PAGES.doc = function (p, q) {
   var id = p[1], isNew = id === 'new', v = $('#view');
-  var load = isNew ? Promise.resolve({ doc: { type: q.type || 'PO', project_id: q.project || '', vat_pct: 10, sign_date: today(), terms: q.type === 'HD' ? [{ name: 'Đợt 1', pct: 100, days: 30 }] : [], attached: [], currency: 'VND' }, items: [] }) : call('get', { table: 'docs', id: id });
+  var load = isNew ? Promise.resolve({ doc: { type: q.type || 'PO', status: q.type === 'PLHD' ? 'NHAP' : '', project_id: q.project || '', vat_pct: 10, sign_date: today(), terms: q.type === 'HD' ? [{ name: 'Đợt 1', pct: 100, days: 30 }] : [], attached: [], currency: 'VND' }, items: [] }) : call('get', { table: 'docs', id: id });
   var hdDef = (isNew ? q.type === 'HD' : true) ? call('hdDefaults', {}).catch(function () { return null; }) : Promise.resolve(null);
   return Promise.all([load, hdDef]).then(function (rr) {
     return (rr[0].doc.project_id ? call('list', { table: 'docs', project_id: rr[0].doc.project_id }).catch(function () { return []; }) : Promise.resolve([])).then(function (sib) { rr.push(sib); return rr; });
@@ -204,6 +204,7 @@ PAGES.doc = function (p, q) {
     var terms = (doc.terms || []).map(function (x) { return Object.assign({}, x); }), attached = (doc.attached || []).map(function (x) { return Object.assign({}, x); });
     v.innerHTML = '';
     var fields = [{ k: 'project_id', label: 'Dự án', req: true, type: 'select', opts: projOpts(), blank: '— chọn —', disabled: !isNew }, { k: 'doc_no', label: doc.type === 'PO' ? 'Số PO' : doc.type === 'HD' ? 'Số hợp đồng' : 'Số PLHD' }, { k: 'sign_date', label: 'Ngày ký', type: 'date' }, { k: 'delivery_date', label: 'Ngày giao dự kiến', type: 'date' }, { k: 'vat_pct', label: 'VAT %', type: 'number' }];
+    if (doc.type === 'PLHD') { if (!isNew && !doc.status) doc.status = 'DA_KY'; fields.splice(2, 0, { k: 'status', label: 'Trạng thái phụ lục', type: 'select', opts: [['NHAP', 'Nháp — chưa tính vào giá trị HĐ'], ['DA_KY', 'Đã ký — tính vào giá trị HĐ'], ['HUY', 'Hủy / Thay thế — không tính']] }); }
     if (doc.type === 'HD') fields.push({ k: 'currency', label: 'Tiền tệ' }, { k: 'pay_method', label: 'Hình thức thanh toán' }, { k: 'late_penalty', label: 'Phạt chậm' }, { k: 'pay_docs', label: 'Chứng từ thanh toán (ghi chú nội bộ)', full: true });
     /* HĐ gốc: Phụ lục HĐ luôn thuộc 1 HĐ; PO của hồ sơ "theo khách" chọn HĐ hoặc để đứng riêng */
     var pjOf = function (id) { return (S.projects || []).filter(function (x) { return x.id === id; })[0] || {}; };
@@ -236,6 +237,7 @@ PAGES.doc = function (p, q) {
     if (doc.type === 'PLHD') v.appendChild(h('div', { class: 'card' }, 'Phụ lục HĐ có thể điều chỉnh đơn giá / số lượng của dòng hàng trong hợp đồng, hoặc thêm sản phẩm khác. Giá trị hợp đồng hiện hành = HĐ gốc + các PLHD.'));
     v.appendChild(h('div', { class: 'card' }, f.el));
     var pendingFiles = [];
+    if (doc.type === 'PLHD' && !isNew) v.appendChild(plhdHistoryCard(doc, sibs));
     v.appendChild(docFilesCard(doc, isNew, pendingFiles));
     if (doc.type === 'HD' && HDD) { hdc = hdCard(doc, f, terms, attached, HDD, isNew, function () { return typeof drawT === 'function' ? drawT() : 0; }, function () { at.draw(); }); v.appendChild(hdc.el); }
     if (doc.type === 'HD') {
@@ -343,6 +345,18 @@ function plhdPicker(doc, d, le, f) {
   if (hdl.length || d.doc.id) return load(hdl);
   var holder = h('div'); safe(call('projectBundle', { id: doc.project_id })).then(function (b) { if (!b) return; var hd = b.docs.filter(function (x) { return x.type === 'HD'; })[0]; holder.appendChild(load(b.lines.filter(function (l) { return hd && l.doc_id === hd.id; }))); });
   return holder;
+}
+
+/* ---- Phụ lục HĐ: thứ tự hiệu lực + lịch sử giá trị HĐ trước / sau mỗi lần điều chỉnh (bản 21) ---- */
+function plhdHistoryCard(doc, sibs) {
+  var on = function (d) { return !d.status || d.status === 'DA_KY'; };
+  var list = sibs.filter(function (d) { return d.type === 'PLHD' && d.parent_id === doc.parent_id && on(d); }).sort(function (a, b) { return String(a.sign_date || a.created_at).localeCompare(String(b.sign_date || b.created_at)) || String(a.created_at).localeCompare(String(b.created_at)); });
+  var pos = list.map(function (d) { return d.id; }).indexOf(doc.id), snaps = Array.isArray(doc.snap) ? doc.snap : [];
+  return h('div', { class: 'card' }, h('h3', null, 'Hiệu lực và lịch sử điều chỉnh'),
+    h('div', null, on(doc) ? 'Thứ tự hiệu lực: ' + (pos + 1) + ' / ' + list.length + ' phụ lục đã ký của HĐ này' : 'Phụ lục đang "' + (doc.status === 'HUY' ? 'Hủy / Thay thế' : 'Nháp') + '" — không tính vào giá trị HĐ.'),
+    h('div', { class: 'mut', style: 'font-size:12px;margin:2px 0 8px' }, 'Phụ lục đã ký áp dụng lần lượt theo ngày ký (cùng ngày: theo thời điểm tạo); phụ lục sau ghi đè số lượng / đơn giá của dòng mà phụ lục trước đã sửa. HĐ gốc không bị ghi đè.'),
+    snaps.length ? h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Lúc lưu', 'Người lưu', 'Ngày ký', 'Giá trị HĐ trước', 'Giá trị HĐ sau', 'Chênh lệch'].map(function (x, i) { return h('th', { class: i >= 3 ? 'r' : '' }, x); }))),
+      h('tbody', null, snaps.slice().reverse().map(function (x) { var dlt = x.after - x.before; return h('tr', null, h('td', null, String(x.at || '').replace('T', ' ').slice(0, 16)), h('td', null, x.by || ''), h('td', null, D(x.sign_date)), h('td', { class: 'r' }, M(x.before)), h('td', { class: 'r' }, M(x.after)), h('td', { class: 'r ' + (dlt < 0 ? 'neg' : '') }, (dlt > 0 ? '+' : '') + M(dlt))); })))) : h('div', { class: 'mut' }, 'Chưa có lần lưu "Đã ký" nào.'));
 }
 
 /* ---- PO lấy dòng hàng từ HĐ (bản 19): hiện SL HĐ hiện hành / đã đưa vào PO khác / còn lại ---- */

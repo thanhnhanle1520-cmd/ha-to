@@ -137,8 +137,9 @@ TABS.docs = function (host, b) {
   if (S.perms.docs.create) { bar.append(h('button', { class: 'pri', disabled: hasHD && !retail, title: hasHD && !retail ? 'Dự án đã có Hợp đồng' : '', onclick: function () { go('doc/new?project=' + pj.id + '&type=HD'); } }, '+ Hợp đồng'), h('button', { onclick: function () { go('doc/new?project=' + pj.id + '&type=PO'); } }, '+ PO'), h('button', { disabled: !hasHD, title: !hasHD ? 'Cần có HĐ trước' : '', onclick: function () { go('doc/new?project=' + pj.id + '&type=PLHD'); } }, '+ PLHD')); }
   host.appendChild(bar); host.appendChild(docsTable(b.docs));
 };
+function plhdTag(r) { return r.type === 'PLHD' && r.status && r.status !== 'DA_KY' ? h('span', { class: 'badge ' + (r.status === 'HUY' ? 'b-bad' : ''), style: 'margin-left:4px' }, r.status === 'HUY' ? 'Hủy' : 'Nháp – chưa tính') : null; }
 function docsTable(rows, showProject) {
-  var cols = [{ k: 'code', label: 'Mã' }, { k: 'type', label: 'Loại', fmt: function (r) { return h('span', { class: 'badge b-info' }, TYPE_LB[r.type]); } }, { k: 'doc_no', label: 'Số văn bản' }];
+  var cols = [{ k: 'code', label: 'Mã' }, { k: 'type', label: 'Loại', fmt: function (r) { return h('span', null, h('span', { class: 'badge b-info' }, TYPE_LB[r.type]), plhdTag(r)); } }, { k: 'doc_no', label: 'Số văn bản' }];
   if (showProject) cols.push({ k: 'project_name', label: 'Dự án', fmt: pjCell }, { k: 'customer_name', label: 'Khách hàng' });
   if (rows.some(function (r) { return r.parent_code && r.type !== 'PO'; }) || rows.filter(function (r) { return r.type === 'HD'; }).length > 1) cols.push({ k: 'parent_code', label: 'Thuộc HĐ', fmt: function (r) { return r.parent_code || ''; } });
   cols.push({ k: 'sign_date', label: 'Ngày ký', fmt: function (r) { return D(r.sign_date); } }, { k: 'value', label: 'Giá trị', cls: 'r', fmt: function (r) { return M(r.value); } });
@@ -414,7 +415,7 @@ function flowCard(b) {
   };
   var it = function (link, a, bb, c, badge2) { return h('div', { class: 'flow-it', onclick: link ? function () { go(link); } : null, style: link ? 'cursor:pointer' : '' }, h('span', { class: 'code' }, a), badge2 || null, h('span', { class: 'mut' }, bb), h('span', { class: 'r', style: 'margin-left:auto' }, c)); };
   var qs = (f.quotes || []).map(function (q) { return it('quote/' + q.id, q.code + (q.version > 1 ? ' v' + q.version : ''), D(q.date), M(q.total), q.converted ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : q.status ? h('span', { class: 'badge' }, q.status) : null); });
-  var ds = (b.docs || []).slice().sort(function (x, y) { return String(x.sign_date || '').localeCompare(String(y.sign_date || '')); }).map(function (d) { return it('doc/' + d.id, d.code, (TL[d.type] || d.type) + (d.doc_no ? ' · ' + d.doc_no : '') + (d.sign_date ? ' · ' + D(d.sign_date) : '') + (d.n_files ? ' · 📎' + d.n_files : ''), M(d.type === 'HD' ? d.current_value : d.value)); });
+  var ds = (b.docs || []).slice().sort(function (x, y) { return String(x.sign_date || '').localeCompare(String(y.sign_date || '')); }).map(function (d) { return it('doc/' + d.id, d.code, (TL[d.type] || d.type) + (d.doc_no ? ' · ' + d.doc_no : '') + (d.sign_date ? ' · ' + D(d.sign_date) : '') + (d.n_files ? ' · 📎' + d.n_files : ''), M(d.type === 'HD' ? d.current_value : d.value), plhdTag(d)); });
   var dl = (f.deliveries || []).map(function (d) { return it('delivery/' + d.id, d.code, D(d.date), M(d.value), h('span', { class: 'badge ' + (STATUS_CLS[d.status] || '') }, STATUS_LB[d.status] || d.status)); });
   var cs = cost ? f.costs.map(function (c) { return it('project/' + b.project.id + '/costs', c.type || 'Chi phí', D(c.date) + (c.payer === 'KHACH' ? ' · khách trả' : '') + (c.note ? ' · ' + c.note : ''), M(c.amount)); }) : [];
   var ps = (f.payments || []).map(function (p) { return it('project/' + b.project.id + '/payments', 'Thu tiền', D(p.date) + (p.note ? ' · ' + p.note : ''), M(p.amount)); });
