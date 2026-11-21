@@ -39,8 +39,8 @@ function perfNote(a, tot, ms, ms0) {
 var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
-var MEMO = {}, READS = { list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
-var WRITES = { projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
+var MEMO = {}, READS = { deliveryBasis: 1, list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
+var WRITES = { syncDocFromQuote: 1, projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -507,14 +507,15 @@ function lineEditor(o) {
             oninput: function (e) { l.vat_line = e.target.value === '' ? '' : num(e.target.value); drawFoot(); if (o.onChange) o.onChange(); } });
           td.appendChild(vi);
         }
-        else if (type === 'rs') { var diff = mode === 'doc' && l.cost_list != null && l.cost_list !== '' && num(l.cost) !== num(l.cost_list); td.appendChild(diff ? h('button', { title: 'Đặt lại giá mua theo bảng giá (' + M(l.cost_list) + ')', style: 'border:none;background:none;color:#d97706', onclick: function () { l.cost = l.cost_list; draw(); if (o.onChange) o.onChange(); } }, '↺') : h('span')); }
-        else if (type === 'ro') td.appendChild(h('span', { style: 'padding:4px 5px;display:block;text-align:' + (k === 'doc_code' ? 'left' : 'right') }, k === 'amount' ? M(amt(l)) : k === 'doc_code' ? (l.doc_code || '—') : k === 'cost_list' ? M(l.cost_list != null && l.cost_list !== '' ? l.cost_list : l.cost) : M(l[k])));
+        else if (type === 'rs') { var diff = mode === 'doc' && num(l.cost) > 0; td.appendChild(diff ? h('button', { title: 'Xóa giá chốt, dùng lại giá bảng giá (' + M(l.cost_list || 0) + ')', style: 'border:none;background:none;color:#d97706', onclick: function () { l.cost = ''; l.cost_src = ''; draw(); if (o.onChange) o.onChange(); } }, '↺') : h('span')); }
+        else if (type === 'ro') td.appendChild(h('span', { style: 'padding:4px 5px;display:block;text-align:' + (k === 'doc_code' ? 'left' : 'right') }, k === 'amount' ? M(amt(l)) : k === 'doc_code' ? (l.doc_code || '—') : k === 'cost_list' ? (num(l.cost) > 0 ? h('span', { class: 'mut', title: 'Đã có giá mua chốt — báo cáo dùng giá chốt' }, '—') : M(l.cost_list != null && l.cost_list !== '' ? l.cost_list : '')) : M(l[k])));
         else if (type === 'src') td.appendChild(h('span', { class: 'badge ' + (l.source === 'QUOTE' ? 'b-info' : 'b-warn'), style: 'margin:4px' }, l.source === 'QUOTE' ? 'Trong BG' : 'Ngoài BG'));
         else {
           var priceLocked = (k === 'price' || k === 'disc_pct' || k === 'cost' || k === 'coef') && !canPrice;
-          var inp = h('input', { type: type === 'n' ? 'number' : 'text', step: 'any', value: l[k] == null ? '' : l[k], disabled: priceLocked, style: k === 'coef' && mode === 'quote' ? (num(l.coef) > 0 && num(l.coef) < 1 ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : '') : k === 'cost' && mode === 'doc' ? (num(l.cost) === 0 ? 'background:#fee2e2' : (l.cost_list != null && l.cost_list !== '' && num(l.cost) !== num(l.cost_list) ? 'background:#fef3c7' : '')) : '',
-            oninput: function (e) { l[k] = type === 'n' ? (e.target.value === '' ? '' : num(e.target.value)) : e.target.value; if (type === 'n') { drawFoot(); var a = tr.querySelector('[data-amt]'); if (a) a.textContent = M(amt(l)); } if (o.onChange) o.onChange(); }, onchange: function () { if (mode === 'quote' && (k === 'cost' || k === 'coef' || k === 'price')) { recalc(l, k); draw(); if (o.onChange) o.onChange(); } else if (k === 'cost' && mode === 'doc') draw(); } });
+          var inp = h('input', { type: type === 'n' ? 'number' : 'text', step: 'any', value: l[k] == null ? '' : l[k], disabled: priceLocked, style: k === 'coef' && mode === 'quote' ? (num(l.coef) > 0 && num(l.coef) < 1 ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : '') : k === 'cost' && mode === 'doc' ? (num(l.cost) === 0 && !num(l.cost_list) ? 'background:#fee2e2' : num(l.cost) > 0 ? 'background:#fef3c7' : '') : '', placeholder: k === 'cost' && mode === 'doc' ? 'chưa chốt' : '',
+            oninput: function (e) { l[k] = type === 'n' ? (e.target.value === '' ? '' : num(e.target.value)) : e.target.value; if (k === 'cost' && mode === 'doc') l.cost_src = ''; if (type === 'n') { drawFoot(); var a = tr.querySelector('[data-amt]'); if (a) a.textContent = M(amt(l)); } if (o.onChange) o.onChange(); }, onchange: function () { if (mode === 'quote' && (k === 'cost' || k === 'coef' || k === 'price')) { recalc(l, k); draw(); if (o.onChange) o.onChange(); } else if (k === 'cost' && mode === 'doc') draw(); } });
           td.appendChild(inp);
+          if (k === 'cost' && mode === 'doc' && o.buy && l.id && o.buy[l.id]) { var bq = o.buy[l.id], same = num(l.cost) === bq.price; td.appendChild(h('div', { class: 'buyref', title: 'Giá mua theo đơn mua: ' + bq.refs, style: 'font-size:11px;line-height:1.2;padding:2px 4px;white-space:normal;color:' + (same ? '#166534' : '#b45309') }, (same ? '✓ ' : '≠ ') + bq.refs.split('; ').map(function (x) { return x.split(' · ')[0]; }).join(', ') + ': ' + M(bq.price))); }
         }
         if (k === 'amount') { td.firstChild.setAttribute('data-amt', '1'); }
         tr.appendChild(td);
@@ -540,7 +541,7 @@ function lineEditor(o) {
     return h('div', { onclick: function () {
       remember(r);
       var qc = o.getCoef ? num(o.getCoef()) : 0, pr = qc > 0 && num(r.cost) > 0 ? rp(r.cost, qc) : r.price, cf = qc > 0 ? qc : (r.coef || '');
-      add({ code: r.code, name: r.name, spec: r.spec || '', coef: cf, model: r.model, brand: r.brand, origin: r.origin, unit: r.unit, price: pr, cost: r.cost, cost_list: r.cost, price_offer: pr, source: mode === 'doc' ? 'EXTRA' : 'QUOTE' });
+      add({ code: r.code, name: r.name, spec: r.spec || '', coef: cf, model: r.model, brand: r.brand, origin: r.origin, unit: r.unit, price: pr, cost: mode === 'doc' ? '' : r.cost, cost_list: r.cost, price_offer: pr, source: mode === 'doc' ? 'EXTRA' : 'QUOTE' });
       dd.style.display = 'none'; q.value = '';
     } }, h('b', null, r.name), h('br'), h('small', null, [r.brand, r.model, r.size, 'ĐVT: ' + r.unit, 'Bán ' + M(r.price) + (r.price ? '' : ' (chưa có giá)') + ' · Mua ' + M(r.cost)].filter(Boolean).join(' · ')));
   }
@@ -578,11 +579,12 @@ function lineEditor(o) {
 /* bộ sửa dòng đơn giản (bảo hành / xuất xưởng) */
 function rowsEditor(cols, rows) {
   var root = h('div'), body = h('tbody');
+  cols.forEach(function (c) { if (c.list) { c._dl = 'dl' + Math.random().toString(36).slice(2, 9); root.appendChild(h('datalist', { id: c._dl }, c.list.map(function (x) { return h('option', { value: x }); }))); } });
   function draw() {
     body.innerHTML = '';
     rows.forEach(function (r, i) {
       var tr = h('tr');
-      cols.forEach(function (c) { tr.appendChild(h('td', null, h('input', { type: c.type || 'text', step: 'any', value: r[c.k] == null ? '' : r[c.k], oninput: function (e) { r[c.k] = c.type === 'number' ? num(e.target.value) : e.target.value; } }))); });
+      cols.forEach(function (c) { var a = { type: c.type || 'text', step: 'any', value: r[c.k] == null ? '' : r[c.k], placeholder: c.ph || '', style: c.w ? 'width:' + c.w + 'px' : '', oninput: function (e) { r[c.k] = c.type === 'number' ? num(e.target.value) : e.target.value; } }; if (c._dl) a.list = c._dl; tr.appendChild(h('td', null, h('input', a))); });
       tr.appendChild(h('td', { class: 'c' }, h('button', { style: 'border:none;background:none;color:#b91c1c', onclick: function () { rows.splice(i, 1); draw(); } }, '✕')));
       body.appendChild(tr);
     });
@@ -591,6 +593,14 @@ function rowsEditor(cols, rows) {
     h('div', { style: 'margin-top:6px' }, h('button', { onclick: function () { rows.push({ qty: 1 }); draw(); } }, '+ Thêm dòng')));
   root.draw = draw; draw();
   return root;
+}
+
+/* Chứng từ kèm theo (HĐ / PO / phiếu giao): chọn từ danh sách hoặc gõ tay */
+var ATT_NAMES = ['Biên bản giao hàng', 'Chứng chỉ xuất xứ hàng hóa (C/O)', 'Giấy kiểm tra chất lượng hàng hóa xuất xưởng (C/Q)', 'Báo cáo thử nghiệm', 'Giấy kiểm định phương tiện phòng cháy và chữa cháy', 'Danh mục hàng hóa (Packing list)', 'Vận đơn (Bill of lading)', 'Cam kết bảo hành'];
+var ATT_FORMS = ['Bản gốc', 'Sao đơn vị nhập khẩu', 'Sao y công chứng', 'Sao y công ty'];
+function attEditor(rows) {
+  return rowsEditor([{ k: 'name', label: 'Tên chứng từ (chọn hoặc gõ)', list: ATT_NAMES, w: 340, ph: 'Chọn trong danh sách hoặc gõ tên khác' }, { k: 'qty', label: 'Số lượng', type: 'number', w: 70 },
+    { k: 'form', label: 'Hình thức bản (chọn hoặc gõ)', list: ATT_FORMS, w: 210, ph: 'VD: Sao y công chứng' }, { k: 'note', label: 'Ghi chú', w: 160 }], rows);
 }
 
 /* ================= Điều hướng ================= */

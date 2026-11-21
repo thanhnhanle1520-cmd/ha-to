@@ -47,7 +47,7 @@ var XlsxWrite = (function () {
         });
         x += '</row>';
       });
-      x += '</sheetData></worksheet>';
+      x += '</sheetData><pageMargins left="1.181" right="0.591" top="0.787" bottom="0.787" header="0.3" footer="0.3"/><pageSetup paperSize="9"' + (s.landscape ? ' orientation="landscape"' : '') + '/></worksheet>';      // A4, lề theo NĐ 30/2020
       fs.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: utf8(x) });
     });
     return zip(fs);

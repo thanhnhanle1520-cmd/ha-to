@@ -3,7 +3,7 @@ var fs = require('fs'), path = require('path'), root = path.join(__dirname, '..'
 var gs = fs.readFileSync(path.join(root, 'Code.gs'), 'utf8'), core = fs.readFileSync(path.join(root, 'Js_core.html'), 'utf8');
 var W = {}, m = core.match(/var WRITES = \{([^}]*)\}/); if (!m) { console.log('FAIL không thấy WRITES'); process.exit(1); }
 m[1].split(',').forEach(function (x) { var k = x.split(':')[0].trim(); if (k) W[k] = 1; });
-var R = {}, mr = core.match(/var READS = \{([^}]*)\}/); if (mr) mr[1].split(',').forEach(function (x) { var k = x.split(':')[0].trim(); if (k) R[k] = 1; });
+var R = {}, mr = core.match(/READS = \{([^}]*)\}/); if (mr) mr[1].split(',').forEach(function (x) { var k = x.split(':')[0].trim(); if (k) R[k] = 1; });
 // tách thân từng ACTIONS.x = function
 var re = /^ACTIONS\.(\w+) = function[^{]*\{/mg, acts = [], a;
 while ((a = re.exec(gs))) acts.push({ name: a[1], start: a.index });

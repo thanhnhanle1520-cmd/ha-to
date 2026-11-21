@@ -128,6 +128,17 @@ PAGES.quotes = function () {
   setTitle('Báo giá', [S.perms.quotes.create ? h('button', { class: 'pri', onclick: function () { pickProject(function (pid) { go('quote/new?project=' + pid); }); } }, '+ Báo giá') : null,]);
   return call('list', { table: 'quotes' }).then(function (rows) { var v = $('#view'); v.innerHTML = ''; v.appendChild(quotesTable(rows, true)); });
 };
+function syncDocModal(qt, docs) {        // Cập nhật PO / HĐ / PL đã chuyển theo báo giá vừa lưu
+  var TL = { HD: 'Hợp đồng', PO: 'PO', PLHD: 'Phụ lục HĐ' }, md;
+  md = modal({ title: 'Cập nhật văn bản theo báo giá ' + qt.code + ' v' + qt.version, body: h('div', null,
+    h('p', null, 'Dòng hàng, đơn giá, VAT của văn bản sẽ được thay theo báo giá đã lưu. Giá mua đã chốt của dòng cùng tên được giữ lại; bản cũ lưu trong lịch sử văn bản.'),
+    h('table', { class: 't' }, h('tbody', null, docs.map(function (x) {
+      return h('tr', null, h('td', null, h('b', null, x.code), ' ', h('span', { class: 'mut' }, TL[x.type] + (x.doc_no ? ' · số ' + x.doc_no : ''))),
+        h('td', null, x.block ? h('span', { class: 'neg' }, 'Không cập nhật được: ' + x.block + ' — hãy lập Phụ lục HĐ') : h('button', { class: 'pri', onclick: function (e) {
+          e.target.disabled = true; safe(call('syncDocFromQuote', { quote_id: qt.id, doc_id: x.id })).then(function (r) { if (r) { md.close(); toast('Đã cập nhật ' + r.doc.code + ' theo báo giá'); go('doc/' + r.doc.id); } else e.target.disabled = false; });
+        } }, 'Cập nhật ' + x.code)));
+    })))) });
+}
 PAGES.quote = function (p, q) {
   var id = p[1], isNew = id === 'new', v = $('#view');
   return (isNew ? Promise.resolve({ quote: { project_id: q.project || '', vat_pct: 10, valid_text: '30 ngày kể từ ngày báo giá', date: today(), note: '', deliver_place: 'Tại chân công trình', pay_method: '100% trước khi giao hàng', status: 'Nháp' }, items: [], versions: [] }) : call('get', { table: 'quotes', id: id })).then(function (d) {
@@ -168,6 +179,7 @@ PAGES.quote = function (p, q) {
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(); } }, 'Lưu'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); } }, 'Phiên bản mới'));
     if (!isNew && S.perms.docs.create) acts.push(h('button', { onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO / Phụ lục HĐ'));
+    if (!isNew && S.perms.docs.edit && canEdit && (d.linked_docs || []).length) acts.push(h('button', { id: 'btnSyncDoc', title: 'Đưa dòng hàng, giá, VAT của báo giá này sang văn bản đã chuyển', onclick: function () { save(function () { syncDocModal(qt, d.linked_docs); }); } }, 'Cập nhật ' + d.linked_docs.map(function (x) { return x.type === 'HD' ? 'HĐ' : x.type === 'PLHD' ? 'PLHD' : 'PO'; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' / ')));
     if (!isNew && S.perms.quotes.edit) acts.push(h('button', { class: 'dng', onclick: function () { quoteDelete(qt, d.versions || []); } }, 'Xóa'));
     setTitle(title, acts);
     if (!isNew && d.versions.length > 1) v.appendChild(h('div', { class: 'bar2' }, h('span', { class: 'mut' }, 'Phiên bản:'), d.versions.map(function (x) { return h('a', { class: 'badge ' + (x.id === qt.id ? 'b-info' : ''), href: '#/quote/' + x.id }, 'v' + x.version); })));
@@ -235,7 +247,7 @@ PAGES.doc = function (p, q) {
     return (rr[0].doc.project_id ? call('list', { table: 'docs', project_id: rr[0].doc.project_id }).catch(function () { return []; }) : Promise.resolve([])).then(function (sib) { rr.push(sib); return rr; });
   }).then(function (rr) {
     var d = rr[0], HDD = rr[1], sibs = rr[2] || [];
-    var doc = d.doc, lines = d.items.map(function (x) { return Object.assign({}, x); }), canEdit = isNew ? S.perms.docs.create : S.perms.docs.edit;
+    var doc = d.doc, lines = d.items.map(function (x) { var o = Object.assign({}, x); if (!(num(o.cost) > 0) || (!o.cost_src && num(o.cost) === num(o.cost_list))) { o.cost = ''; o.cost_src = ''; }     /* dữ liệu cũ: giá chốt trùng bảng giá = chưa chốt (giá vốn không đổi) */ return o; }), canEdit = isNew ? S.perms.docs.create : S.perms.docs.edit;
     var terms = (doc.terms || []).map(function (x) { return Object.assign({}, x); }), attached = (doc.attached || []).map(function (x) { return Object.assign({}, x); });
     v.innerHTML = '';
     var fields = [{ k: 'project_id', label: 'Dự án', req: true, type: 'select', opts: projOpts(doc.project_id), blank: '— chọn —', disabled: !isNew }, { k: 'doc_no', label: doc.type === 'PO' ? 'Số PO' : doc.type === 'HD' ? 'Số hợp đồng' : 'Số PLHD' }, { k: 'sign_date', label: 'Ngày ký', type: 'date' }, { k: 'delivery_date', label: 'Ngày giao dự kiến', type: 'date' }, { k: 'vat_pct', label: 'VAT %', type: 'number' }];
@@ -251,7 +263,7 @@ PAGES.doc = function (p, q) {
     var showParent = function (list, pid) { var n = hdOpts(list).length; return doc.type === 'PLHD' ? n > 0 : doc.type === 'PO' && pjOf(pid).kind === 'LE' && n > 0; };
     if (doc.type === 'PLHD' || doc.type === 'PO') fields.splice(1, 0, { k: 'parent_id', label: doc.type === 'PLHD' ? 'Thuộc HĐ gốc' : 'Thuộc HĐ', type: 'select', opts: hdOpts(sibs), blank: doc.type === 'PLHD' ? '— chọn HĐ gốc —' : '— PO riêng (không thuộc HĐ) —', req: doc.type === 'PLHD' });
     fields.push({ k: 'note', label: 'Ghi chú', type: 'textarea', full: true });
-    var f = form(fields, doc), le = lineEditor({ mode: 'doc', lines: lines, getVat: function () { return f.inputs.vat_pct ? f.inputs.vat_pct.value : 10; } }), hdc = null;
+    var f = form(fields, doc), le = lineEditor({ mode: 'doc', lines: lines, buy: d.buy || {}, getVat: function () { return f.inputs.vat_pct ? f.inputs.vat_pct.value : 10; } }), hdc = null;
     vatSync(f.inputs.vat_pct, le);
     if (f.inputs.parent_id) {
       var pWrap = f.inputs.parent_id.closest('label');
@@ -276,6 +288,7 @@ PAGES.doc = function (p, q) {
       });
     } }, 'Lưu'));
     if (!isNew && doc.type === 'HD') acts.push(exportMenu('hd', doc.id, ['pdf', 'doc']));
+    if (!isNew && S.perms.deliveries.create && (doc.type !== 'PLHD' || doc.status === 'DA_KY')) acts.push(h('button', { id: 'btnDeliver', title: 'Mở phiếu giao mới, điền sẵn hàng còn lại của ' + doc.code, onclick: function () { go('delivery/new?project=' + doc.project_id + '&doc=' + doc.id); } }, 'Tạo phiếu giao'));
     if (!isNew) acts.push(h('button', { onclick: function () { go('project/' + doc.project_id + '/docs'); } }, 'Về dự án'));
     if (!isNew && S.perms.docs.edit) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa văn bản ' + doc.code + '?', function () { safe(call('remove', { table: 'docs', id: doc.id })).then(function (r) { if (r) backToList('docs'); }); }); } }, 'Xóa'));
     setTitle(title, acts);
@@ -302,9 +315,9 @@ PAGES.doc = function (p, q) {
       drawT();
       v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Điều khoản thanh toán (nhiều đợt)'), tb));
     }
-    var at = rowsEditor([{ k: 'name', label: 'Tên chứng từ' }, { k: 'qty', label: 'Số lượng', type: 'number' }], attached);
+    var at = attEditor(attached);
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Chứng từ kèm theo (dùng cho biên bản giao nhận chứng từ)'), at));
-    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, le));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), le));
     if (!canEdit) v.querySelectorAll('input,select,textarea').forEach(function (e) { e.disabled = true; });
     else S.draftCtl = draftWatch({ id: 'doc/' + (isNew ? 'new:' + (q.type || 'PO') + ':' + (q.project || '') : id), label: TYPE_LB[doc.type] + ' ' + (isNew ? 'mới' : doc.code), hash: location.hash, root: v,
       get: function () { return { ext: hdc ? hdc.get() : null, f: f.get(), lines: lines.map(function (x) { return Object.assign({}, x); }), terms: terms.map(function (x) { return Object.assign({}, x); }), attached: attached.map(function (x) { return Object.assign({}, x); }) }; },
@@ -382,7 +395,7 @@ function plhdPicker(doc, d, le, f) {
     var s = sel(lines.map(function (l) { return [l.id, l.name + ' · SL ' + N(l.qty) + ' · ' + M(l.price)]; }), '', null, '— chọn dòng hàng trong HĐ để điều chỉnh —');
     return h('div', { class: 'bar2' }, s, h('button', { onclick: function () {
       var l = lines.filter(function (x) { return x.id === s.value; })[0]; if (!l) return;
-      if (le && le.add) le.add({ vat_line: l.vat != null ? l.vat : '', ref_item_id: l.id, code: l.code, name: l.name, model: l.model, brand: l.brand, origin: l.origin, unit: l.unit, qty: l.qty, price: l.price, price_offer: l.price, cost: l.cost, cost_list: (l.cost_list != null && l.cost_list !== '' ? l.cost_list : l.cost), source: 'EXTRA' });
+      if (le && le.add) le.add({ vat_line: l.vat != null ? l.vat : '', ref_item_id: l.id, code: l.code, name: l.name, model: l.model, brand: l.brand, origin: l.origin, unit: l.unit, qty: l.qty, price: l.price, price_offer: l.price, cost: l.cost_set != null ? (l.cost_set > 0 ? l.cost_set : '') : l.cost, cost_list: (l.cost_list != null && l.cost_list !== '' ? l.cost_list : l.cost), source: 'EXTRA' });
     } }, '+ Điều chỉnh dòng này'), h('span', { class: 'mut' }, 'SL / đơn giá nhập là giá trị mới sau điều chỉnh'));
   };
   if (!d.doc.id && f && f.inputs.parent_id) {               // PLHD mới: lấy dòng của HĐ gốc đang chọn, đổi HĐ thì nạp lại
@@ -443,7 +456,7 @@ function poPicker(doc, le, f) {
           var qv = num(r.qi.value); if (!r.ck.checked || qv <= 0) return;
           var ex = le.lines().filter(function (x) { return x.ref_item_id === r.l.id; })[0];
           if (ex) ex.qty = num(ex.qty) + qv;
-          else le.lines().push({ vat_line: r.l.vat != null ? r.l.vat : '', id: '', ref_item_id: r.l.id, code: r.l.code || '', name: r.l.name, spec: r.l.spec || '', model: r.l.model || '', brand: r.l.brand || '', origin: r.l.origin || '', unit: r.l.unit || '', qty: qv, price: r.l.price, price_offer: r.l.price, cost: r.l.cost, cost_list: r.l.cost_list != null && r.l.cost_list !== '' ? r.l.cost_list : r.l.cost, disc_pct: 0, note: '', source: r.l.source || 'QUOTE' });
+          else le.lines().push({ vat_line: r.l.vat != null ? r.l.vat : '', id: '', ref_item_id: r.l.id, code: r.l.code || '', name: r.l.name, spec: r.l.spec || '', model: r.l.model || '', brand: r.l.brand || '', origin: r.l.origin || '', unit: r.l.unit || '', qty: qv, price: r.l.price, price_offer: r.l.price, cost: r.l.cost_set != null ? (r.l.cost_set > 0 ? r.l.cost_set : '') : r.l.cost, cost_list: r.l.cost_list != null && r.l.cost_list !== '' ? r.l.cost_list : r.l.cost, disc_pct: 0, note: '', source: r.l.source || 'QUOTE' });
           n++;
         });
         if (!n) return toast('Chưa chọn dòng nào', true);
@@ -476,10 +489,22 @@ PAGES.delivery = function (p, q) {
     var codes = {}; v.innerHTML = '';
     var f = form([{ k: 'project_id', label: 'Dự án', req: true, type: 'select', opts: projOpts(dv.project_id), blank: '— chọn —', disabled: true }, { k: 'date', label: 'Ngày giao', type: 'date' }, { k: 'status', label: 'Trạng thái', type: 'select', opts: [['NHAP', 'Nháp'], ['DA_GIAO', 'Đã giao'], ['HUY', 'Hủy']] },
       { k: 'deliverer', label: 'Người giao' }, { k: 'place', label: 'Địa điểm giao' }, { k: 'receiver', label: 'Người nhận' },
+      { k: 'basis_type', label: 'Căn cứ theo', type: 'select', opts: [['PO', 'PO'], ['HD', 'HĐ'], ['PLHD', 'PLHD'], ['HD_PLHD', 'HĐ + PLHD']], blank: '— tự động theo văn bản —' }, { k: 'basis_no', label: 'Số PO / HĐ / PLHD (gõ tay, in trên biên bản)' },
       { k: 'copies', label: 'Biên bản lập thành (bản)', type: 'number' }, { k: 'copies_a', label: 'Bên A giữ (bản)', type: 'number' }, { k: 'copies_b', label: 'Bên B giữ (bản)', type: 'number' }, { k: 'note', label: 'Ghi chú', type: 'textarea', full: true }], dv);
+    var BLB = { PO: 'PO', HD: 'HĐ', PLHD: 'PLHD', HD_PLHD: 'HĐ + PLHD' }, bHint = h('div', { class: 'mut', id: 'basisHint', style: 'margin-top:4px' }), autoB = d.basis_auto || null;
+    function drawBasis() {
+      var t = f.inputs.basis_type.value || (autoB && autoB.type), no = f.inputs.basis_no.value.trim() || (autoB && autoB.no);
+      f.inputs.basis_no.placeholder = autoB && autoB.no ? autoB.no : 'Số của khách, VD: 4500123456';
+      bHint.textContent = 'In trên biên bản: "Căn cứ theo ' + (BLB[t] || 'Đơn đặt hàng / HĐ') + ' số: ' + (no || '……') + '"' + (!no ? ' — chưa có số, hãy gõ số PO / HĐ của khách.' : '');
+    }
+    function refreshBasis() { safe(call('deliveryBasis', { items: lines.map(function (l) { return { doc_id: l.doc_id || '' }; }) })).then(function (r) { if (r) { autoB = r.basis_auto; docAtt = r.doc_attached || []; drawBasis(); } }); }
+    f.inputs.basis_type.addEventListener('change', drawBasis); f.inputs.basis_no.addEventListener('input', drawBasis);
+    f.inputs.basis_no.parentNode.appendChild(bHint);
+    var att = (dv.attached || []).map(function (x) { return Object.assign({}, x); }), docAtt = d.doc_attached || [], ate = attEditor(att);
     var le = lineEditor({ mode: 'delivery', lines: lines });
+    var r0 = le.redraw; le.redraw = function () { r0.apply(le, arguments); refreshBasis(); };
     function save(force) {
-      var rec = Object.assign({}, dv, f.get());
+      var rec = Object.assign({}, dv, f.get(), { attached: att });
       return safe(call('save', { table: 'deliveries', rec: rec, items: lines, force: !!force })).then(function (r) {
         if (!r) return;
         if (r.needConfirm) return modal({ title: 'Cảnh báo khi giao hàng', body: h('div', null, h('p', null, 'Một số dòng vượt khối lượng còn lại hoặc vượt hàng đã về:'), h('ul', null, r.warnings.map(function (w) { return h('li', null, w); })), h('p', null, 'Vẫn lưu phiếu?')), buttons: [{ label: 'Vẫn lưu', cls: 'pri', fn: function (c) { c(); save(true); } }], closeLabel: 'Quay lại sửa' });
@@ -496,6 +521,10 @@ PAGES.delivery = function (p, q) {
     v.appendChild(pick);
     var filesBox = S.perms.files.view ? refFilesCard(dv.project_id, 'delivery', isNew ? '' : dv.id, 'BBGH') : null;
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Hàng trong phiếu giao'), le, h('div', { class: 'mut', style: 'margin-top:6px' }, 'Hàng ngoài văn bản: tìm trong bảng giá ở ô phía trên hoặc thêm dòng trống (sẽ không trừ vào khối lượng văn bản).')));
+    v.appendChild(h('div', { class: 'card', id: 'attCard' }, h('h3', null, 'Chứng từ kèm theo (biên bản giao nhận chứng từ của phiếu này)'),
+      h('div', { class: 'mut', style: 'margin-bottom:6px' }, 'Để trống thì in theo danh sách khai báo trong HĐ / PO. Mỗi đợt giao có thể bàn giao chứng từ khác nhau.'), ate,
+      h('div', { style: 'margin-top:6px' }, h('button', { onclick: function () { if (!docAtt.length) return toast('HĐ / PO của các dòng giao chưa khai báo chứng từ kèm theo.', true); att.length = 0; docAtt.forEach(function (x) { att.push(Object.assign({}, x)); }); ate.draw(); } }, 'Lấy theo HĐ / PO'))));
+    drawBasis();
     if (filesBox) v.appendChild(filesBox);
     safe(call('deliverable', { project_id: dv.project_id, exclude_delivery_id: dv.id || null })).then(function (rows) {
       pick.lastChild.remove(); if (!rows) return;
@@ -514,6 +543,11 @@ PAGES.delivery = function (p, q) {
       }
       pick.append(h('div', { class: 'bar2' }, s), host);
       if (!rows.length) pick.appendChild(h('div', { class: 'mut' }, 'Dự án chưa có HĐ / PO / Phụ lục HĐ. Chuyển báo giá thành văn bản trước, hoặc nhập hàng ngoài văn bản bên dưới.'));
+      if (isNew && q.doc && docsMap[q.doc] && !lines.length) {       // mở từ nút "Tạo phiếu giao" của PO / HĐ: điền sẵn hàng còn lại
+        s.value = q.doc; drawRows();
+        rows.forEach(function (r) { if (r.doc_id === q.doc && r.remaining > 0) lines.push({ id: '', doc_id: r.doc_id, doc_item_id: r.doc_item_id, doc_code: r.doc_code, code: r.code, name: r.name, model: r.model, unit: r.unit, qty: r.remaining, note: '' }); });
+        if (!lines.length) toast('Văn bản này đã giao hết hàng.', true);
+      }
       lines.forEach(function (l) { if (!l.doc_code && l.doc_id && docsMap[l.doc_id]) l.doc_code = docsMap[l.doc_id]; }); le.redraw();
     });
     if (!canEdit) v.querySelectorAll('input,select,textarea').forEach(function (e) { e.disabled = true; });
@@ -524,6 +558,18 @@ PAGES.delivery = function (p, q) {
 };
 
 
+/* Giá mua chốt theo đơn mua: đơn mua "Đã đặt" tự điền dòng chưa chốt; dòng đã chốt tay khác giá đơn mua → nút áp giá */
+function buyFillBar(buy, lines, le, canEdit) {
+  var n = Object.keys(buy).length; if (!n) return null;
+  var diff = function () { return lines.filter(function (l) { var b = buy[l.id]; return b && num(l.cost) !== b.price; }); };
+  var info = h('span', { class: 'mut', id: 'buyInfo' }), btn = h('button', { id: 'btnBuyFill', onclick: function () {
+    var ds = diff(); if (!ds.length) return toast('Giá chốt đã khớp giá đơn mua.');
+    confirmBox('Áp giá từ đơn mua cho ' + ds.length + ' dòng đang có giá chốt khác? (Bấm Lưu để ghi)', function () { ds.forEach(function (l) { l.cost = buy[l.id].price; l.cost_src = buy[l.id].pids; }); le.redraw(); upd(); });
+  } }, 'Lấy giá từ đơn mua');
+  function upd() { var k = diff().length; info.textContent = n + ' dòng đã có đơn mua' + (k ? ' · ' + k + ' dòng giá chốt khác giá đơn mua' : ' · giá chốt khớp đơn mua'); btn.style.display = k && canEdit ? '' : 'none'; }
+  upd();
+  return h('div', { class: 'bar2', style: 'margin-bottom:6px' }, btn, info);
+}
 /* ---- Tệp đính kèm của HĐ / PO / PLHD (hồ sơ scan) — lưu Drive: Năm / Khách hàng / Dự án / Mã văn bản ---- */
 function docFilesCard(doc, isNew, pending) {
   var card = h('div', { class: 'card' }), list = h('div'), st = h('span', { class: 'mut' });

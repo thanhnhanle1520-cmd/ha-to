@@ -138,7 +138,7 @@ PAGES.purchase = function (p, q) {
       var rec = Object.assign({ id: isNew ? '' : pu.id }, f.get());
       safe(call('purchaseSave', { rec: rec, items: lines.map(function (l) { return { id: l._saved ? l.id : '', project_id: l.project_id, doc_id: l.doc_id, doc_item_id: l.doc_item_id, code: l.code, name: l.name, model: l.model, brand: l.brand, unit: l.unit, spec: l.spec, qty: l.qty, price: l.price, note: l.note, vat_line: l.vat_line == null ? '' : l.vat_line }; }) })).then(function (r) {
         if (!r) return;
-        toast('Đã lưu ' + r.purchase.code);
+        toast('Đã lưu ' + r.purchase.code + (r.cost_filled ? ' · đã điền giá mua chốt cho ' + r.cost_filled + ' dòng HĐ / PO' : ''));
         var done = 0, next = function () { if (done++) return; if (isNew) go('purchase/' + r.purchase.id); else route(); };
         if (r.price_diffs && r.price_diffs.length && S.perms.pricelist.edit) {
           modal({ title: 'Giá mua thực khác bảng giá', body: h('div', null, h('p', null, 'Cập nhật giá mua vào Bảng giá cho các mã sau? (lưu lịch sử giá)'),
@@ -190,7 +190,7 @@ function receiptModal(pu, d, rc) {
 TABS.purchases = function (host, b) {
   var pj = b.project, rows = [];
   (b.flow && b.flow.purchases || []).forEach(function (pu) { pu.lines.forEach(function (l) { rows.push(Object.assign({ pu: pu }, l)); }); });
-  var plan = {}; (b.lines || []).forEach(function (l) { plan[l.id] = l.cost; });
+  var plan = {}; (b.lines || []).forEach(function (l) { plan[l.id] = l.cost_plan != null ? l.cost_plan : l.cost; });
   if (S.perms.purchases.create) host.appendChild(h('div', { class: 'bar2' }, h('button', { class: 'pri', onclick: function () { go('purchase/new?project=' + pj.id); } }, '+ Đơn mua cho dự án này'), h('span', { class: 'mut' }, 'Có thể gom hàng của nhiều dự án trong cùng 1 đơn ở trang Mua hàng.')));
   host.appendChild(table({ rows: rows, empty: 'Chưa có đơn mua nào cho dự án này.', search: function (r) { return [r.pu.code, r.pu.supplier_name, r.name, r.model].join(' '); },
     cols: [{ k: 'code', label: 'Đơn mua', val: function (r) { return r.pu.code; }, fmt: function (r) { return h('span', { class: 'code' }, r.pu.code); } }, { k: 'sup', label: 'Nhà cung cấp', val: function (r) { return r.pu.supplier_name; }, fmt: function (r) { return r.pu.supplier_name; } },
