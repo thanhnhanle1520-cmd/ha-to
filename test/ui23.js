@@ -64,8 +64,11 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E('reloadLookups()'); await E(`MEMO={};location.hash='#/config'`); await sleep(1500);
   const nb0 = (await E(`HatoStore.listBackups().then(x=>x.length)`));
   await E(`[...document.querySelectorAll('#acts button')].find(b=>/Xóa dữ liệu/.test(b.textContent)).click()`); await sleep(1200);
-  const ck = await E(`[...document.querySelectorAll('.ov input[type=checkbox]')].map(c=>[c.checked,c.disabled])`);
-  T('mặc định: xóa dự án, mua hàng, khách, NCC, công việc; giữ bảng giá + cấu hình; nhóm phụ thuộc bị khóa', JSON.stringify(ck.map(x => x[0])) === JSON.stringify([true, true, true, true, true, false, false]) && ck[0][1] && ck[1][1], ck);
+  const ck = await E(`[...document.querySelectorAll('.ov input[type=checkbox]:not(#delTrash)')].map(c=>[c.checked,c.disabled])`);
+  T('mặc định: chưa tick nhóm nào (đang dùng chính thức, tránh xóa nhầm)', ck.every(x => !x[0]), ck);
+  await E(`(()=>{const c=[...document.querySelectorAll('.ov input[type=checkbox]:not(#delTrash)')];[2,3,4].forEach(i=>{c[i].checked=true;c[i].dispatchEvent(new Event('change'))})})()`); await sleep(300);
+  const ck2 = await E(`[...document.querySelectorAll('.ov input[type=checkbox]:not(#delTrash)')].map(c=>[c.checked,c.disabled])`);
+  T('tick khách hàng, NCC, công việc → dự án + mua hàng bị kéo theo và khóa', JSON.stringify(ck2.map(x => x[0])) === JSON.stringify([true, true, true, true, true, false, false]) && ck2[0][1] && ck2[1][1], ck2);
   await pg.shot('/tmp/s23_reset.png');
   await E(`[...document.querySelectorAll('.ov button')].find(b=>b.textContent==='Sao lưu rồi xóa').click()`); await sleep(600);
   T('chưa gõ XOA → không chạy', await E(`!!document.querySelector('.ov')`) && (await A('dataCounts', {})).data.customers.rows > 0);

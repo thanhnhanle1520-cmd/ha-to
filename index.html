@@ -242,8 +242,8 @@ function perfNote(a, tot, ms, ms0) {
 var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
-var MEMO = {}, READS = { deliveryBasis: 1, list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
-var WRITES = { syncDocFromQuote: 1, projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
+var MEMO = {}, READS = { dataRows: 1, deletePreview: 1, dupCodes: 1, deliveryBasis: 1, list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
+var WRITES = { deleteRecords: 1, renumberCode: 1, syncDocFromQuote: 1, projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -2270,7 +2270,7 @@ function imgBox(name, label, maxW, outType) {
   return h('div', { style: 'margin-bottom:12px' }, h('b', null, label), pv, tools);
 }
 PAGES.config = function () {
-  setTitle('Cấu hình hệ thống', [S.perms.config.edit ? h('button', { class: 'dng', onclick: function () { resetDataModal(); } }, 'Xóa dữ liệu…') : null]);
+  setTitle('Cấu hình hệ thống', [S.perms.config.edit ? h('button', { id: 'btnDupCodes', onclick: function () { dupCodesModal(); } }, 'Kiểm tra trùng mã') : null, S.perms.config.edit ? h('button', { class: 'dng', onclick: function () { resetDataModal(); } }, 'Xóa dữ liệu…') : null]);
   return call('getConfig').then(function (d) {
     var v = $('#view'), cfg = d.cfg, ed = S.perms.config.edit; v.innerHTML = '';
     var ff = form([{ k: 'company_name', label: 'Tên công ty', full: true }, { k: 'tax_code', label: 'MST' }, { k: 'address', label: 'Địa chỉ', full: true }, { k: 'phone', label: 'Điện thoại' }, { k: 'hotline', label: 'Hotline' }, { k: 'email', label: 'Email' }, { k: 'website', label: 'Website' },
@@ -3158,48 +3158,108 @@ function resetDataModal() {
   if (!S.perms.config || !S.perms.config.edit) return toast('Chỉ quản trị mới xóa được dữ liệu', true);
   safe(call('dataCounts', {})).then(function (cn) {
     if (!cn) return;
-    var defs = [['projects', 1], ['purchases', 1], ['customers', 1], ['suppliers', 1], ['tasks', 1], ['pricelist', 0], ['config', 0]], cks = {};
-    var list = h('div', { style: 'display:grid;gap:6px' });
+    var defs = [['projects', 0], ['purchases', 0], ['customers', 0], ['suppliers', 0], ['tasks', 0], ['pricelist', 0], ['config', 0]], cks = {}, pick = {}, PICKABLE = { projects: 1, purchases: 1, customers: 1, suppliers: 1, tasks: 1 };
+    var list = h('div', { style: 'display:grid;gap:6px' }), prev = h('div', { id: 'delPreview', style: 'margin:8px 0;font-size:13px;color:#b91c1c' });
     defs.forEach(function (d) {
       var c = cn[d[0]], ck = h('input', { type: 'checkbox', checked: !!d[1] }); cks[d[0]] = ck;
-      ck.onchange = deps;
-      list.appendChild(h('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px' }, ck,
-        h('div', null, h('div', null, c.label, ' ', h('b', null, '(' + c.rows + ' dòng)')), c.detail ? h('div', { class: 'mut', style: 'font-size:12px' }, c.detail) : null, h('div', { class: 'mut dep', style: 'font-size:12px;color:#b45309' }))));
+      ck.onchange = function () { if (ck.checked && pick[d[0]]) { pick[d[0]].ids = {}; pick[d[0]].redraw(); } deps(); };
+      var box = h('div', { class: 'pickbox', style: 'display:none;margin-top:6px' }), cnt = h('span', { class: 'mut', style: 'font-size:12px' });
+      var tog = PICKABLE[d[0]] && c.rows ? h('a', { href: 'javascript:void 0', class: 'picktog', 'data-g': d[0], style: 'font-size:12px;margin-left:8px', onclick: function () { openPick(d[0], box, tog, cnt); } }, 'Chọn từng dòng ▸') : null;
+      list.appendChild(h('div', { style: 'padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px' },
+        h('label', { style: 'display:flex;gap:8px;align-items:flex-start' }, ck,
+          h('div', null, h('div', null, c.label, ' ', h('b', null, '(' + c.rows + ' dòng)'), tog, ' ', cnt), c.detail ? h('div', { class: 'mut', style: 'font-size:12px' }, c.detail) : null, h('div', { class: 'mut dep', style: 'font-size:12px;color:#b45309' }))), box));
     });
+    function openPick(g, box, tog, cnt) {        // danh sách từng dòng của nhóm: tick dòng nào xóa dòng đó (kèm chứng từ con)
+      if (box.style.display !== 'none') { box.style.display = 'none'; tog.textContent = 'Chọn từng dòng ▸'; return; }
+      box.style.display = ''; tog.textContent = 'Thu gọn ▾';
+      if (pick[g]) return;
+      box.appendChild(h('div', { class: 'mut' }, 'Đang tải…'));
+      safe(call('dataRows', { group: g })).then(function (rows) {
+        box.innerHTML = ''; if (!rows) return;
+        var P = pick[g] = { ids: {}, rows: rows }, q = h('input', { type: 'search', placeholder: 'Tìm mã, tên…', style: 'width:220px' }), tb = h('tbody'), all = h('input', { type: 'checkbox', title: 'Chọn tất cả dòng đang hiện' });
+        var NL = { quotes: 'BG', docs: 'HĐ/PO', deliveries: 'giao', payments: 'thu', files: 'tệp', projects: 'dự án', purchases: 'đơn mua', lines: 'dòng' };
+        function vis() { var t = strip(q.value); return rows.filter(function (r) { return !t || strip([r.code, r.name, r.sub].join(' ')).indexOf(t) >= 0; }); }
+        function draw() {
+          tb.innerHTML = ''; var vs = vis();
+          vs.forEach(function (r) {
+            var c = h('input', { type: 'checkbox', checked: !!P.ids[r.id], onchange: function () { if (c.checked) P.ids[r.id] = 1; else delete P.ids[r.id]; changed(); } });
+            tb.appendChild(h('tr', null, h('td', { class: 'c' }, c), h('td', null, h('b', null, r.code || ''), ' ', r.name, r.sub ? h('div', { class: 'mut', style: 'font-size:12px' }, r.sub) : null), h('td', null, D(r.date)),
+              h('td', { class: 'mut', style: 'font-size:12px' }, Object.keys(r.n || {}).filter(function (k) { return r.n[k]; }).map(function (k) { return r.n[k] + ' ' + (NL[k] || k); }).join(' · '))));
+          });
+          if (!vs.length) tb.appendChild(h('tr', null, h('td', { colspan: 4, class: 'mut' }, 'Không có dòng phù hợp.')));
+          all.checked = vs.length > 0 && vs.every(function (r) { return P.ids[r.id]; });
+        }
+        P.redraw = function () { draw(); changed(); };
+        all.onchange = function () { vis().forEach(function (r) { if (all.checked) P.ids[r.id] = 1; else delete P.ids[r.id]; }); draw(); changed(); };
+        q.oninput = draw;
+        box.append(h('div', { class: 'bar2' }, q, h('label', { style: 'display:flex;gap:4px;align-items:center;font-size:13px' }, all, 'Chọn tất cả')),
+          h('div', { class: 'tw', style: 'max-height:240px;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, h('th'), h('th', null, 'Dòng'), h('th', null, 'Ngày'), h('th', null, 'Kèm theo'))), tb)));
+        draw();
+        function changed() { var n = Object.keys(P.ids).length; cnt.textContent = n ? '· đã chọn ' + n + ' dòng' : ''; if (n && cks[g].checked) { cks[g].checked = false; deps(); } preview(); }
+      });
+    }
+    var pvTimer = null;
+    function sel() { return Object.keys(pick).filter(function (g) { return !cks[g].checked && Object.keys(pick[g].ids).length; }).map(function (g) { return { group: g, ids: Object.keys(pick[g].ids) }; }); }
+    function preview() { clearTimeout(pvTimer); pvTimer = setTimeout(function () { var s = sel(); if (!s.length) { prev.textContent = ''; return; } call('deletePreview', { sel: s }).then(function (r) { prev.textContent = r && r.text ? 'Xóa chọn lọc sẽ xóa: ' + r.text : ''; }, function (e) { prev.textContent = 'Không xóa được: ' + ((e && e.message) || e); }); }, 250); }
     function deps() {   // nhóm phụ thuộc: khách → dự án → đơn mua; NCC → đơn mua
       if (cks.customers.checked) cks.projects.checked = true;
       if (cks.projects.checked || cks.suppliers.checked) cks.purchases.checked = true;
       cks.projects.disabled = cks.customers.checked; cks.purchases.disabled = cks.projects.checked || cks.suppliers.checked;
-      Object.keys(cks).forEach(function (k) { var n = cks[k].parentNode.querySelector('.dep'); n.textContent = (k === 'projects' && cks.customers.checked) ? 'Bắt buộc xóa vì đã chọn xóa khách hàng' : (k === 'purchases' && cks.purchases.disabled) ? 'Bắt buộc xóa vì đơn mua gắn dự án / nhà cung cấp' : ''; });
+      Object.keys(cks).forEach(function (k) { var n = cks[k].closest('div').querySelector('.dep'); n.textContent = (k === 'projects' && cks.customers.checked) ? 'Bắt buộc xóa vì đã chọn xóa khách hàng' : (k === 'purchases' && cks.purchases.disabled) ? 'Bắt buộc xóa vì dòng đơn mua gắn với dự án / nhà cung cấp' : ''; });
+      preview();
     }
     deps();
+    var trash = h('input', { type: 'checkbox', id: 'delTrash' });
     var inp = h('input', { type: 'text', placeholder: 'Gõ XOA để xác nhận', style: 'width:200px;text-transform:uppercase' }), st = h('div', { class: 'mut', style: 'margin-top:6px' });
     var body = h('div', null,
-      h('div', { class: 'card', style: 'background:#fef2f2;border-color:#fca5a5;margin-bottom:10px' }, h('b', null, 'Xóa vĩnh viễn trên Drive. '), 'App tự sao lưu toàn bộ dữ liệu lên Drive (thư mục "HA TO / Sao lưu") trước khi xóa — xóa nhầm thì vào menu ☁ → Khôi phục. Số chứng từ của nhóm đã xóa bắt đầu lại từ 001.'),
-      list,
-      h('div', { class: 'mut', style: 'font-size:12px;margin:8px 0' }, 'Tệp đính kèm: chỉ xóa danh sách trong app; file gốc vẫn nằm trong thư mục Drive "HA TO", tự xóa nếu muốn. Tài khoản đăng nhập không bị xóa.'),
+      h('div', { class: 'card', style: 'background:#fef2f2;border-color:#fca5a5;margin-bottom:10px' }, h('b', null, 'Xóa vĩnh viễn trên Drive. '), 'App tự sao lưu toàn bộ dữ liệu lên Drive (thư mục "HA TO / Sao lưu") trước khi xóa — xóa nhầm thì vào menu ☁ → Khôi phục. Tick cả nhóm: số chứng từ của nhóm bắt đầu lại từ 001. Chọn từng dòng: xóa dòng đó kèm mọi chứng từ con, số chứng từ không đặt lại (không cấp trùng mã).'),
+      list, prev,
+      h('label', { style: 'display:flex;gap:6px;align-items:center;margin:8px 0' }, trash, 'Xóa luôn tệp đính kèm trên Drive của phần bị xóa (bỏ vào thùng rác Google Drive, khôi phục được trong 30 ngày)'),
+      h('div', { class: 'mut', style: 'font-size:12px;margin:0 0 8px' }, 'Không tick thì file gốc vẫn nằm trong thư mục Drive "HA TO". Thư mục trống trên Drive không tự xóa. Tài khoản đăng nhập không bị xóa.'),
       h('label', null, 'Xác nhận: ', inp), st);
-    modal({ title: 'Xóa dữ liệu để dùng chính thức', wide: true, body: body, buttons: [{ label: 'Sao lưu rồi xóa', cls: 'dng', fn: function (close, btnEl) {
-      var groups = Object.keys(cks).filter(function (k) { return cks[k].checked; });
-      if (!groups.length) return toast('Chưa chọn nhóm nào', true);
+    modal({ title: 'Xóa dữ liệu', wide: true, body: body, buttons: [{ label: 'Sao lưu rồi xóa', cls: 'dng', fn: function (close, btnEl) {
+      var groups = Object.keys(cks).filter(function (k) { return cks[k].checked; }), parts = sel();
+      if (!groups.length && !parts.length) return toast('Chưa chọn nhóm hoặc dòng nào', true);
       if (inp.value.trim().toUpperCase() !== 'XOA') { inp.focus(); return toast('Gõ chữ XOA để xác nhận', true); }
-      var stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
+      var stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-'), msg = [];
       st.textContent = 'Đang sao lưu lên Drive…';
       var bk = window.HatoStore && HatoStore.backupNow ? HatoStore.backupNow('HA TO trước khi xóa dữ liệu ' + stamp + '.json') : Promise.reject(new Error('Bản này không có sao lưu tự động — hãy sao lưu trước bằng tay.'));
       bk.then(function () {
         st.textContent = 'Đã sao lưu. Đang xóa…';
-        return call('resetData', { groups: groups, confirm: 'XOA' });
-      }).then(function (r) {
+        return parts.length ? call('deleteRecords', { sel: parts, confirm: 'XOA', trash_files: trash.checked }).then(function (r) { msg.push(r.summary.text); if (r.trashed) msg.push(r.trashed + ' tệp vào thùng rác Drive'); }) : null;
+      }).then(function () {
+        return groups.length ? call('resetData', { groups: groups, confirm: 'XOA', trash_files: trash.checked }).then(function (r) { msg.push(r.groups.length + ' nhóm dữ liệu'); if (r.trashed) msg.push(r.trashed + ' tệp vào thùng rác Drive'); }) : null;
+      }).then(function () {
         try { localStorage.removeItem(DR.key()); localStorage.removeItem(CACHE_KEY); } catch (e) { }
         MEMO = {}; S.ver = null; DR.badge();
         st.textContent = 'Đã xóa. Đang đồng bộ lên Drive…';
-        return (window.HatoStore && HatoStore.syncNow ? Promise.resolve(HatoStore.syncNow()).catch(function () { }) : Promise.resolve()).then(function () { return r; });
-      }).then(function (r) {
-        close(); reloadLookups(); toast('Đã xóa ' + r.groups.length + ' nhóm dữ liệu. Sẵn sàng dùng chính thức.'); go(S.perms.dashboard.view ? 'dashboard' : 'projects'); route();
+        return window.HatoStore && HatoStore.syncNow ? Promise.resolve(HatoStore.syncNow()).catch(function () { }) : null;
+      }).then(function () {
+        close(); reloadLookups(); toast('Đã xóa: ' + msg.join(' · ')); go(S.perms.dashboard.view ? 'dashboard' : 'projects'); route();
       }, function (e) { st.textContent = ''; toast('Không xóa: ' + ((e && e.message) || e), true); });
     } }] });
   });
 }
+/* Kiểm tra trùng mã chứng từ: liệt kê mã bị trùng, cấp mã mới cho dòng chọn */
+function dupCodesModal() {
+  safe(call('dupCodes', {})).then(function (rows) {
+    if (!rows) return;
+    var md, body = h('div', { id: 'dupBox' });
+    if (!rows.length) body.appendChild(h('p', null, '✓ Không có mã nào bị trùng.'));
+    else {
+      body.appendChild(h('p', { class: 'mut' }, 'Các mã đang dùng cho nhiều dòng. Bấm "Cấp mã mới" ở dòng cần đổi (thường là dòng mới tạo sau). Báo giá: đổi mã cho mọi phiên bản của báo giá đó.'));
+      rows.forEach(function (g) {
+        body.appendChild(h('div', { class: 'card', style: 'padding:8px;margin:6px 0' }, h('b', null, g.label + ' ' + g.code), ' ', h('span', { class: 'mut' }, '(' + g.rows.length + ' dòng)'),
+          h('table', { class: 't', style: 'margin-top:4px' }, h('tbody', null, g.rows.map(function (r) {
+            return h('tr', null, h('td', null, r.link ? h('a', { href: '#/' + r.link, onclick: function () { md.close(); } }, r.name || r.id) : (r.name || r.id)), h('td', null, D(r.date)),
+              h('td', { class: 'r' }, h('button', { onclick: function (e) { e.target.disabled = true; safe(call('renumberCode', { table: g.table, id: r.id })).then(function (x) { if (x) { toast('Đã đổi ' + x.old + ' → ' + x.code); md.close(); reloadLookups(); dupCodesModal(); } else e.target.disabled = false; }); } }, 'Cấp mã mới')));
+          })))));
+      });
+    }
+    md = modal({ title: 'Kiểm tra trùng mã', wide: true, body: body });
+  });
+}
+
 </script>
 
 <script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>

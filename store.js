@@ -8,7 +8,10 @@
   var Q = new URLSearchParams(location.search), LOCAL = Q.get('local') === '1';
   var T0 = (window.performance && performance.now) ? performance.now() : 0, PERF = { ready: 0, from: '', syncs: [] };     // đo tốc độ thật trên máy người dùng
   var SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
-  var ROOT_NAME = 'HA TO', DATA_NAME = 'data', BACKUP_NAME = 'Sao lưu';
+  /* Bản thử (đường dẫn có chữ "test", vd /ha-to-test/): bộ nhớ trình duyệt + thư mục Drive riêng — không bao giờ chạm dữ liệu thật */
+  function nsOf(path) { return /(^|\/)[^\/]*test[^\/]*\//i.test(String(path || '')) ? '_test' : ''; }
+  var NS = nsOf(location.pathname); window.__hatoNS = NS; window.__hatoNsOf = nsOf;
+  var ROOT_NAME = NS ? 'HA TO TEST' : 'HA TO', DATA_NAME = 'data', BACKUP_NAME = 'Sao lưu', DBN = (LOCAL ? 'hato_local' : 'hato_app') + NS;
   var CLIENT_ID = (window.HATO_CLIENT_ID || '') || localStorage.getItem('hato_client_id') || '';
   var env = GasShim.create({ email: localStorage.getItem('hato_email') || '' }), wb = env.wb;
   Object.keys(env.globals).forEach(function (k) { window[k] = env.globals[k]; });
@@ -22,7 +25,7 @@
   /* ---------- IndexedDB: bản sao dữ liệu trong máy (mở app tức thì, dùng được khi mất mạng) ---------- */
   var IDB = (function () {
     var dbp = null;
-    function open() { if (dbp) return dbp; dbp = new Promise(function (res, rej) { var r = indexedDB.open(LOCAL ? 'hato_local' : 'hato_app', 1); r.onupgradeneeded = function () { r.result.createObjectStore('kv'); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }); return dbp; }
+    function open() { if (dbp) return dbp; dbp = new Promise(function (res, rej) { var r = indexedDB.open(DBN, 1); r.onupgradeneeded = function () { r.result.createObjectStore('kv'); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }); return dbp; }
     function tx(mode, fn) { return open().then(function (db) { return new Promise(function (res, rej) { var t = db.transaction('kv', mode), s = t.objectStore('kv'), out = fn(s); t.oncomplete = function () { res(out && out.result !== undefined ? out.result : undefined); }; t.onerror = function () { rej(t.error); }; }); }); }
     return {
       get: function (k) { return tx('readonly', function (s) { return s.get(k); }); },
@@ -199,6 +202,7 @@
   function checkPayload(n, p) {
     if (!p || typeof p !== 'object') return 'không phải JSON hợp lệ';
     if (n === '_props') return (p.props && typeof p.props === 'object') ? '' : 'thiếu phần props';
+    if (n === TOMB) return (p.tomb && typeof p.tomb === 'object') ? '' : 'thiếu danh sách đã xóa';
     if (!Array.isArray(p.rows)) return 'thiếu danh sách dòng';
     for (var i = 0; i < p.rows.length; i++) if (!Array.isArray(p.rows[i])) return 'dòng ' + (i + 1) + ' sai cấu trúc';
     if (p.rows.length && !(p.rows[0] || []).length) return 'mất dòng tiêu đề';
@@ -213,11 +217,31 @@
   /* ---------- Lưu / nạp dữ liệu ---------- */
   var FILE = function (n) { return n + '.json'; };
   var LOGT = { AUDIT: 1, ERRLOG: 1 };
-  function sheetPayload(n) { return n === '_props' ? { props: wb.props } : { rows: wb.sheets[n].exportRows() }; }
-  function applyPayload(n, p) { if (n === '_props') { wb.props = p.props || {}; return; } var s = wb.sheets[n]; if (!s) { wb.addSheet(n, p.rows || []); return; } s.g = p.rows || []; s.max = Math.max(1000, s.g.length + 200); }
+  /* Ghi nhớ dòng đã xóa (tệp _deleted.json trên Drive, gộp từ mọi thiết bị): máy / tab còn dữ liệu cũ không làm dòng đã xóa sống lại */
+  var TOMB_T = { PROJECTS: 1, QUOTES: 1, QUOTE_ITEMS: 1, DOCS: 1, DOC_ITEMS: 1, DELIVERIES: 1, DELIVERY_ITEMS: 1, COSTS: 1, ADVANCES: 1, PAYMENTS: 1, WARRANTIES: 1, CERTS: 1, FILES: 1, CUSTOMERS: 1, SUPPLIERS: 1, PURCHASES: 1, PURCHASE_ITEMS: 1, RECEIPTS: 1, RECEIPT_ITEMS: 1, TASKS: 1, RFQS: 1 };
+  var TOMB = '_deleted';
+  function tombOf(n) { var t = meta.tomb && meta.tomb[n]; if (!t) return null; var c = meta.tombCleared || 0, o = null; Object.keys(t).forEach(function (k) { if (t[k] > c) (o = o || {})[k] = 1; }); return o; }
+  function tombUnion(p) {        // gộp danh sách đã xóa từ Drive vào máy này
+    if (!p) return; meta.tomb = meta.tomb || {}; meta.tombCleared = Math.max(meta.tombCleared || 0, p.cleared || 0);
+    Object.keys(p.tomb || {}).forEach(function (n) { var a = meta.tomb[n] = meta.tomb[n] || {}; Object.keys(p.tomb[n] || {}).forEach(function (k) { if (!(a[k] >= p.tomb[n][k])) a[k] = p.tomb[n][k]; }); });
+  }
+  function tombPrune() { var lim = Date.now() - 400 * 864e5; Object.keys(meta.tomb || {}).forEach(function (n) { var a = meta.tomb[n]; Object.keys(a).forEach(function (k) { if (a[k] < lim || a[k] <= (meta.tombCleared || 0)) delete a[k]; }); }); }
+  function tombDetect(names) {   // dòng có trong bản đồng bộ trước mà máy này không còn = máy này đã xóa
+    return seq(names.filter(function (n) { return TOMB_T[n] && wb.sheets[n]; }), function (n) {
+      return IDB.get('base:' + n).then(function (b) {
+        if (!b || !b.rows) return; var cur = {}, now = Date.now(), add = 0;
+        wb.sheets[n].exportRows().slice(1).forEach(function (r) { if (r && r[0] !== '' && r[0] != null) cur[String(r[0])] = 1; });
+        meta.tomb = meta.tomb || {}; var t = meta.tomb[n] = meta.tomb[n] || {};
+        b.rows.slice(1).forEach(function (r) { var k = r && r[0]; if (k === '' || k == null) return; k = String(k); if (!cur[k] && !(t[k] > (meta.tombCleared || 0))) { t[k] = now; add++; } });
+        if (add) meta.dirty[TOMB] = 1;
+      });
+    });
+  }
+  function sheetPayload(n) { if (n === TOMB) { tombPrune(); return { tomb: meta.tomb || {}, cleared: meta.tombCleared || 0 }; } return n === '_props' ? { props: wb.props } : { rows: wb.sheets[n].exportRows() }; }
+  function applyPayload(n, p) { if (n === TOMB) { tombUnion(p); return; } if (n === '_props') { wb.props = p.props || {}; return; } var s = wb.sheets[n]; if (!s) { wb.addSheet(n, p.rows || []); return; } s.g = p.rows || []; s.max = Math.max(1000, s.g.length + 200); }
 
   function persistLocal(names) {                      // ghi các bảng đã đổi vào IndexedDB
-    var jobs = names.map(function (n) { return IDB.set('sheet:' + n, sheetPayload(n)); });
+    var jobs = names.filter(function (n) { return n !== TOMB; }).map(function (n) { return IDB.set('sheet:' + n, sheetPayload(n)); });
     jobs.push(IDB.set('meta', clone(meta)));
     return Promise.all(jobs);
   }
@@ -244,6 +268,7 @@
     clearTimeout(pushTimer); pushTimer = setTimeout(function () { syncNow(); }, 1500);
   }
   function syncNow() {
+    if (passive) return Promise.resolve();
     pushing = pushing.then(doSync, doSync); return pushing;
   }
   /* ---------- Gộp dữ liệu 3 bên: bản nền (lần đồng bộ trước) · máy này · Drive ----------
@@ -259,7 +284,7 @@
     }
     return { m: m, order: order };
   }
-  function mergeRows(name, base, local, remote) {
+  function mergeRows(name, base, local, remote, tomb) {
     var hL = local[0] || [], hR = remote[0] || [], hdr = hL.length > hR.length ? hL : (hR.length ? hR : hL), out = [hdr];
     if (LOGT[name]) {                                   // nhật ký: hợp hai bên, không trùng
       var seen = {}; remote.slice(1).forEach(function (r) { if (r && r.length) { seen[rowSig(r)] = 1; out.push(r); } });
@@ -279,11 +304,12 @@
         else take = l;
       } else if (l) take = (b && rowSig(l) === rowSig(b)) ? null : l;      // Drive đã xóa (máy này không sửa) → xóa theo
       else take = (b && rowSig(r) === rowSig(b)) ? null : r;               // máy này đã xóa (Drive không sửa) → xóa theo
+      if (take && tomb && tomb[k]) take = null;                            // đã bị xóa ở máy khác / tab khác → không cho sống lại
       if (take) out.push(take);
     });
     return out;
   }
-  function saveBase(n, p) { return n === '_props' ? Promise.resolve() : IDB.set('base:' + n, { rows: (p && p.rows) || [] }); }
+  function saveBase(n, p) { return n === '_props' || n === TOMB ? Promise.resolve() : IDB.set('base:' + n, { rows: (p && p.rows) || [] }); }
   function seq(list, fn) { return list.reduce(function (p, x) { return p.then(function () { return fn(x); }); }, Promise.resolve()); }
   var RETRY = { retry: true };
   function doSync(attempt) {
@@ -298,23 +324,36 @@
         if (known && known.version === x.version && known.id === x.id) return;             // Drive không đổi
         tasks.push({ n: n, x: x, merge: !!meta.dirty[n] });
       });
+      tasks.sort(function (a, b) { return (b.n === TOMB) - (a.n === TOMB); });          // nhận danh sách đã xóa trước khi gộp các bảng
       return seq(tasks, function (t) {
         return readChecked(t.n, t.x.id).then(function (p) {
+          if (t.n === TOMB) { tombUnion(p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; return IDB.set('meta', clone(meta)); }
           if (!t.merge) { applyPayload(t.n, p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; got.push(t.n); return saveBase(t.n, p).then(function () { return persistLocal([t.n]); }); }
           if (t.n === '_props') { wb.props = Object.assign({}, p.props || {}, wb.props || {}); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return persistLocal([t.n]); }
           return IDB.get('base:' + t.n).then(function (b) {
             var loc = wb.sheets[t.n] ? wb.sheets[t.n].exportRows() : [];
-            applyPayload(t.n, { rows: mergeRows(t.n, b && b.rows, loc, p.rows || []) });
+            applyPayload(t.n, { rows: mergeRows(t.n, b && b.rows, loc, p.rows || [], tombOf(t.n)) });
             meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; merged.push(t.n); return persistLocal([t.n]);
           });
         }, function (e) { bad.push(t.n); logEv('error', t.n + '.json trên Drive ' + e.message + ' — giữ dữ liệu máy này, không ghi đè'); });
       });
     }).then(function () {
       if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
-      var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || wb.sheets[n]) && bad.indexOf(n) < 0; });   // bảng có tệp lỗi: không ghi đè, chờ xử lý
+      return tombDetect(Object.keys(meta.dirty));
+    }).then(function () {          // dòng đã xóa (ở đâu đó) mà máy này vẫn còn (tab cũ, máy cũ) → bỏ trước khi gửi
+      var fixed = [];
+      Object.keys(meta.dirty).forEach(function (n) {
+        var t = TOMB_T[n] && wb.sheets[n] ? tombOf(n) : null; if (!t) return;
+        var rows = wb.sheets[n].exportRows(), keep = rows.filter(function (r, i) { return i === 0 || !(r && r[0] !== '' && r[0] != null && t[String(r[0])]); });
+        if (keep.length < rows.length) { applyPayload(n, { rows: keep }); fixed.push(n + ' (' + (rows.length - keep.length) + ')'); }
+      });
+      if (fixed.length) { env.resetCache(); logEv('merge', 'Bỏ dòng đã bị xóa nhưng còn trong máy: ' + fixed.join(', ')); return persistLocal(Object.keys(meta.dirty).filter(function (n) { return wb.sheets[n]; })); }
+    }).then(function () {
+      var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || n === TOMB || wb.sheets[n]) && bad.indexOf(n) < 0; });
+      names.sort(function (a, b) { return (b === TOMB) - (a === TOMB); });              // gửi danh sách đã xóa trước   // bảng có tệp lỗi: không ghi đè, chờ xử lý
       return seq(names, function (n) {
         var k = meta.versions[n], pl = sheetPayload(n);
-        return (n !== '_props' && merged.indexOf(n) < 0 && k && k.id ? IDB.get('base:' + n) : Promise.resolve(null)).then(function (b) {
+        return (n !== '_props' && n !== TOMB && merged.indexOf(n) < 0 && k && k.id ? IDB.get('base:' + n) : Promise.resolve(null)).then(function (b) {
           if (b && JSON.stringify(b.rows) === JSON.stringify(pl.rows)) { delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }   // giống bản đã đồng bộ → khỏi ghi lên Drive
           meta.dirty[n] = 2;                                                                  // đang gửi; nếu trong lúc gửi có sửa thêm thì onChange đặt lại = 1
           return (k && k.id ? Drive.version(k.id) : Promise.resolve(null)).then(function (v) {
@@ -380,6 +419,7 @@
         wb.load({ sheets: sn.sheets, props: sn.props || {} }); env.resetCache();
         if (counters && wb.sheets.COUNTERS) wb.sheets.COUNTERS.g = mergeRows('COUNTERS', null, wb.sheets.COUNTERS.exportRows(), counters);   // giữ số thứ tự lớn nhất để không cấp trùng số chứng từ
         Object.keys(wb.sheets).forEach(function (n) { meta.dirty[n] = 1; }); meta.dirty._props = 1;
+        meta.tombCleared = Date.now(); meta.dirty[TOMB] = 1;         // khôi phục: các dòng trong bản sao lưu được sống lại
         logEv('restore', 'Khôi phục từ ' + name);
         return persistLocal(Object.keys(wb.sheets).concat(['_props']));
       }).then(function () { return syncNow(); });
@@ -433,7 +473,7 @@
   function askClientId() {
     var inp = el('input', { placeholder: 'xxxxxxxx.apps.googleusercontent.com', style: 'width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;margin-top:10px;box-sizing:border-box' });
     showGate([el('h2', { style: 'margin:0 0 6px' }, 'HA TO'), el('p', { style: 'color:#6b7280;margin:0' }, 'Dán Client ID Google của bạn (làm một lần, xem HUONG_DAN.md).'), inp,
-      el('button', { style: BTN, onclick: function () { var v = inp.value.trim(); if (!/\.apps\.googleusercontent\.com$/.test(v)) { inp.style.borderColor = '#dc2626'; return; } localStorage.setItem('hato_client_id', v); CLIENT_ID = v; boot(); } }, 'Lưu và tiếp tục')]);
+      el('button', { style: BTN, onclick: function () { var v = inp.value.trim(); if (!/\.apps\.googleusercontent\.com$/.test(v)) { inp.style.borderColor = '#dc2626'; return; } localStorage.setItem('hato_client_id', v); CLIENT_ID = v; boot0(); } }, 'Lưu và tiếp tục')]);
   }
   function askLogin(msg) {
     showGate([el('h2', { style: 'margin:0 0 6px' }, 'HA TO'), el('p', { style: 'color:#6b7280;margin:0' }, 'Đăng nhập Google để mở dữ liệu trên Drive của bạn.'), msg ? el('p', { style: 'color:#dc2626;font-size:13px' }, msg) : '',
@@ -458,7 +498,41 @@
     var sizes = Object.keys(wb.sheets).map(function (n) { var len = 0; try { len = JSON.stringify(wb.sheets[n].exportRows()).length; } catch (e) { } return { name: n, bytes: len, rows: Math.max(0, wb.sheets[n].exportRows().length - 1) }; }).sort(function (a, b) { return b.bytes - a.bytes; });
     return { ready: PERF.ready, firstLoad: PERF.firstLoad || 0, syncs: PERF.syncs.slice(), sizes: sizes, total: sizes.reduce(function (s, x) { return s + x.bytes; }, 0) };
   }
-  function boot() {
+  /* ---------- Chỉ một tab được làm việc (tab khác dùng chung bộ nhớ trình duyệt → gộp sai, dữ liệu cũ sống lại) ---------- */
+  var TABN = 'hato_tab_' + DBN, tabCh = null, tabRelease = null, passive = false;
+  function tabBusy(msg) {
+    showGate([el('h2', { style: 'margin:0 0 6px' }, 'HA TO'), el('p', { style: 'color:#374151;margin:0' }, msg || 'App đang mở ở một tab khác của trình duyệt này. Để không ghi đè dữ liệu, mỗi lúc chỉ một tab được làm việc.'),
+      el('button', { id: 'hato-take', style: BTN, onclick: takeOver }, 'Dùng tab này')]);
+  }
+  function takeOver() {
+    showGate([el('p', null, 'Đang chuyển sang tab này…')]);
+    try { tabCh && tabCh.postMessage('take'); } catch (e) { }
+    var ac = window.AbortController ? new AbortController() : null, to = setTimeout(function () { if (ac) ac.abort(); tabBusy('Tab kia chưa trả quyền (có thể đang chạy bản cũ). Hãy đóng tab đó rồi bấm lại.'); }, 6000);
+    navigator.locks.request(TABN, ac ? { signal: ac.signal } : {}, function () { clearTimeout(to); window.__redirecting = true; try { sessionStorage.setItem('hato_take', '1'); } catch (e) { } location.reload(); return new Promise(function () { }); }).catch(function () { });
+  }
+  var giving = false;
+  function giveUp() {               // tab khác xin làm việc: lưu + gửi nốt dữ liệu rồi nhường
+    if (giving || passive) return; giving = true; clearTimeout(pushTimer);
+    showGate([el('p', null, 'Đang chuyển sang tab khác…')]);
+    var done = function () { passive = true; isReady = false; window.__redirecting = true; tabBusy('Đã chuyển sang làm việc ở tab khác. Tab này tạm khóa để không ghi đè dữ liệu.'); if (tabRelease) { tabRelease(); tabRelease = null; } };
+    var names = Object.keys(meta.dirty).filter(function (n) { return n === '_props' || wb.sheets[n]; });
+    persistLocal(names).catch(function () { }).then(function () {
+      return isReady && Object.keys(meta.dirty).length ? Promise.race([pushing.then(doSync, doSync), sleep(4000)]).catch(function () { }) : null;
+    }).then(done, done);
+  }
+  function tabLock(go) {
+    if (!navigator.locks || !window.BroadcastChannel) return go();
+    try { tabCh = new BroadcastChannel(TABN); tabCh.onmessage = function (e) { if (e.data === 'take' && tabRelease) giveUp(); }; } catch (e) { }
+    var tries = 0, again = false; try { again = sessionStorage.getItem('hato_take') === '1'; sessionStorage.removeItem('hato_take'); } catch (e) { }
+    (function attempt() {
+      navigator.locks.request(TABN, { ifAvailable: true }, function (lock) {
+        if (!lock) { if (++tries < (again ? 20 : 4)) setTimeout(attempt, 250); else tabBusy(); return; }
+        go(); return new Promise(function (r) { tabRelease = r; });
+      });
+    })();
+  }
+  function boot() { tabLock(boot0); }
+  function boot0() {
     if (!LOCAL && !CLIENT_ID) return askClientId();
     loadLocal().then(function (has) {
       if (has) { start(); return; }
@@ -477,7 +551,7 @@
     ['hato_token', 'hato_email'].forEach(function (k) { try { localStorage.removeItem(k); } catch (e) { } });
     if (t && !LOCAL) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }).catch(function () { });
     window.__redirecting = true;
-    return new Promise(function (res) { var r = indexedDB.deleteDatabase(LOCAL ? 'hato_local' : 'hato_app'); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }).then(function () { location.replace(location.pathname + location.search); });
+    return new Promise(function (res) { var r = indexedDB.deleteDatabase(DBN); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }).then(function () { location.replace(location.pathname + location.search); });
   }
   setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, 60000);     // tự lấy thay đổi từ thiết bị khác
   function flushHidden() { if (!isReady) return; clearTimeout(pushTimer); if (Object.keys(meta.dirty || {}).length) syncNow(); }
