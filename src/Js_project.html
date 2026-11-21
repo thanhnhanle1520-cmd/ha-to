@@ -16,7 +16,7 @@ function projectModal(pj, done) {
 PAGES.projects = function (p, q) {
   var kind = q.kind || 'DA';
   setTitle(kind === 'LE' ? 'Bán theo khách hàng (không có dự án)' : 'Dự án', [S.perms.projects.create ? h('button', { onclick: function () { importProjects(route); } }, 'Nhập file') : null, S.perms.projects.create ? h('button', { class: 'pri', onclick: function () { projectModal(null, function (r) { go('project/' + r.id); }); } }, '+ Dự án') : null]);
-  return call('list', { table: 'projects', customer_id: q.customer || '' }).then(function (rows) {
+  return call('list', { table: 'projects', customer_id: q.customer || '', archived: q.arch ? 1 : 0 }).then(function (rows) {
     if (kind !== 'ALL') rows = rows.filter(function (r) { return (r.kind || 'DA') === kind; });
     var cost = S.perms.canCost, v = $('#view'); v.innerHTML = '';
     var red = function (x) { return h('span', { class: x < 0 ? 'neg' : '' }, M(x)); };
@@ -29,7 +29,8 @@ PAGES.projects = function (p, q) {
       { k: 'profit_real', label: 'Lợi nhuận gộp', cls: 'r', fmt: function (r) { return h('span', { title: 'Lãi dự kiến theo giá trị ký: ' + M(r.profit) + ' (' + P(r.margin) + ')' }, red(r.profit_real), r.revenue ? h('small', { class: 'mut' }, ' ' + P(r.margin_real)) : null); }, val: function (r) { return r.profit_real; } });
     cols.push({ k: 'receivable', label: 'Còn phải thu', cls: 'r', fmt: function (r) { return r.receivable ? red(r.receivable) : h('span', { class: 'mut' }, '—'); }, val: function (r) { return r.receivable; } });
     v.appendChild(table({ rows: rows, cols: cols, search: function (r) { return [r.code, r.name, r.customer_name].join(' '); }, onRow: function (r) { go('project/' + r.id); },
-      tools: [sel([['DA', 'Dự án'], ['LE', 'Theo khách hàng (không có dự án)'], ['ALL', 'Tất cả']], kind, function (e) { go('projects?kind=' + e.target.value + (q.customer ? '&customer=' + q.customer : '')); })],
+      tools: [sel([['DA', 'Dự án'], ['LE', 'Theo khách hàng (không có dự án)'], ['ALL', 'Tất cả']], kind, function (e) { go('projects?kind=' + e.target.value + (q.customer ? '&customer=' + q.customer : '') + (q.arch ? '&arch=1' : '')); }),
+        h('label', { style: 'display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:13px', title: 'Dự án đã bấm "Lưu trữ" được ẩn khỏi danh sách và ô chọn' }, h('input', { type: 'checkbox', checked: !!q.arch, onchange: function (e) { go('projects?kind=' + kind + (q.customer ? '&customer=' + q.customer : '') + (e.target.checked ? '&arch=1' : '')); } }), ' Hiện cả dự án lưu trữ')],
       filters: [{ label: 'Mọi trạng thái', opts: ['Đang chào giá', 'Đang thực hiện', 'Hoàn thành', 'Hủy'].map(function (x) { return [x, x]; }), get: function (r) { return r.status; } }, { label: 'Mọi khách hàng', opts: opt(S.customers), get: function (r) { return r.customer_id; } }] }));
   });
 };
@@ -41,11 +42,12 @@ PAGES.project = function (p) {
   return call('projectBundle', { id: id }).then(function (b) {
     var pj = b.project, s = b.summary, v = $('#view'); v.innerHTML = '';
     setTitle(pj.code + ' · ' + pj.name, [S.perms.projects.edit ? h('button', { onclick: function () { projectModal(pj, route); } }, 'Sửa dự án') : null,
+      S.perms.projects.edit ? h('button', { id: 'btnArchive', title: pj.archived === '1' ? 'Đưa dự án trở lại danh sách đang dùng' : 'Ẩn dự án khỏi danh sách và ô chọn; số liệu vẫn giữ nguyên', onclick: function () { var on = pj.archived !== '1'; confirmBox(on ? 'Lưu trữ dự án ' + pj.code + '? Dự án sẽ ẩn khỏi danh sách, ô chọn và trang Mua hàng; số liệu và báo cáo vẫn giữ nguyên.' : 'Bỏ lưu trữ dự án ' + pj.code + '?', function () { safe(call('projectArchive', { id: pj.id, on: on })).then(function (r) { if (r) { toast(on ? 'Đã lưu trữ dự án.' : 'Đã bỏ lưu trữ.'); reloadLookups().then(route); } }); }); } }, pj.archived === '1' ? 'Bỏ lưu trữ' : 'Lưu trữ') : null,
       h('button', { onclick: function () { reconModal(pj.id); } }, 'Gói đối chiếu'), h('button', { onclick: function () { projectSummaryPrint(b); } }, 'Tóm tắt 1 trang'),
       S.perms.projects.create && S.perms.quotes.create ? h('button', { onclick: function () { confirmBox('Tạo bản sao dự án (kèm báo giá mới nhất)?', function () { safe(call('copyProject', { id: pj.id })).then(function (r) { if (r) { toast('Đã tạo ' + r.code); reloadLookups().then(function () { go('project/' + r.id); }); } }); }); } }, 'Copy dự án') : null]);
     var kp = h('div', { id: 'kpibar' },
       h('div', { class: 'i' }, h('span', null, 'Khách hàng'), h('b', null, b.customer.id ? h('a', { href: '#/customer/' + b.customer.id, title: 'Mở hồ sơ khách hàng' }, b.customer.name || '') : (b.customer.name || ''), b.customers && b.customers.length > 1 ? h('span', { class: 'badge b-info', style: 'margin-left:6px', title: b.customers.map(function (c) { return c.name + (c.status ? ' (' + c.status + ')' : ''); }).join('\n') }, '+' + (b.customers.length - 1) + ' khách') : null)),
-      h('div', { class: 'i' }, h('span', null, 'Trạng thái'), badge(pj.status)),
+      h('div', { class: 'i' }, h('span', null, 'Trạng thái'), h('span', null, badge(pj.status), pj.archived === '1' ? h('span', { class: 'badge', id: 'archBadge', style: 'margin-left:4px;background:#e5e7eb;color:#374151' }, 'Lưu trữ') : null)),
       h('div', { class: 'i' }, h('span', null, 'Giá trị ký' + (b.money && b.money.basis === 'PO' ? ' (theo PO)' : b.money && b.money.basis === 'MIX' ? ' (HĐ + PO)' : '')), h('b', null, M(s.value))),
       h('div', { class: 'i', style: 'min-width:200px' }, h('span', null, 'Giao hàng'), progCell(s.delivered_value, s.value)),
       h('div', { class: 'i' }, h('span', null, 'Doanh thu ghi nhận'), h('b', null, M(s.revenue))));
@@ -343,12 +345,12 @@ function advanceForm(kind, rec, docs, dels) {
     var v = f.get(), d = docNow(); if (!d) return;
     var terms = termsOf(d, docs), t = v.term_index ? terms[v.term_index - 1] : null;
     if (t) f.set('pct', t.pct);
-    var base = d.type === 'HD' ? d.current_value : d.value, pct = num(f.inputs.pct.value), vatp = v.vat === 'CO' ? num(d.vat_pct) : 0;
-    f.set('amount', Math.round(base * pct / 100 * (1 + vatp / 100)));
+    var base = d.type === 'HD' ? d.current_value : d.value, pct = num(f.inputs.pct.value), den = v.vat === 'CO' ? totOf(d) : base;   // có VAT: theo tổng có VAT của từng dòng
+    f.set('amount', Math.round(den * pct / 100));
   }
   function amountAdv() {
     var v = f.get(), d = docNow(); if (!d) return;
-    var base = d.type === 'HD' ? d.current_value : d.value, vatp = v.vat === 'CO' ? num(d.vat_pct) : 0, den = base * (1 + vatp / 100);
+    var base = d.type === 'HD' ? d.current_value : d.value, den = v.vat === 'CO' ? totOf(d) : base;
     if (den > 0) f.set('pct', Math.round(num(f.inputs.amount.value) / den * 10000) / 100);
   }
   function recalcPay(src) {       // chọn văn bản / đợt -> số tiền và % tự nhảy; sửa % -> số tiền; sửa số tiền -> %

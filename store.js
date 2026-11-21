@@ -176,10 +176,23 @@
       backup: function (name, obj) { return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return multipart({ name: name, parents: [par], mimeType: 'application/json' }, JSON.stringify(obj), 'application/json'); }); },
       listBackups: function () { return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=createdTime desc&fields=files(id,name,createdTime,size)&pageSize=100'); }).then(function (r) { return (r.files || []).map(function (x) { return { id: x.id, name: x.name, t: Date.parse(x.createdTime) || 0, size: +x.size || 0 }; }); }); },
       pruneBackups: function (keep) {
-        return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=createdTime desc&fields=files(id,name)&pageSize=200'); }).then(function (r) { return Promise.all((r.files || []).slice(keep).map(function (x) { return Drive.trash(x.id); })); }).catch(function () { });
+        return ensurePath([ROOT_NAME, BACKUP_NAME]).then(function (par) { return j(API + 'files?q=' + q("'" + par + "' in parents and trashed=false") + '&orderBy=createdTime desc&fields=files(id,name,createdTime)&pageSize=1000'); }).then(function (r) { return Promise.all(backupTrashList((r.files || []).map(function (x) { return { id: x.id, t: Date.parse(x.createdTime) || 0 }; }), keep).map(function (id) { return Drive.trash(id); })); }).catch(function () { });
       }
     };
   })();
+
+  /* Giữ sao lưu: 30 bản mới nhất + bản mới nhất của mỗi tháng cũ hơn; trả về danh sách id cần bỏ vào thùng rác. */
+  function backupTrashList(files, keep) {
+    var a = files.slice().sort(function (x, y) { return y.t - x.t; }), seenM = {}, out = [];
+    a.forEach(function (x, i) {
+      var d = new Date(x.t + 7 * 3600e3), m = d.getUTCFullYear() + '-' + d.getUTCMonth();
+      if (i < keep) { seenM[m] = 1; return; }
+      if (!seenM[m]) { seenM[m] = 1; return; }
+      out.push(x.id);
+    });
+    return out;
+  }
+  window.__hatoBackupTrashList = backupTrashList;
 
   /* ---------- Kiểm tra tệp JSON trước khi nhận (tệp hỏng / rỗng bất thường thì không ghi đè dữ liệu máy này) ---------- */
   var acceptEmpty = {};
@@ -341,7 +354,7 @@
   }
 
   /* ---------- Sao lưu ---------- */
-  /* Bản sao lưu được chụp NGAY lúc gọi (không phải lúc tải lên), giữ 30 bản mới nhất trong thư mục "HA TO/Sao lưu". */
+  /* Bản sao lưu được chụp NGAY lúc gọi (không phải lúc tải lên), giữ 30 bản mới nhất + 1 bản/tháng trong thư mục "HA TO/Sao lưu". */
   function stamp() { return Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd HH-mm'); }
   function backupNow(name) {
     var snap = clone(wb.snapshot());
@@ -467,7 +480,9 @@
     return new Promise(function (res) { var r = indexedDB.deleteDatabase(LOCAL ? 'hato_local' : 'hato_app'); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }).then(function () { location.replace(location.pathname + location.search); });
   }
   setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, 60000);     // tự lấy thay đổi từ thiết bị khác
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && isReady) syncNow(); });
+  function flushHidden() { if (!isReady) return; clearTimeout(pushTimer); if (Object.keys(meta.dirty || {}).length) syncNow(); }
+  document.addEventListener('visibilitychange', function () { if (!isReady) return; if (document.visibilityState === 'visible') syncNow(); else flushHidden(); });
+  window.addEventListener('pagehide', flushHidden);
   if (LOCAL) window.__hatoDrive = Drive;      // chỉ chế độ thử: để kiểm tra gộp dữ liệu giữa hai "thiết bị"
   /* Xử lý bảng có tệp lỗi trên Drive: dùng bản trên Drive (kể cả rỗng) hoặc ghi bản máy này đè lên */
   function useRemote(n) { acceptEmpty[n] = 1; delete meta.versions[n]; delete meta.dirty[n]; logEv('restore', 'Chọn dùng bản trên Drive cho ' + n); return syncNow(); }

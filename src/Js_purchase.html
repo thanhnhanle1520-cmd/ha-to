@@ -102,25 +102,26 @@ PAGES.purchase = function (p, q) {
         var qi = h('input', { type: 'number', step: 'any', value: l.qty, style: 'width:80px', oninput: function () { l.qty = num(qi.value); upd(); } });
         var pi = h('input', { type: 'number', step: 'any', value: l.price, style: 'width:110px', oninput: function () { l.price = num(pi.value); upd(); } });
         var ni = h('input', { type: 'text', value: l.note || '', style: 'width:120px', oninput: function () { l.note = ni.value; } });
+        var vi = h('input', { type: 'number', step: 'any', min: 0, max: 20, value: l.vat_line == null ? '' : l.vat_line, placeholder: N(num(f.inputs.vat_pct.value)), title: 'VAT % của dòng (trống = theo VAT chung của đơn)', style: 'width:52px', oninput: function () { l.vat_line = vi.value === '' ? '' : num(vi.value); total(); } });
         var at = h('td', { class: 'r' }, M(amt)), dif = h('td', { class: 'r' }), upd = function () { at.textContent = M(num(l.qty) * num(l.price)); diff(); total(); };
         function diff() { var c = num(l.cost); dif.innerHTML = ''; if (c > 0 && num(l.price) > 0 && Math.round(num(l.price)) !== Math.round(c)) dif.appendChild(h('span', { class: num(l.price) > c ? 'neg' : 'pos', title: 'So với giá mua dự kiến ' + M(c) }, (num(l.price) > c ? '+' : '') + M(num(l.price) - c))); }
         diff();
         tb.appendChild(h('tr', null, h('td', { class: 'c mut' }, i + 1), h('td', null, h('span', { class: 'code' }, l.project_code || ''), h('div', { class: 'mut', style: 'font-size:12px' }, l.doc_code || '')), h('td', null, l.name + (l.model ? ' · ' + l.model : '')), h('td', { class: 'c' }, l.unit || ''),
-          h('td', { class: 'r' }, qi), h('td', { class: 'r' }, l.cost != null ? M(l.cost) : ''), h('td', { class: 'r' }, pi), dif, at, h('td', { class: 'r' }, l.received ? N(l.received) : ''), h('td', null, ni),
+          h('td', { class: 'r' }, qi), h('td', { class: 'r' }, l.cost != null ? M(l.cost) : ''), h('td', { class: 'r' }, pi), dif, at, h('td', { class: 'r' }, vi), h('td', { class: 'r' }, l.received ? N(l.received) : ''), h('td', null, ni),
           h('td', null, num(l.received) > 0 ? null : h('button', { class: 'dng', type: 'button', title: 'Bỏ dòng', onclick: function () { lines.splice(i, 1); draw(); } }, '✕'))));
       });
-      if (!lines.length) tb.appendChild(h('tr', null, h('td', { colspan: 12, class: 'mut' }, 'Chưa có dòng hàng. Bấm "Chọn hàng cần mua" để lấy dòng từ HĐ/PO của các dự án.')));
+      if (!lines.length) tb.appendChild(h('tr', null, h('td', { colspan: 13, class: 'mut' }, 'Chưa có dòng hàng. Bấm "Chọn hàng cần mua" để lấy dòng từ HĐ/PO của các dự án.')));
       total();
     }
-    function total() { var t = 0; lines.forEach(function (l) { t += num(l.qty) * num(l.price); }); var vat = num(f.inputs.vat_pct.value); tf.innerHTML = ''; tf.appendChild(h('tr', null, h('td', { colspan: 8, class: 'r' }, 'Cộng (chưa VAT) · có VAT ' + vat + '%'), h('td', { class: 'r' }, h('b', null, M(t)), h('div', { class: 'mut' }, M(Math.round(t * (1 + vat / 100))))), h('td', { colspan: 3 }))); }
-    f.inputs.vat_pct.addEventListener('input', total);
-    var tblWrap = h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['#', 'Dự án / văn bản', 'Hàng hóa', 'ĐVT', 'SL đặt', 'Giá mua dự kiến', 'Giá mua thực', 'Chênh lệch', 'Thành tiền', 'Đã về', 'Ghi chú', ''].map(function (x, i) { return h('th', { class: i >= 4 && i <= 9 ? 'r' : i === 3 ? 'c' : '' }, x); }))), tb, tf));
+    function total() { var gs = vatGroups(lines, num(f.inputs.vat_pct.value), function (l) { return num(l.qty) * num(l.price); }), t = 0, vt = 0; gs.forEach(function (g) { t += g.base; vt += g.vat; }); tf.innerHTML = ''; tf.appendChild(h('tr', null, h('td', { colspan: 8, class: 'r' }, 'Cộng (chưa VAT) · ' + gs.map(function (g) { return 'VAT ' + N(g.rate) + '%: ' + M(g.vat); }).join(' · ') + ' · Tổng có VAT'), h('td', { class: 'r' }, h('b', null, M(t)), h('div', { class: 'mut' }, M(t + vt))), h('td', { colspan: 4 }))); }
+    f.inputs.vat_pct.addEventListener('input', function () { draw(); });
+    var tblWrap = h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['#', 'Dự án / văn bản', 'Hàng hóa', 'ĐVT', 'SL đặt', 'Giá mua dự kiến', 'Giá mua thực', 'Chênh lệch', 'Thành tiền', 'VAT %', 'Đã về', 'Ghi chú', ''].map(function (x, i) { return h('th', { class: i >= 4 && i <= 10 ? 'r' : i === 3 ? 'c' : '' }, x); }))), tb, tf));
     var pickBtn = canEdit ? h('button', { class: 'pri', type: 'button', onclick: function () {
       buyPicker(lines, function (add) {
         add.forEach(function (l) {
           var ex = lines.filter(function (x) { return x.doc_item_id === l.doc_item_id && !x._saved; })[0];
           if (ex) ex.qty = num(ex.qty) + num(l.qty);
-          else lines.push({ id: '', project_id: l.project_id, project_code: l.project_code, doc_id: l.doc_id, doc_code: l.doc_code, doc_item_id: l.doc_item_id, code: l.code, name: l.name, model: l.model, brand: l.brand, unit: l.unit, spec: l.spec, qty: l.qty, price: l.cost, cost: l.cost, note: '' });
+          else lines.push({ vat_line: num(f.inputs.vat_pct.value), id: '', project_id: l.project_id, project_code: l.project_code, doc_id: l.doc_id, doc_code: l.doc_code, doc_item_id: l.doc_item_id, code: l.code, name: l.name, model: l.model, brand: l.brand, unit: l.unit, spec: l.spec, qty: l.qty, price: l.cost, cost: l.cost, note: '' });
         });
         draw(); toast('Đã đưa ' + add.length + ' dòng vào đơn mua');
       }, q.project);
@@ -135,7 +136,7 @@ PAGES.purchase = function (p, q) {
       if (!f.check()) return;
       if (!lines.length) return toast('Đơn mua chưa có dòng hàng', true);
       var rec = Object.assign({ id: isNew ? '' : pu.id }, f.get());
-      safe(call('purchaseSave', { rec: rec, items: lines.map(function (l) { return { id: l._saved ? l.id : '', project_id: l.project_id, doc_id: l.doc_id, doc_item_id: l.doc_item_id, code: l.code, name: l.name, model: l.model, brand: l.brand, unit: l.unit, spec: l.spec, qty: l.qty, price: l.price, note: l.note }; }) })).then(function (r) {
+      safe(call('purchaseSave', { rec: rec, items: lines.map(function (l) { return { id: l._saved ? l.id : '', project_id: l.project_id, doc_id: l.doc_id, doc_item_id: l.doc_item_id, code: l.code, name: l.name, model: l.model, brand: l.brand, unit: l.unit, spec: l.spec, qty: l.qty, price: l.price, note: l.note, vat_line: l.vat_line == null ? '' : l.vat_line }; }) })).then(function (r) {
         if (!r) return;
         toast('Đã lưu ' + r.purchase.code);
         var done = 0, next = function () { if (done++) return; if (isNew) go('purchase/' + r.purchase.id); else route(); };

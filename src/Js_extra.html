@@ -20,8 +20,10 @@ function customerTerms(pid, cid) {
 
 /* ---- Tổng tiền báo giá ---- */
 function quoteSums(lines, vat) {
-  var sub = 0, cost = 0; lines.forEach(function (l) { sub += Math.round(num(l.qty) * num(l.price) * (1 - num(l.disc_pct) / 100)); cost += num(l.qty) * num(l.cost); });
-  return { sub: sub, vat: Math.round(sub * num(vat) / 100), total: sub + Math.round(sub * num(vat) / 100), cost: cost };
+  var cost = 0; lines.forEach(function (l) { cost += num(l.qty) * num(l.cost); });
+  var gs = vatGroups(lines, vat, function (l) { return num(l.qty) * num(l.price) * (1 - num(l.disc_pct) / 100); }), sub = 0, v = 0;
+  gs.forEach(function (g) { sub += g.base; v += g.vat; });
+  return { sub: sub, vat: v, total: sub + v, cost: cost, groups: gs };
 }
 
 /* ---- Kiểm tra trước khi xuất / gửi ---- */
@@ -76,7 +78,7 @@ function quoteZaloText(rec, lines) {
     L.push((i + 1) + '. ' + l.name + (l.spec ? ' (' + l.spec + ')' : '') + (l.model ? ' – ' + l.model : '') + (l.brand ? ' – ' + l.brand : ''));
     L.push('    ' + N(l.qty) + ' ' + (l.unit || '') + ' × ' + M(net) + ' = ' + M(amt));
   });
-  L.push('', 'Cộng tiền hàng: ' + M(sm.sub), 'VAT ' + N(rec.vat_pct) + '%: ' + M(sm.vat), 'TỔNG CỘNG: ' + M(sm.total) + ' đ', '');
+  L.push('', 'Cộng tiền hàng: ' + M(sm.sub), sm.groups.map(function (g) { return 'VAT ' + N(g.rate) + '%: ' + M(g.vat); }).join('\n'), 'TỔNG CỘNG: ' + M(sm.total) + ' đ', '');
   if (rec.valid_text) L.push('Hiệu lực: ' + rec.valid_text);
   if (rec.deliver_time) L.push('Giao hàng: ' + rec.deliver_time);
   if (rec.deliver_place) L.push('Địa điểm: ' + rec.deliver_place);
