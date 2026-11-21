@@ -47,7 +47,10 @@ const txt = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' '
   let ex = await A('export', { kind: 'bbgh', id: dl.id, format: 'html' }), t = txt(ex.data.html);
   T('BBGH: "Căn cứ theo PO số: 4500123", không in mã hệ thống', /Căn cứ theo PO số: 4500123/.test(t) && !/PO-20\d\d|BG-20\d\d|Căn cứ yêu cầu/.test(t), t.slice(0, 600));
   T('BBGH có cột Xuất xứ = Việt Nam', /Xuất xứ/.test(t) && /MT5 Việt Nam/.test(t), t.slice(600, 1300));
-  T('khổ A4, lề 20 · 15 · 20 · 30 mm (NĐ 30)', /size:A4;margin:20mm 15mm 20mm 30mm/.test(ex.data.html) && /@page WordSection1\{size:21cm 29.7cm;margin:20mm 15mm 20mm 30mm/.test(ex.data.html));
+  const PR = x => /size:A4;margin:0/.test(x) && /padding:0 15mm 0 30mm/.test(x) && /thead>tr>td\{height:20mm\}/.test(x) && /tfoot>tr>td\{height:20mm\}/.test(x);
+  T('bản in: A4 đứng, lề 20 · 15 · 20 · 30 mm (NĐ 30) tạo bằng nội dung', PR(ex.data.html), ex.data.html.slice(0, 300));
+  const wd = await A('export', { kind: 'bbgh', id: dl.id, format: 'doc' }), wh = Buffer.from(wd.data.base64, 'base64').toString('utf8');
+  T('file Word: A4, lề 20 · 15 · 20 · 30 mm', /@page WordSection1\{size:21cm 29.7cm;margin:20mm 15mm 20mm 30mm/.test(wh) && /size:A4;margin:20mm 15mm 20mm 30mm/.test(wh));
   ex = await A('export', { kind: 'tbgh', id: dl.id, format: 'html' });
   T('TBGH cũng "Căn cứ theo PO số"', /Căn cứ theo PO số: 4500123/.test(txt(ex.data.html)));
   ex = await A('export', { kind: 'bbct', id: dl.id, format: 'html' }); t = txt(ex.data.html);
@@ -57,7 +60,7 @@ const txt = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' '
   T('chọn "HĐ + PLHD" + số gõ tay → in đúng', /Căn cứ theo Hợp đồng và Phụ lục hợp đồng số: 12\/2026\/HĐMB &amp; PL01|Căn cứ theo Hợp đồng và Phụ lục hợp đồng số: 12\/2026\/HĐMB & PL01/.test(t), t.slice(0, 500));
   T('phiếu không khai chứng từ → in theo PO (C/O sao y công chứng)', /Chứng chỉ xuất xứ hàng hóa \(C\/O\) 01 bản Sao y công chứng/.test(t), t.slice(800, 1500));
   ex = await A('export', { kind: 'quote', id: q.id, format: 'html' });
-  T('báo giá in cũng theo lề NĐ 30', /margin:20mm 15mm 20mm 30mm/.test(ex.data.html));
+  T('báo giá in cũng theo lề NĐ 30', PR(ex.data.html));
 
   console.log('— Cập nhật PO theo báo giá');
   const pj2 = (await A('save', { table: 'projects', rec: { name: 'Văn phòng Bản 25', customer_id: cu.id, status: 'Đang chào giá' } })).data;

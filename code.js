@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.20.0';
+const APP_VERSION = '1.22.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -2290,7 +2290,7 @@ function docAttOf_(dit) {      // chứng từ kèm theo khai báo ở HĐ / PO 
 function shortCo_(c) { return String(c || '').toUpperCase().replace('KỸ THUẬT VÀ THƯƠNG MẠI', 'KT & TM'); }
 function pad2_(n) { n = Math.round(num_(n)); return (n < 10 ? '0' : '') + n; }
 function dlTable_(rows) {
-  var h = '<table><tr><th class="c" style="width:30px">STT</th><th>Tên hàng hóa</th><th style="width:15%">Model</th><th style="width:16%">Thương hiệu / Xuất xứ</th><th class="c" style="width:8%">ĐVT</th><th class="c" style="width:8%">SL</th><th style="width:15%">Ghi chú</th></tr>';
+  var h = '<table><thead><tr><th class="c" style="width:30px">STT</th><th>Tên hàng hóa</th><th style="width:15%">Model</th><th style="width:16%">Thương hiệu / Xuất xứ</th><th class="c" style="width:8%">ĐVT</th><th class="c" style="width:8%">SL</th><th style="width:15%">Ghi chú</th></tr></thead>';     // tiêu đề bảng lặp lại khi sang trang
   rows.forEach(function (r, i) { h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td><td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' - ')) + '</td><td class="c">' + esc_(r.unit) + '</td><td class="r">' + qty_(r.qty) + '</td><td>' + esc_(r.note) + '</td></tr>'; });
   return h + '</table>';
 }
@@ -2299,9 +2299,9 @@ function bbHead_(title, dl, basis, pcx, cfg, place) {
   var rep = dl.receiver || pr.receiver || pr.rep_name || cu.contact || '', repPhone = pr.rep_phone || cu.phone || '';
   return nationalHead_() + '<h1>' + title + '</h1><p style="text-align:center;margin:2px 0 8px">Số: ' + esc_(dl.code) + '</p>' +
     '<p style="margin:2px 0">' + esc_(basis) + '</p><p style="margin:2px 0 8px">Dự án: <b>' + esc_(pr.name || '') + '</b></p>' +
-    '<p>Hôm nay, ' + esc_(viDateLong_(dl.date)) + ', tại ' + esc_(place || pr.name || '') + ', chúng tôi gồm:</p>' +
+    '<p>Hôm nay, ' + esc_(viDateLong_(dl.date)) + ', chúng tôi gồm:</p>' +
     '<p><b>BÊN GIAO (Bên A):</b> ' + esc_(cfg.company_name) + '<br>Địa chỉ: ' + esc_(cfg.address || '') + '<br>Điện thoại: ' + esc_(cfg.phone || '') + '</p>' +
-    '<p><b>BÊN NHẬN (Bên B):</b> ' + esc_(cu.name || '') + '<br>Địa chỉ: ' + esc_(cu.address || '') + '<br>Đại diện: ' + esc_(rep) + ' &nbsp;&nbsp;&nbsp;&nbsp; Điện thoại: ' + esc_(repPhone) + '<br>Địa chỉ nhận hàng: ' + esc_(place || '') + '</p>';
+    '<p><b>BÊN NHẬN (Bên B):</b> ' + esc_(cu.name || '') + '<br>Đại diện: ' + esc_(rep) + ' &nbsp;&nbsp;&nbsp;&nbsp; Điện thoại: ' + esc_(repPhone) + '<br>Địa chỉ nhận hàng: ' + esc_(place || '') + '</p>';
 }
 function bbCopies_(cfg, dl) {
   dl = dl || {};
@@ -2309,10 +2309,17 @@ function bbCopies_(cfg, dl) {
   return '<p>Biên bản được lập thành ' + pad2_(pick(dl.copies, cfg.bb_copies || 2)) + ' bản, Bên A giữ ' + pad2_(pick(dl.copies_a, cfg.bb_copies_a || 1)) + ' bản, Bên B giữ ' + pad2_(pick(dl.copies_b, cfg.bb_copies_b || 1)) + ' bản, có giá trị pháp lý như nhau.</p>';
 }
 var PAGE_MARGIN_ = '20mm 15mm 20mm 30mm';     // lề in theo Nghị định 30/2020/NĐ-CP: trên 20 · phải 15 · dưới 20 · trái 30 (mm), khổ A4
-function wrapHtml_(title, body, landscape, plain) {
+function wrapHtml_(title, body, landscape, plain, print) {
   body = String(body).replace(/<(h1|h2|h3)>/g, '<$1 style="font-family:' + FONT_.replace(/"/g, "'") + '">');   // Word/Google đôi khi bỏ qua CSS của tiêu đề
   body = String(body).replace(/<table(?![^>]*class=)([^>]*)>/g, '<table border="1" width="100%" cellspacing="0" cellpadding="4"$1>');   // viền bảng cho mọi trình đọc (Word, LibreOffice, PDF)
   var sz = landscape ? '29.7cm 21cm' : '21cm 29.7cm';
+  if (print) {     // xem trước / in từ trình duyệt: lề giấy = 0 (trình duyệt không còn chỗ in ngày giờ, tên file, đường dẫn); lề NĐ 30 tạo bằng nội dung, lặp lại ở mọi trang
+    var W = landscape ? '297mm' : '210mm', H = landscape ? '210mm' : '297mm';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') +
+      'html,body{margin:0;padding:0}body{background:#8a8f98}.sheet{width:' + W + ';min-height:' + H + ';box-sizing:border-box;margin:12px auto;padding:0 15mm 0 30mm;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}' +
+      'table.pgw{width:100%;border-collapse:collapse}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td,table.pgw>tbody>tr>td{border:none;padding:0}table.pgw>thead>tr>td{height:20mm}table.pgw>tfoot>tr>td{height:20mm}' +
+      '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
+  }
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + PAGE_MARGIN_ + '}' +
     '@page WordSection1{size:' + sz + ';' + (landscape ? 'mso-page-orientation:landscape;' : '') + 'margin:' + PAGE_MARGIN_ + '}div.WordSection1{page:WordSection1}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + '</style></head><body><div class="WordSection1">' + body + '</div></body></html>';
 }
@@ -2526,7 +2533,7 @@ function exportFolder_() {   // nhớ ID thư mục "Xuất file" để khỏi d
   return fo;
 }
 ACTIONS.export = function (u, p) {
-  var r = buildExport_(u, p), html = wrapHtml_(r.title, r.body, r.landscape, r.plain), fmt = p.format || 'pdf', blob;
+  var r = buildExport_(u, p), fmt = p.format || 'pdf', html = wrapHtml_(r.title, r.body, r.landscape, r.plain, fmt === 'html'), blob;
   if (fmt === 'html') return { name: r.fname + '.pdf', title: r.title, html: html };   // xem trước trong giao diện
   if (fmt === 'pdf') blob = Utilities.newBlob(html, 'text/html', r.fname + '.html').getAs('application/pdf').setName(r.fname + '.pdf');
   else if (fmt === 'xls') blob = Utilities.newBlob(html, 'application/vnd.ms-excel', r.fname + '.xls');

@@ -288,6 +288,10 @@ PAGES.doc = function (p, q) {
       });
     } }, 'Lưu'));
     if (!isNew && doc.type === 'HD') acts.push(exportMenu('hd', doc.id, ['pdf', 'doc']));
+    if (!isNew && S.perms.purchases && S.perms.purchases.create && (doc.type !== 'PLHD' || doc.status === 'DA_KY')) acts.push(h('button', { id: 'btnQuickBuy', title: 'Tick dòng hàng, chọn nhà cung cấp, nhập giá → tạo đơn mua liên kết sẵn với ' + doc.code, onclick: function () {
+      var ids = [doc.id]; (sibs || []).forEach(function (x) { if (x.type === 'PLHD' && (x.parent_id === doc.id || (doc.type === 'PLHD' && x.parent_id === doc.parent_id))) ids.push(x.id); }); if (doc.type === 'PLHD' && doc.parent_id) ids.push(doc.parent_id);
+      quickBuyModal(doc, ids, function () { if (S.draftCtl) S.draftCtl.clear(); MEMO = {}; route(); });
+    } }, 'Tạo đơn mua'));
     if (!isNew && S.perms.deliveries.create && (doc.type !== 'PLHD' || doc.status === 'DA_KY')) acts.push(h('button', { id: 'btnDeliver', title: 'Mở phiếu giao mới, điền sẵn hàng còn lại của ' + doc.code, onclick: function () { go('delivery/new?project=' + doc.project_id + '&doc=' + doc.id); } }, 'Tạo phiếu giao'));
     if (!isNew) acts.push(h('button', { onclick: function () { go('project/' + doc.project_id + '/docs'); } }, 'Về dự án'));
     if (!isNew && S.perms.docs.edit) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa văn bản ' + doc.code + '?', function () { safe(call('remove', { table: 'docs', id: doc.id })).then(function (r) { if (r) backToList('docs'); }); }); } }, 'Xóa'));
@@ -512,7 +516,7 @@ PAGES.delivery = function (p, q) {
       });
     }
     var acts = [];
-    if (!isNew) acts.push(h('span', { class: 'acts' }, h('button', { onclick: function () { doExport('tbgh', dv.id, 'doc'); } }, 'TBGH'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'doc'); } }, 'BBGH'), h('button', { onclick: function () { doExport('bbct', dv.id, 'doc'); } }, 'BBCT'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'pdf'); } }, 'BBGH PDF')));
+    if (!isNew) acts.push(h('span', { class: 'acts' }, h('button', { onclick: function () { doExport('tbgh', dv.id, 'doc'); } }, 'TBGH'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'doc'); } }, 'BBGH'), h('button', { onclick: function () { doExport('bbct', dv.id, 'doc'); } }, 'BBCT'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'pdf'); } }, 'BBGH PDF'), h('button', { onclick: function () { doExport('bbct', dv.id, 'pdf'); } }, 'BBCT PDF'), h('button', { onclick: function () { doExport('tbgh', dv.id, 'pdf'); } }, 'TBGH PDF')));
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(false); } }, 'Lưu'));
     if (!isNew && S.perms.deliveries.edit) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa phiếu giao hàng?', function () { safe(call('remove', { table: 'deliveries', id: dv.id })).then(function (r) { if (r) backToList('deliveries'); }); }); } }, 'Xóa'));
     setTitle(isNew ? 'Phiếu giao hàng mới' : 'Giao hàng ' + dv.code, acts);

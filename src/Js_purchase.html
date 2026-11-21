@@ -46,6 +46,43 @@ PAGES.purchases = function () {
 };
 
 /* ---- Chọn hàng cần mua (dòng HĐ/PO của nhiều dự án) ---- */
+/* Tạo đơn mua ngay từ trang HĐ / PO / PL: tick dòng, chọn nhà cung cấp, nhập giá → đơn mua liên kết sẵn từng dòng */
+function quickBuyModal(doc, docIds, after) {
+  Promise.all([safe(call('buyableLines', { project_id: doc.project_id })), call('supplierList', {})]).then(function (a) {
+    var all = a[0]; if (!all) return; var sups = a[1] || [];
+    var mine = all.filter(function (l) { return docIds.indexOf(l.doc_id) >= 0; });
+    if (!mine.length) return toast('Văn bản này không có dòng hàng cần mua (dự án đang tính doanh thu theo văn bản khác, hoặc chưa lưu).', true);
+    var supOpts = function () { return sups.map(function (x) { return [x.id, x.name]; }); };
+    var ss = sel(supOpts(), '', null, '— chọn nhà cung cấp —'), dt = h('input', { type: 'date', value: today() }), vat = h('input', { type: 'number', step: 'any', value: num(doc.vat_pct) || 10, style: 'width:70px' });
+    var st = sel([['DA_DAT', 'Đã đặt (điền giá chốt vào văn bản)'], ['NHAP', 'Nháp (chưa đặt)']], 'DA_DAT'), onlyNeed = h('input', { type: 'checkbox', checked: true }), tb = h('tbody'), tot = h('b');
+    var newSup = S.perms.suppliers.create ? h('a', { href: 'javascript:void 0', style: 'font-size:12px', onclick: function () { supplierModal({}, function (x) { if (!x) return; sups.push(x); var nv = sel(supOpts(), x.id, null, '— chọn nhà cung cấp —'); ss.innerHTML = nv.innerHTML; ss.value = x.id; }); } }, '+ Nhà cung cấp mới') : null;
+    var rows = mine.map(function (l) { var r = { l: l, ck: h('input', { type: 'checkbox', checked: l.need > 0 }), qi: h('input', { type: 'number', step: 'any', value: Math.max(0, l.need), style: 'width:80px' }), pi: h('input', { type: 'number', step: 'any', value: l.cost || '', style: 'width:110px' }) }; [r.ck, r.qi, r.pi].forEach(function (e) { e.addEventListener('input', sum); e.addEventListener('change', sum); }); return r; });
+    function sum() { var t = 0; rows.forEach(function (r) { if (r.ck.checked) t += num(r.qi.value) * num(r.pi.value); }); tot.textContent = M(Math.round(t)); }
+    function draw() {
+      tb.innerHTML = ''; var n = 0;
+      rows.forEach(function (r) { var l = r.l; if (onlyNeed.checked && l.need <= 0) return; n++;
+        tb.appendChild(h('tr', null, h('td', { class: 'c' }, r.ck), h('td', null, l.name + (l.model ? ' · ' + l.model : ''), h('div', { class: 'mut', style: 'font-size:12px' }, l.doc_code + (l.brand ? ' · ' + l.brand : ''))), h('td', { class: 'c' }, l.unit),
+          h('td', { class: 'r' }, N(l.qty)), h('td', { class: 'r' }, l.ordered ? N(l.ordered) : ''), h('td', { class: 'r' }, h('b', null, N(l.need))), h('td', { class: 'r' }, r.qi), h('td', { class: 'r' }, r.pi))); });
+      if (!n) tb.appendChild(h('tr', null, h('td', { colspan: 8, class: 'mut' }, 'Các dòng đã đặt mua đủ. Bỏ tick "Chỉ hiện dòng còn cần mua" để đặt thêm.')));
+      sum();
+    }
+    onlyNeed.onchange = draw; draw();
+    var body = h('div', { id: 'quickBuy' },
+      h('div', { class: 'fg' }, h('label', null, h('span', null, 'Nhà cung cấp *'), ss, newSup), h('label', null, h('span', null, 'Ngày đặt'), dt), h('label', null, h('span', null, 'Trạng thái'), st), h('label', null, h('span', null, 'VAT %'), vat)),
+      h('div', { class: 'bar2', style: 'margin:6px 0' }, h('label', { style: 'display:flex;gap:4px;align-items:center' }, onlyNeed, 'Chỉ hiện dòng còn cần mua'), h('span', { class: 'mut' }, 'Mua nhiều nhà cung cấp: tick dòng của nhà cung cấp này, lưu, rồi bấm "Tạo đơn mua" lần nữa cho nhà cung cấp khác.')),
+      h('div', { class: 'tw', style: 'max-height:50vh;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, h('th'), h('th', null, 'Hàng hóa'), h('th', { class: 'c' }, 'ĐVT'), ['SL văn bản', 'Đã đặt', 'Còn cần', 'SL mua', 'Giá mua'].map(function (x) { return h('th', { class: 'r' }, x); }))), tb)),
+      h('div', { style: 'text-align:right;margin-top:6px' }, 'Cộng (chưa VAT): ', tot));
+    modal({ title: 'Tạo đơn mua từ ' + doc.code, wide: true, body: body, buttons: [{ label: 'Tạo đơn mua', cls: 'pri', fn: function (close) {
+      if (!ss.value) return toast('Chọn nhà cung cấp', true);
+      var items = []; rows.forEach(function (r) { var qv = num(r.qi.value); if (r.ck.checked && qv > 0) items.push({ project_id: r.l.project_id, doc_id: r.l.doc_id, doc_item_id: r.l.doc_item_id, code: r.l.code, name: r.l.name, model: r.l.model, brand: r.l.brand, unit: r.l.unit, spec: r.l.spec, qty: qv, price: num(r.pi.value), vat_line: num(vat.value) }); });
+      if (!items.length) return toast('Chưa tick dòng nào', true);
+      if (items.some(function (x) { return !(x.price > 0); })) return toast('Nhập giá mua cho các dòng đã tick', true);
+      safe(call('purchaseSave', { rec: { supplier_id: ss.value, order_date: dt.value, vat_pct: num(vat.value), status: st.value }, items: items })).then(function (r) {
+        if (!r) return; close(); toast('Đã tạo ' + r.purchase.code + (r.cost_filled ? ' · điền giá chốt ' + r.cost_filled + ' dòng' : '')); if (after) after(r);
+      });
+    } }] });
+  });
+}
 function buyPicker(curLines, onAdd, pid0) {
   safe(call('buyableLines', {})).then(function (all) {
     if (!all) return;

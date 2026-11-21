@@ -49,7 +49,9 @@ const txt = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' '
   console.log('— Trang văn bản');
   await E(`MEMO={};location.hash='#/doc/${hd.id}'`); await sleep(2000);
   const refs = await E(`[...document.querySelectorAll('.buyref')].map(x=>x.textContent)`);
-  T('cạnh giá chốt hiện mã đơn mua (✓ khớp, ≠ khác)', refs.length === 3 && refs.filter(x => /^✓ DM-/.test(x)).length === 2 && refs.some(x => /^≠ DM-.*980\.000/.test(x)), refs);
+  T('dưới giá chốt: ✓ khớp / ≠ khác giá đơn mua', refs.length === 3 && refs.filter(x => /^✓ đơn mua/.test(x)).length === 2 && refs.some(x => /^≠ đơn mua: 980\.000/.test(x)), refs);
+  const bc = await E(`[...document.querySelectorAll('#view table.le td a[href^="#/purchase/"]')].map(a=>[a.textContent,a.getAttribute('href'),a.title])`);
+  T('cột "Đơn mua": mã đơn bấm mở được, kèm tên NCC', bc.length === 3 && bc.filter(x => x[1] === '#/purchase/' + puA.id).length === 2 && bc.some(x => x[1] === '#/purchase/' + puB.id && /NCC Tyco/.test(x[2])), bc);
   T('nút "Lấy giá từ đơn mua" hiện vì dòng 2 khác giá', await E(`document.querySelector('#btnBuyFill').style.display!=='none' && /1 dòng giá chốt khác/.test(document.querySelector('#buyInfo').textContent)`));
   await E(`document.querySelector('#btnBuyFill').scrollIntoView()`); await sleep(300); await pg.shot('/tmp/s26_doc.png');
   await E(`document.querySelector('#btnBuyFill').click()`); await sleep(300); await E(`document.querySelector('.ov button.pri').click()`); await sleep(400);
