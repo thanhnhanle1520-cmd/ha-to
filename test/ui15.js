@@ -14,7 +14,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E(`reloadLookups()`);
   console.log('— Khách hàng: danh sách');
   await E(`MEMO={};location.hash='#/customers'`); await sleep(1500);
-  const th = await E(`[...document.querySelectorAll('#view thead th')].map(x=>x.textContent).join('|')`);
+  const th = await E(`[...document.querySelectorAll('#view thead th:not(.ck)')].map(x=>x.textContent).join('|')`);
   T('cột: Mã KH · Tên · MST · Người liên hệ · Điện thoại · Số dự án · Trạng thái', th === 'Mã KH|Tên khách hàng|MST|Người liên hệ|Điện thoại|Số dự án|Trạng thái', th);
   T('địa chỉ trong dòng gợi ý của tên', await E(`[...document.querySelectorAll('#view tbody td span')].some(s=>/12 Nguyễn Văn Linh/.test(s.title||''))`));
   T('ô trống hiện "—"', await E(`[...document.querySelectorAll('#view tbody td')].some(td=>td.textContent==='—')`));
@@ -31,7 +31,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   T('lịch sử giao dịch đủ loại (ký HĐ, thu tiền)', bdl.events.some(e => e.kind === 'doc') && bdl.events.some(e => e.kind === 'pay'), bdl.events.map(e => e.kind));
   console.log('— Bảng giá: cột mới');
   await E(`MEMO={};location.hash='#/pricelist'`); await sleep(2000);
-  const pth = await E(`[...document.querySelectorAll('#view thead th')].map(x=>x.textContent).join('|')`);
+  const pth = await E(`[...document.querySelectorAll('#view thead th:not(.ck)')].map(x=>x.textContent).join('|')`);
   T('cột: Mã · Hãng · Nhóm · Tên hàng · Model · Size · ĐVT · Giá mua · Hệ số · Giá bán', pth === 'Mã|Hãng|Nhóm|Tên hàng|Model|Size|ĐVT|Giá mua|Hệ số ⓘ|Giá bán' || /Mã\|Hãng\|Nhóm\|Tên hàng\|Model\|Size\|ĐVT\|Giá mua\|Hệ số/.test(pth), pth);
   T('bỏ dòng hướng dẫn khỏi khu lọc', !/Giá bán = Giá mua × Hệ số \(riêng/.test(await E(`document.querySelector('#view .bar2').textContent`)));
   const rows = await E(`document.querySelectorAll('#view tbody tr').length`);

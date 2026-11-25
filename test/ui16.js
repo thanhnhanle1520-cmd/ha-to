@@ -25,7 +25,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E(`reloadLookups()`);
   console.log('— Giao diện');
   await E(`MEMO={};location.hash='#/projects'`); await sleep(1500);
-  const th = await E(`[...document.querySelectorAll('#view thead th')].map(x=>x.textContent).join('|')`);
+  const th = await E(`[...document.querySelectorAll('#view thead th:not(.ck)')].map(x=>x.textContent).join('|')`);
   T('cột tài chính tách riêng', /Giá trị ký/.test(th) && /Doanh thu ghi nhận/.test(th) && /Giá vốn/.test(th) && /Chi phí phát sinh/.test(th) && /Lợi nhuận gộp/.test(th) && /Còn phải thu/.test(th), th);
   T('thanh giao hàng có % và đã giao / tổng', /40%\s*1,2 tr \/ 3 tr/.test(await E(`document.querySelector('#view tbody').textContent`)), await E(`document.querySelector('#view tbody').textContent`));
   T('tên công trình cắt gọn, rê chuột xem đủ', await E(`[...document.querySelectorAll('#view tbody td.ell')].some(td=>/rất dài để kiểm tra cắt chữ/.test(td.title))`));

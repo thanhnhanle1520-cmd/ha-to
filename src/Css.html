@@ -180,4 +180,20 @@ td.r,th.r{text-align:right}
 .srows{font-size:13px}.sr{display:flex;gap:8px;align-items:baseline;padding:5px 0;border-top:1px solid #eef0f3}.sr .sd{flex:0 0 74px;white-space:nowrap}.sr .sl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sr .sa{flex:0 0 auto;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 select.mini{padding:2px 4px;font-size:12px;height:auto;min-height:0}
 details.pobox{margin:0 0 10px;border:1px solid #dbe3ee;border-radius:8px;padding:6px 10px;background:#f8fafc}details.pobox>summary{cursor:pointer;font-weight:600;color:#1e3a5f;padding:2px 0}details.pobox[open]>summary{margin-bottom:8px}
+/* bản 30: nút có biểu tượng, cột chọn, xuất hàng loạt */
+.vh{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button.hasic{display:inline-flex;align-items:center;gap:6px}
+button.hasic .bi{display:inline-flex;flex:none}
+#main button.ionly{padding:5px 8px}
+#main button.ionly .lb{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media(max-width:640px){#bar .acts button.hasic:not(.pri){padding:5px 8px}#bar .acts button.hasic:not(.pri) .lb{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
+button.mbtn{display:inline-flex;align-items:center;gap:4px}button.mbtn .car{font-size:10px;opacity:.7}
+.pop{position:fixed;z-index:200;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,27,61,.18);padding:4px;display:flex;flex-direction:column;min-width:120px}
+.pop button{border:0;text-align:left;border-radius:6px;padding:7px 10px}.pop button:hover{background:#eef3f9}
+table.t th.ck,table.t td.ck{width:30px;text-align:center;padding-left:6px;padding-right:2px}
+table.t td.ck input,table.t th.ck input{width:16px;height:16px;cursor:pointer;margin:0}
+table.t tr.picked td{background:#fff7f7}
+.selbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:6px 10px;border:1px solid #fecaca;background:#fff5f5;border-radius:8px}
+.selbar b{color:var(--brand);margin-right:4px}
+button.lnk{border:0;background:none;color:#1d4ed8;padding:4px 6px}button.lnk:hover{background:none;text-decoration:underline}
 </style>

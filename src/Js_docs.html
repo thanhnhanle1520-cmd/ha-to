@@ -516,7 +516,10 @@ PAGES.delivery = function (p, q) {
       });
     }
     var acts = [];
-    if (!isNew) acts.push(h('span', { class: 'acts' }, h('button', { onclick: function () { doExport('tbgh', dv.id, 'doc'); } }, 'TBGH'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'doc'); } }, 'BBGH'), h('button', { onclick: function () { doExport('bbct', dv.id, 'doc'); } }, 'BBCT'), h('button', { onclick: function () { doExport('bbgh', dv.id, 'pdf'); } }, 'BBGH PDF'), h('button', { onclick: function () { doExport('bbct', dv.id, 'pdf'); } }, 'BBCT PDF'), h('button', { onclick: function () { doExport('tbgh', dv.id, 'pdf'); } }, 'TBGH PDF')));
+    // bản 30: 6 nút gom thành 3 nút có menu Word / PDF
+    if (!isNew) acts.push(h('span', { class: 'acts' }, [['tbgh', 'TBGH', 'Thông báo giao hàng'], ['bbgh', 'BBGH', 'Biên bản giao hàng'], ['bbct', 'BBCT', 'Biên bản giao nhận chứng từ']].map(function (x) {
+      return menuBtn(x[1], [{ label: 'Word', fn: function () { doExport(x[0], dv.id, 'doc'); } }, { label: 'PDF', fn: function () { doExport(x[0], dv.id, 'pdf'); } }], { id: 'btn' + x[1], title: x[2] + ': xuất Word hoặc PDF' });
+    })));
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(false); } }, 'Lưu'));
     if (!isNew && S.perms.deliveries.edit) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa phiếu giao hàng?', function () { safe(call('remove', { table: 'deliveries', id: dv.id })).then(function (r) { if (r) backToList('deliveries'); }); }); } }, 'Xóa'));
     setTitle(isNew ? 'Phiếu giao hàng mới' : 'Giao hàng ' + dv.code, acts);

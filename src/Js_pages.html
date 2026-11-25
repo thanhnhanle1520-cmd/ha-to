@@ -90,16 +90,16 @@ function plGuide() {
 function plDownloadTemplate() {
   XlsxWrite.download('Mau_nhap_bang_gia.xlsx', [{ name: 'Bang gia', rows: [PL_HDR.map(function (c) { return c[1]; })], widths: [14, 16, 18, 40, 16, 12, 12, 8, 26, 14, 12, 24], boldRows: [0] }, plGuide()]);
 }
-function plDownloadCurrent() {
-  var all = [], page = 1;
+function plDownloadCurrent(f) {      // f: bộ lọc đang xem {q, brand, group} → chỉ xuất các mặt hàng khớp bộ lọc (bản 30)
+  var all = [], page = 1; f = f && (f.q || f.brand || f.group) ? f : null;
   function next() {
-    return call('catalogList', { page: page, size: 200 }).then(function (r) {
+    return call('catalogList', { q: f ? f.q : '', brand: f ? f.brand : '', group: f ? f.group : '', page: page, size: 200 }).then(function (r) {
       r.rows.forEach(function (x) { all.push(x); });
       if (all.length < r.total && r.rows.length) { page++; return next(); }
     });
   }
   return safe(next()).then(function () {
-    XlsxWrite.download('Bang_gia_hien_tai.xlsx', [{ name: 'Bang gia', rows: plSheetRows(all), widths: [14, 16, 18, 40, 16, 12, 12, 8, 26, 14, 12, 24], boldRows: [0] }, plGuide()]);
+    XlsxWrite.download(f ? 'Bang_gia_' + fileSafe([f.brand, f.group, f.q].filter(Boolean).join(' ')) + '_' + today() + '.xlsx' : 'Bang_gia_hien_tai.xlsx', [{ name: 'Bang gia', rows: plSheetRows(all), widths: [14, 16, 18, 40, 16, 12, 12, 8, 26, 14, 12, 24], boldRows: [0] }, plGuide()]);
     toast('Đã tạo file ' + all.length + ' dòng');
   });
 }
@@ -173,7 +173,7 @@ PAGES.pricelist = function () {
   var ed = S.perms.pricelist.edit || S.perms.pricelist.create;
   setTitle('Bảng giá', [ed ? h('button', { class: 'pri', onclick: function () { plEditModal(null, function (r) { meta = null; load(r && r.code); }, meta); } }, '+ Thêm hàng') : null,
     ed ? h('button', { onclick: function () { plImport(function () { meta = null; load(); }); } }, 'Nhập hàng loạt') : null,
-    ed ? h('button', { onclick: plDownloadTemplate }, 'Tải file mẫu') : null, h('button', { onclick: plDownloadCurrent }, 'Tải Bảng giá hiện tại'),
+    ed ? h('button', { onclick: plDownloadTemplate }, 'Tải file mẫu') : null, h('button', { onclick: function () { plDownloadCurrent(); } }, 'Tải Bảng giá hiện tại'),
     ed ? h('button', { onclick: function () { plCoefModal(function () { load(); }); } }, 'Hệ số') : null]);
   // st giữ bộ lọc / trang đang xem cả khi trang vẽ lại (PL_ST chỉ xóa khi mở Bảng giá từ menu)
   var view = $('#view'), st = PL_ST || (PL_ST = { q: '', brand: '', group: '', page: 1 }), host = h('div'), meta = null;
@@ -185,7 +185,8 @@ PAGES.pricelist = function () {
         view.innerHTML = '';
         view.appendChild(h('div', { class: 'bar2' }, h('input', { type: 'search', value: st.q, placeholder: 'Tìm theo tên, model, hãng, size, quy cách…', oninput: debounce(function (e) { st.q = e.target.value; st.page = 1; load(); }, 300) }),
           sel(r.brands.map(function (b) { return [b, b]; }), st.brand, function (e) { st.brand = e.target.value; st.page = 1; load(); }, 'Tất cả hãng'),
-          sel(r.groups.map(function (b) { return [b, b]; }), st.group, function (e) { st.group = e.target.value; st.page = 1; load(); }, 'Tất cả nhóm')));
+          sel(r.groups.map(function (b) { return [b, b]; }), st.group, function (e) { st.group = e.target.value; st.page = 1; load(); }, 'Tất cả nhóm'),
+          h('span', { class: 'sp' }), h('button', { id: 'btnPlXls', type: 'button', title: 'Xuất Excel các mặt hàng đang lọc (theo ô tìm, hãng, nhóm). Không lọc thì xuất cả bảng giá.', onclick: function () { plDownloadCurrent(st); } }, 'Excel')));
         view.appendChild(host);
       }
       host.innerHTML = '';
@@ -227,6 +228,7 @@ PAGES.customers = function () {
     var v = $('#view'); v.innerHTML = '';
     var dash = function (x) { return x ? x : h('span', { class: 'mut' }, '—'); };
     v.appendChild(table({ rows: rows, search: function (r) { return [r.code, r.name, r.short_name, r.tax_code, r.address, r.contact, r.phone, r.email].join(' '); }, onRow: function (r) { go('customer/' + r.id); },
+      xls: 'Danh_sach_khach_hang', xlsCols: [['code', 'Mã KH'], ['name', 'Tên khách hàng'], ['short_name', 'Tên viết tắt'], ['tax_code', 'MST'], ['address', 'Địa chỉ'], ['rep_name', 'Người đại diện'], ['rep_title', 'Chức vụ'], ['contact', 'Người liên hệ'], ['phone', 'Điện thoại'], ['email', 'Email'], ['bank_account', 'Tài khoản ngân hàng'], ['project_count', 'Số dự án'], ['status', 'Trạng thái']].map(function (c) { return { k: c[0], label: c[1] }; }),
       filters: [{ label: 'Mọi trạng thái', opts: [['Hoạt động', 'Hoạt động'], ['Ngừng', 'Ngừng']], get: function (r) { return r.status; } }],
       cols: [{ k: 'code', label: 'Mã KH' },
         { k: 'name', label: 'Tên khách hàng', max: 60, maxw: '460px', fmt: function (r) { return h('span', { title: r.name + (r.address ? '\n📍 ' + r.address : '') }, r.name); } },
@@ -274,10 +276,12 @@ PAGES.customer = function (p) {
           { k: 'paid', label: 'Đã thu', cls: 'r', fmt: function (r) { return M(r.paid); } }] }));
     } else if (tab === 'quotes') {
       host.appendChild(table({ rows: b.quotes, search: function (r) { return r.code + ' ' + r.project_name; }, onRow: function (r) { go('quote/' + r.id); }, empty: 'Chưa có báo giá.',
+        select: bulkActs('quote', 'BaoGia_' + fileSafe(c.code || c.short_name || c.name)), xls: 'Bao_gia_' + fileSafe(c.code || c.short_name || c.name),
         cols: [{ k: 'code', label: 'Mã', fmt: function (r) { return r.code + (r.version > 1 ? ' v' + r.version : ''); } }, { k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'project_name', label: 'Dự án' },
           { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge' }, r.status) : ''; } }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } }] }));
     } else if (tab === 'docs') {
       host.appendChild(table({ rows: b.docs, search: function (r) { return [r.code, r.doc_no, r.project_name].join(' '); }, onRow: function (r) { go('doc/' + r.id); }, empty: 'Chưa có HĐ / PO.',
+        select: bulkActs('hd', 'HopDong_' + fileSafe(c.code || c.short_name || c.name)), xls: 'HD_PO_' + fileSafe(c.code || c.short_name || c.name),
         filters: [{ label: 'Mọi loại', opts: [['HD', 'Hợp đồng'], ['PO', 'PO'], ['PLHD', 'Phụ lục HĐ']], get: function (r) { return r.type; } }],
         cols: [{ k: 'code', label: 'Mã' }, { k: 'type', label: 'Loại', fmt: function (r) { return h('span', { class: 'badge b-info' }, TYPE_LB[r.type] || r.type); } }, { k: 'doc_no', label: 'Số văn bản', fmt: function (r) { return dash(r.doc_no); } },
           { k: 'sign_date', label: 'Ngày ký', fmt: function (r) { return D(r.sign_date); } }, { k: 'project_name', label: 'Dự án' }, { k: 'value', label: 'Giá trị (chưa VAT)', cls: 'r', fmt: function (r) { return M(r.value); } },

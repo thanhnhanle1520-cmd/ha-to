@@ -23,9 +23,12 @@ const txt = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' '
 
   console.log('— Nút in BBCT / TBGH');
   await E(`MEMO={};location.hash='#/delivery/${dl.id}'`); await sleep(2000);
-  const bt = await E(`[...document.querySelectorAll('#acts button')].map(b=>b.textContent)`);
-  T('phiếu giao có BBGH PDF, BBCT PDF, TBGH PDF', ['BBGH PDF', 'BBCT PDF', 'TBGH PDF'].every(x => bt.includes(x)), bt);
-  await E(`[...document.querySelectorAll('#acts button')].find(b=>b.textContent==='BBCT PDF').click()`); await sleep(1800);
+  // bản 30: 6 nút gom thành 3 nút menu TBGH / BBGH / BBCT, mỗi nút có Word và PDF
+  const bt = await E(`['btnTBGH','btnBBGH','btnBBCT'].map(i=>!!document.getElementById(i))`);
+  T('phiếu giao có 3 nút menu TBGH, BBGH, BBCT', bt.every(Boolean), bt);
+  await E(`document.getElementById('btnBBCT').click()`); await sleep(200);
+  T('menu BBCT có Word và PDF', JSON.stringify(await E(`[...document.querySelectorAll('.pop button')].map(b=>b.textContent)`)) === '["Word","PDF"]');
+  await E(`[...document.querySelectorAll('.pop button')].find(b=>b.textContent==='PDF').click()`); await sleep(1800);
   T('BBCT PDF → xem trước, có nút In / Lưu PDF', await E(`!!document.querySelector('.ov iframe') && /BIÊN BẢN GIAO NHẬN CHỨNG TỪ/.test(document.querySelector('.ov iframe').contentDocument.body.textContent) && [...document.querySelectorAll('.ov button')].some(b=>/In/.test(b.textContent))`));
   T('xem trước hiển thị đúng khổ A4 đứng (rộng 210 mm)', Math.abs(await E(`document.querySelector('.ov iframe').contentDocument.querySelector('.sheet').getBoundingClientRect().width`) - 793.7) < 2);
   await pg.shot('/tmp/s27_preview.png');
