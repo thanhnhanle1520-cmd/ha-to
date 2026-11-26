@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.27.0';
+const APP_VERSION = '1.28.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -2709,12 +2709,15 @@ ACTIONS.stockCard = function (u, p) {
 /* Báo cáo Nhập - Xuất - Tồn theo kỳ */
 ACTIONS.stockReport = function (u, p) {
   need_(u, 'stock', 'view');
-  var from = String(p.from || '0000-00-00'), to = String(p.to || '9999-12-31'), L = stockLedger_(), cost = canCost_(u), rows = [], cat = stkCat_();
-  Object.keys(L.items).sort().forEach(function (c) {
-    var it = L.items[c], k = cat[c] || {}, r = { code: c, name: it.name, unit: it.unit, group: k.group || '', brand: k.brand || '', oq: 0, ov: 0, iq: 0, iv: 0, xq: 0, xv: 0 };
+  var from = String(p.from || '0000-00-00'), to = String(p.to || '9999-12-31'), L = stockLedger_(), P = stockPlan_(), cost = canCost_(u), rows = [], cat = stkCat_();
+  var codes = {}; [L.items, P.inc, P.out].forEach(function (o) { Object.keys(o).forEach(function (c) { codes[c] = 1; }); });
+  Object.keys(codes).sort().forEach(function (c) {
+    var it = L.items[c] || { moves: [] }, k = cat[c] || {}, r = { code: c, name: it.name || k.name || '', unit: it.unit || k.unit || '', group: k.group || '', brand: k.brand || '', oq: 0, ov: 0, iq: 0, iv: 0, xq: 0, xv: 0 };
     it.moves.forEach(function (m) { var d = String(m.date); if (d > to) return; if (d < from) { r.oq += m.dir * m.qty; r.ov += m.dir * m.value; } else if (m.dir > 0) { r.iq += m.qty; r.iv += m.value; } else { r.xq += m.qty; r.xv += m.value; } });
     r.cq = r.oq + r.iq - r.xq; r.cv = r.ov + r.iv - r.xv;
-    if (!r.oq && !r.iq && !r.xq) return;
+    /* bản 35: dự kiến (luôn tính đến hôm nay): nhập = đơn mua đã đặt chưa về; xuất = dòng HĐ/PO dự án đang chạy chưa giao */
+    r.pi = (P.inc[c] || {}).qty || 0; r.po = (P.out[c] || {}).qty || 0; r.fq = r.cq + r.pi - r.po;
+    if (!r.oq && !r.iq && !r.xq && !r.pi && !r.po) return;
     if (!cost) { delete r.ov; delete r.iv; delete r.xv; delete r.cv; }
     rows.push(r);
   });
@@ -2724,7 +2727,7 @@ ACTIONS.stockReport = function (u, p) {
     var now = {}; Object.keys(L.items).forEach(function (c) { var q = 0; L.items[c].moves.forEach(function (m) { if (String(m.date) <= lk) q += m.dir * m.qty; }); if (q) now[c] = q; });
     var all = Object.assign({}, cl.data, now); Object.keys(all).forEach(function (c) { var a = num_((cl.data[c] || {}).q), b = now[c] || 0; if (Math.abs(a - b) > 1e-9) diffs.push({ code: c, locked: a, now: b }); });
   }
-  return { rows: rows, from: p.from || '', to: p.to || '', lock: lk, diffs: diffs, can_cost: cost };
+  return { rows: rows, from: p.from || '', to: p.to || '', lock: lk, diffs: diffs, can_cost: cost, today: today_() };
 };
 /* Nạp file phiếu kho: kiểm tra mã trong Bảng giá, số lượng; kiểm kê thì kèm tồn sổ sách tại ngày */
 ACTIONS.stockImportCheck = function (u, p) {
@@ -3121,11 +3124,11 @@ function moneyWords_(n) {
 }
 var FONT_ = '"Times New Roman",Times,serif';
 var BASE_CSS = '*{font-family:"Times New Roman",Times,serif}body,h1,h2,h3,p,div,span,table,th,td,b,i,u{font-family:"Times New Roman",Times,serif}body{font-size:13px;color:#000}h1{font-size:20px;text-align:center;margin:14px 0 4px}h2{font-size:15px;margin:10px 0 4px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:4px 5px;vertical-align:top;word-break:break-word}th{background:#fff}td.r{text-align:right}td.c,th.c{text-align:center}.nb td{border:none;padding:2px 4px}.sig{width:100%;margin-top:18px}.sig td{border:none;text-align:center;width:50%}.hd{width:100%}.hd td{border:none;vertical-align:top}.small{font-size:11px}';
-function letterhead_() {
+function letterhead_(big) {     // big (báo giá bản 35): tên công ty 14pt, địa chỉ 10,5pt
   var img = images_('logo'), c = cfg_(), col = '#3a4a5c';
   var l2 = [c.phone ? 'ĐT: ' + esc_(c.phone) : '', c.tax_code ? 'MST: ' + esc_(c.tax_code) : '', c.website ? esc_(c.website) : ''].filter(Boolean).join(' &nbsp;|&nbsp; ');
-  var txt = '<div style="font-size:15px;font-weight:bold;color:' + col + ';margin-bottom:5px">' + esc_(String(c.company_name || '').toUpperCase()) + '</div>' +
-    '<div style="font-size:11px;line-height:1.7">' + (c.address ? esc_(c.address) + '<br>' : '') + l2 + (c.email ? '<br>Email: ' + esc_(c.email) : '') + '</div>';
+  var txt = '<div style="font-size:' + (big ? '14pt' : '15px') + ';font-weight:bold;color:' + col + ';margin-bottom:5px">' + esc_(String(c.company_name || '').toUpperCase()) + '</div>' +
+    '<div style="font-size:' + (big ? '10.5pt' : '11px') + ';line-height:' + (big ? '1.5' : '1.7') + '">' + (c.address ? esc_(c.address) + '<br>' : '') + l2 + (c.email ? '<br>Email: ' + esc_(c.email) : '') + '</div>';
   return '<table class="hd" width="100%" cellspacing="0" cellpadding="2"><tr>' + (img ? '<td width="22%" valign="middle"><img src="' + img + '" width="130" height="47" alt=""></td>' : '') + '<td valign="middle" align="center" style="text-align:center">' + txt + '</td></tr></table><hr style="border:1px solid ' + col + ';margin:2px 0 8px">';
 }
 function nationalHead_() { return '<div style="text-align:center"><b>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</b><br><b>Độc lập - Tự do - Hạnh phúc</b><br>---------------</div>'; }
@@ -3159,35 +3162,43 @@ function bbCopies_(cfg, dl) {
   return '<p>Biên bản được lập thành ' + pad2_(pick(dl.copies, cfg.bb_copies || 2)) + ' bản, Bên A giữ ' + pad2_(pick(dl.copies_a, cfg.bb_copies_a || 1)) + ' bản, Bên B giữ ' + pad2_(pick(dl.copies_b, cfg.bb_copies_b || 1)) + ' bản, có giá trị pháp lý như nhau.</p>';
 }
 var PAGE_MARGIN_ = '20mm 15mm 20mm 30mm';     // lề in theo Nghị định 30/2020/NĐ-CP: trên 20 · phải 15 · dưới 20 · trái 30 (mm), khổ A4
-function wrapHtml_(title, body, landscape, plain, print) {
+function wrapHtml_(title, body, landscape, plain, print, opt) {
+  opt = opt || {}; var mg = opt.margin || [20, 15, 20, 30], MG = mg.map(function (x) { return x + 'mm'; }).join(' '), XC = opt.css || '';     // lề [trên, phải, dưới, trái] mm
   body = String(body).replace(/<(h1|h2|h3)>/g, '<$1 style="font-family:' + FONT_.replace(/"/g, "'") + '">');   // Word/Google đôi khi bỏ qua CSS của tiêu đề
   body = String(body).replace(/<table(?![^>]*class=)([^>]*)>/g, '<table border="1" width="100%" cellspacing="0" cellpadding="4"$1>');   // viền bảng cho mọi trình đọc (Word, LibreOffice, PDF)
   var sz = landscape ? '29.7cm 21cm' : '21cm 29.7cm';
   if (print) {     // xem trước / in từ trình duyệt: lề giấy = 0 (trình duyệt không còn chỗ in ngày giờ, tên file, đường dẫn); lề NĐ 30 tạo bằng nội dung, lặp lại ở mọi trang
     var W = landscape ? '297mm' : '210mm', H = landscape ? '210mm' : '297mm';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') +
-      'html,body{margin:0;padding:0}body{background:#8a8f98}.sheet{width:' + W + ';min-height:' + H + ';box-sizing:border-box;margin:12px auto;padding:0 15mm 0 30mm;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}' +
-      'table.pgw{width:100%;border-collapse:collapse}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td,table.pgw>tbody>tr>td{border:none;padding:0}table.pgw>thead>tr>td{height:20mm}table.pgw>tfoot>tr>td{height:20mm}' +
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC +
+      'html,body{margin:0;padding:0}body{background:#8a8f98}.sheet{width:' + W + ';min-height:' + H + ';box-sizing:border-box;margin:12px auto;padding:0 ' + mg[1] + 'mm 0 ' + mg[3] + 'mm;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}' +
+      'table.pgw{width:100%;border-collapse:collapse}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td,table.pgw>tbody>tr>td{border:none;padding:0}table.pgw>thead>tr>td{height:' + mg[0] + 'mm}table.pgw>tfoot>tr>td{height:' + mg[2] + 'mm}' +
       '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
   }
-  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + PAGE_MARGIN_ + '}' +
-    '@page WordSection1{size:' + sz + ';' + (landscape ? 'mso-page-orientation:landscape;' : '') + 'margin:' + PAGE_MARGIN_ + '}div.WordSection1{page:WordSection1}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + '</style></head><body><div class="WordSection1">' + body + '</div></body></html>';
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + MG + '}' +
+    '@page WordSection1{size:' + sz + ';' + (landscape ? 'mso-page-orientation:landscape;' : '') + 'margin:' + MG + '}div.WordSection1{page:WordSection1}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC + '</style></head><body><div class="WordSection1">' + body + '</div></body></html>';
 }
 function projectCtx_(pid, cid) {
   var pr = readTable_('PROJECTS').filter(function (x) { return x.id === pid; })[0] || {};
   var cu = readTable_('CUSTOMERS').filter(function (x) { return x.id === (cid || pr.customer_id); })[0] || {};
   return { pr: pr, cu: cu };
 }
+/* Mẫu báo giá (bản 35): bỏ CK% — đơn giá in ra là giá sau chiết khấu; chữ to, dòng giãn đều; lề trái 20 · phải 15 · trên/dưới 15 mm */
+var QUOTE_MARGIN_ = [15, 15, 15, 20];
+var QUOTE_CSS_ = '.bq p,.bq td,.bq th,.bq div,.bq span{font-size:12pt;line-height:1.3}.bq h1{font-size:18pt;margin:10pt 0 2pt;text-align:center}.bq p{margin:0 0 6pt}.bq p.no{text-align:center;margin:0 0 12pt}' +
+  '.bq table.it th,.bq table.it td{font-size:11.5pt;padding:5pt;vertical-align:middle;border:1px solid #000}.bq table.it th{background:#eef1f5;font-weight:bold;text-align:center}.bq table.it td.tot{text-align:right}' +
+  '.bq table.inf td,.bq table.tm td{border:none;padding:2pt 4pt;vertical-align:top}.bq table.inf td.k{font-weight:bold;white-space:nowrap}.bq p.sec{font-weight:bold;margin:12pt 0 4pt}.bq p.bank,.bq p.bank b{font-size:11pt}' +
+  '.bq table.sig td{border:none;text-align:center;vertical-align:top;font-size:12pt}.bq table.sig i{font-size:11pt}.bq .gap{height:8pt}';
 function lineTable_(rows, withPrice, tot) {
   var sp = rows.some(function (r) { return String(r.spec || '').trim(); }), mv = (tot.groups || []).length > 1;     // nhiều mức VAT → thêm cột VAT
-  var nc = (sp ? 9 : 8) + (mv ? 1 : 0);
-  var h = '<table><tr><th class="c" style="width:28px">STT</th><th>Tên hàng hóa</th>' + (sp ? '<th style="width:14%">Quy cách</th>' : '') + '<th style="width:11%">Model</th><th style="width:9%">Hãng / Xuất xứ</th><th class="c" style="width:6%">ĐVT</th><th class="c" style="width:6%">SL</th><th class="c" style="width:11%">Đơn giá</th><th class="c" style="width:5%">CK%</th>' + (mv ? '<th class="c" style="width:5%">VAT</th>' : '') + '<th class="c" style="width:12%">Thành tiền</th><th style="width:10%">Ghi chú</th></tr>';
+  var nc = (sp ? 8 : 7) + (mv ? 1 : 0);
+  var h = '<table class="it" border="1" width="100%" cellspacing="0" cellpadding="6"><tr><th style="width:6%;white-space:nowrap">STT</th><th>Tên hàng hóa</th>' + (sp ? '<th style="width:14%">Quy cách</th>' : '') + '<th style="width:10%">Model</th><th style="width:10%">Hãng / Xuất xứ</th><th style="width:8%;white-space:nowrap">ĐVT</th><th style="width:6%">SL</th><th style="width:11%">Đơn giá</th>' + (mv ? '<th style="width:6%">VAT</th>' : '') + '<th style="width:13%">Thành tiền</th><th style="width:9%;white-space:nowrap">Ghi chú</th></tr>';
   rows.forEach(function (r, i) {
-    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' - ')) + '</td><td class="c">' + esc_(r.unit) + '</td><td class="r">' + qty_(r.qty) + '</td><td class="r">' + money_(r.price) + '</td><td class="r">' + qty_(r.disc_pct) + '</td>' + (mv ? '<td class="c">' + qty_(r.vat) + '%</td>' : '') + '<td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note) + '</td></tr>';
+    var d = num_(r.disc_pct), net = d ? Math.round(num_(r.price) * (1 - d / 100)) : num_(r.price);     // không in cột CK%: có chiết khấu thì in đơn giá sau chiết khấu
+    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' - ')) + '</td><td class="c" style="white-space:nowrap">' + esc_(r.unit) + '</td><td class="c">' + qty_(r.qty) + '</td><td class="r">' + money_(net) + '</td>' + (mv ? '<td class="c">' + qty_(r.vat) + '%</td>' : '') + '<td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note || '') + '</td></tr>';
   });
   var gs = (tot.groups && tot.groups.length ? tot.groups : [{ rate: tot.vat_pct, base: tot.sub, vat: tot.vat }]).map(function (g) { return ['Thuế GTGT ' + qty_(g.rate) + '%' + (mv ? ' (trên ' + money_(g.base) + ')' : ''), g.vat, 0]; });
   [['Cộng tiền hàng', tot.sub, 0]].concat(gs, [['Tổng thanh toán', tot.total, 1]]).forEach(function (x) {
-    h += '<tr><td colspan="' + nc + '" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>';
+    h += '<tr><td class="tot" colspan="' + nc + '" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>';
   });
   return h + '</table>';
 }
@@ -3261,7 +3272,7 @@ function hdBody_(dc, items) {
   return out;
 }
 function buildExport_(u, p) {
-  var kind = p.kind, id = p.id, body = '', title = '', fname = '', landscape = false, plain = false;
+  var kind = p.kind, id = p.id, body = '', title = '', fname = '', landscape = false, plain = false, opt = null;
   if (kind === 'quote') {
     need_(u, 'quotes', 'view');
     var q = readTable_('QUOTES').filter(function (x) { return x.id === id; })[0]; if (!q) throw new Error('Không tìm thấy báo giá.');
@@ -3272,16 +3283,18 @@ function buildExport_(u, p) {
     var sender = readTable_('USERS').filter(function (x) { return String(x.email).toLowerCase() === String(q.created_by || '').toLowerCase(); })[0] || {};
     var sName = sender.name || (q.created_by === u.email ? u.name : '') || q.created_by || '', sPhone = sender.phone || '';
     var cName = q.contact_name || pc.pr.rep_name || pc.cu.contact || '', cPhone = q.contact_phone || pc.pr.rep_phone || pc.cu.phone || '', cMail = q.contact_email || pc.cu.email || '';
-    var term = function (k, v) { return '<tr><td width="28%">' + k + '</td><td>' + (v ? esc_(v) : '&nbsp;') + '</td></tr>'; };
-    body = letterhead_() + '<h1>BÁO GIÁ</h1><p style="text-align:center;margin:2px 0 8px">Số: ' + esc_(q.code) + 'V' + esc_(q.version) + ' - ' + esc_(viDateLong_(q.date)) + '</p>' +
-      '<table class="hd" width="100%" cellspacing="0" cellpadding="2"><tr><td width="62%" valign="top"><b>Khách hàng:</b> ' + esc_(pc.cu.name || '') + '<br><b>Người nhận:</b> ' + esc_(cName) + '<br><b>Số điện thoại:</b> ' + esc_(cPhone) + '<br><b>Email:</b> ' + esc_(cMail) + '<br><b>Công trình:</b> ' + esc_(pc.pr.name || '') + '</td>' +
-      '<td width="38%" valign="top"><b>Người gửi:</b> ' + esc_(sName) + '<br><b>Số điện thoại:</b> ' + esc_(sPhone) + '</td></tr></table><p style="margin:4px 0"></p>' +
-      lineTable_(rows, 2, { sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
-      '<p><i>Bằng chữ: ' + esc_(moneyWords_(t.total)) + '</i></p>' +
-      '<p><b>Điều khoản và điều kiện:</b></p><table>' + term('Bảo hành', q.warranty_text) + term('Địa điểm giao hàng', q.deliver_place) + term('Thời gian giao hàng', q.deliver_time) + term('Phương thức thanh toán', q.pay_method) + term('Hiệu lực báo giá', vt) + '</table>' +
-      (q.note ? '<p><b>Ghi chú:</b> ' + esc_(q.note) + '</p>' : '') +
-      '<p>Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
-      bankBlock_() + sigBlock_('KHÁCH HÀNG', 'XÁC NHẬN BÁO GIÁ', false);
+    var term = function (k, v) { return '<tr><td width="32%">' + k + '</td><td>' + (v ? esc_(v) : '&nbsp;') + '</td></tr>'; };
+    var kv = function (k1, v1, k2, v2) { return '<tr><td class="k" width="17%">' + k1 + '</td><td width="47%">' + (v1 ? esc_(v1) : '') + '</td><td class="k" width="15%">' + (k2 || '') + '</td><td width="21%">' + (v2 ? esc_(v2) : '') + '</td></tr>'; };
+    body = '<div class="bq">' + letterhead_(true) + '<h1>BÁO GIÁ</h1><p class="no">Số: ' + esc_(q.code) + 'V' + esc_(q.version) + ' - ' + esc_(viDateLong_(q.date)) + '</p>' +
+      '<table class="inf" width="100%" cellspacing="0" cellpadding="3">' + kv('Khách hàng:', pc.cu.name || '', 'Người gửi:', sName) + kv('Người nhận:', cName, 'Điện thoại:', sPhone) + kv('Điện thoại:', cPhone) + kv('Email:', cMail) + kv('Công trình:', pc.pr.name || '') + '</table>' +
+      '<p class="gap"></p>' + lineTable_(rows, 2, { sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
+      '<p style="margin-top:6pt"><i>Bằng chữ: ' + esc_(moneyWords_(t.total)) + '</i></p>' +
+      '<p class="sec">Điều khoản và điều kiện:</p><table class="tm" width="100%" cellspacing="0" cellpadding="3">' + term('Bảo hành', q.warranty_text) + term('Địa điểm giao hàng', q.deliver_place) + term('Thời gian giao hàng', q.deliver_time) + term('Phương thức thanh toán', q.pay_method) + term('Hiệu lực báo giá', vt) + '</table>' +
+      (q.note ? '<p class="sec">Ghi chú:</p><p>' + esc_(q.note) + '</p>' : '') +
+      '<p class="gap"></p><p>Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
+      bankBlock_().replace('<p class="small">', '<p class="bank">') +
+      '<table class="sig" width="100%" cellspacing="0" cellpadding="3"><tr><td width="50%"><b>KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></td><td width="50%"><b>XÁC NHẬN BÁO GIÁ</b><br><i>(Ký, ghi rõ họ tên)</i></td></tr><tr><td style="height:25mm">&nbsp;</td><td style="height:25mm">&nbsp;</td></tr></table></div>';
+    opt = { margin: QUOTE_MARGIN_, css: QUOTE_CSS_ };
     landscape = false;
   } else if (kind === 'hd') {
     need_(u, 'docs', 'view');
@@ -3374,7 +3387,7 @@ function buildExport_(u, p) {
       '<p style="text-align:center">Khách hàng: <b>' + esc_(String(pcc.cu.name || '').toUpperCase()) + '</b><br><b>Số: ' + esc_(so) + '</b></p>' + tb +
       '<div style="text-align:right;margin-top:16px;margin-right:40px">Xác nhận của <b>' + esc_(cfx.company_name.replace(/^CÔNG TY TNHH KỸ THUẬT VÀ THƯƠNG MẠI /i, 'Công Ty ').replace(/^CÔNG TY /i, 'Công ty ')) + '</b><br>HCM, ' + esc_(viDateLong_(ct.issue_date).replace(/^ngày/, 'Ngày')) + '</div>';
   } else throw new Error('Mẫu chứng từ không hợp lệ.');
-  return { title: title, fname: fname, body: body, landscape: landscape, plain: plain };
+  return { title: title, fname: fname, body: body, landscape: landscape, plain: plain, opt: opt };
 }
 function exportFolder_() {   // nhớ ID thư mục "Xuất file" để khỏi dò lại Drive mỗi lần (tiết kiệm 1–2 giây)
   var c = CacheService.getScriptCache(), id = c.get('XF'), fo = null;
@@ -3383,7 +3396,7 @@ function exportFolder_() {   // nhớ ID thư mục "Xuất file" để khỏi d
   return fo;
 }
 ACTIONS.export = function (u, p) {
-  var r = buildExport_(u, p), fmt = p.format || 'pdf', html = wrapHtml_(r.title, r.body, r.landscape, r.plain, fmt === 'html'), blob;
+  var r = buildExport_(u, p), fmt = p.format || 'pdf', html = wrapHtml_(r.title, r.body, r.landscape, r.plain, fmt === 'html', r.opt), blob;
   if (fmt === 'html') return { name: r.fname + '.pdf', title: r.title, html: html };   // xem trước trong giao diện
   if (fmt === 'pdf') blob = Utilities.newBlob(html, 'text/html', r.fname + '.html').getAs('application/pdf').setName(r.fname + '.pdf');
   else if (fmt === 'xls') blob = Utilities.newBlob(html, 'application/vnd.ms-excel', r.fname + '.xls');

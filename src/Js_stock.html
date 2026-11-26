@@ -40,10 +40,10 @@ function stkTon(v, tabs) {
     v.appendChild(h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, 'Khả dụng = Tồn thực + Đang về − Xuất dự kiến. Đang về: đơn mua "Đã đặt" chưa về đủ. Xuất dự kiến: dòng HĐ / PO / PLHĐ còn hiệu lực chưa giao (dự án chưa hoàn thành). Bấm 1 dòng để xem thẻ kho.'));
     var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên hàng', max: 46, maxw: '380px' }, { k: 'model', label: 'Model', max: 18 }, { k: 'unit', label: 'ĐVT' },
       { k: 'qty', label: 'Tồn thực', cls: 'r', fmt: function (x) { return h('b', { class: x.qty < 0 ? 'neg' : '' }, N(x.qty)); } }];
-    if (r.can_cost) cols.push({ k: 'value', label: 'Giá trị tồn', cls: 'r', fmt: function (x) { return x.value ? M(x.value) : ''; } });
-    cols.push({ k: 'inc', label: 'Đang về', cls: 'r', fmt: function (x) { return x.inc ? N(x.inc) : ''; } }, { k: 'out', label: 'Xuất dự kiến', cls: 'r', fmt: function (x) { return x.out ? N(x.out) : ''; } },
+    cols.push({ k: 'inc', label: 'Nhập dự kiến', cls: 'r', fmt: function (x) { return x.inc ? N(x.inc) : ''; } }, { k: 'out', label: 'Xuất dự kiến', cls: 'r', fmt: function (x) { return x.out ? N(x.out) : ''; } },
       { k: 'avail', label: 'Khả dụng', cls: 'r', fmt: function (x) { return h('b', { class: x.avail < 0 ? 'neg' : 'pos' }, N(x.avail)); } },
       { k: 'status', label: 'Tình trạng', val: function (x) { return (STK_STS[x.status] || [''])[0]; }, fmt: function (x) { return stkBadge(x.status); } });
+    if (r.can_cost) cols.push({ k: 'value', label: 'Giá trị tồn', cls: 'r', fmt: function (x) { return x.value ? M(x.value) : ''; } });   // bản 35: giá trị xếp cuối
     v.appendChild(table({ rows: rows, xls: 'Ton_kho', search: function (x) { return [x.code, x.name, x.model, x.brand].join(' '); }, empty: 'Chưa có phát sinh kho. Lưu tờ khai có mã hàng, ghi đợt hàng về của đơn mua, hoặc lập phiếu "Tồn đầu kỳ".',
       filters: [{ label: 'Mọi tình trạng', opts: Object.keys(STK_STS).map(function (k) { return [k, STK_STS[k][0]]; }), get: function (x) { return x.status; } }, { label: 'Mọi mã', opts: [['1', 'Đang có tồn'], ['0', 'Hết tồn']], get: function (x) { return x.qty > 0 ? '1' : '0'; } }],
       cols: cols, onRow: function (x) { stkCardModal(x.code); } }));
@@ -74,6 +74,16 @@ function stkNocodeModal(after, dirty) {
     m = modal({ title: 'Dòng chứng từ chưa có mã hàng (' + rows.length + ')', wide: true, dismiss: true, body: body, onclose: function () { if (changed && after) after(); } });
   });
 }
+/* bản 35: danh sách chứng từ của số Nhập / Xuất dự kiến */
+function stkPlanModal(code, which) {
+  safe(call('stockCard', { code: code })).then(function (c) {
+    if (!c) return; var L = which === 'inc' ? c.inc : c.out;
+    modal({ title: (which === 'inc' ? 'Nhập dự kiến · ' : 'Xuất dự kiến · ') + c.code + ' · ' + c.name, wide: true, dismiss: true, body: h('div', null, h('p', { class: 'mut', style: 'margin-top:0' }, which === 'inc' ? 'Đơn mua đã đặt, phần chưa về.' : 'Dòng HĐ / PO của dự án đang thực hiện, phần chưa giao.'),
+      h('div', { class: 'tw' }, h('table', { class: 't stkplan' }, h('thead', null, h('tr', null, (which === 'inc' ? ['Đơn mua', 'Dự kiến về', 'Số lượng'] : ['HĐ / PO · dự án', 'Hàng', 'Số lượng']).map(function (x, i) { return h('th', { class: i === 2 ? 'r' : '' }, x); }))),
+        h('tbody', null, L.map(function (x) { return h('tr', null, h('td', null, stkLink(x.link, x.ref)), h('td', null, which === 'inc' ? (x.eta ? D(x.eta) : 'chưa có ngày') : (x.name || '')), h('td', { class: 'r' }, N(x.qty) + ' ' + (c.unit || ''))); })),
+        h('tfoot', null, h('tr', null, h('td', { colspan: 2, class: 'r' }, 'Cộng'), h('td', { class: 'r' }, h('b', null, N(L.reduce(function (t, x) { return t + num(x.qty); }, 0)) + ' ' + (c.unit || '')))))))) });
+  });
+}
 /* ---- Thẻ kho 1 mã ---- */
 function stkCardModal(code) {
   safe(call('stockCard', { code: code })).then(function (c) {
@@ -91,11 +101,11 @@ function stkCardModal(code) {
     }));
     var lots = c.lots.filter(function (l) { return l.rem > 1e-9; });
     var body = h('div', null,
-      h('div', { class: 'tkgrid', style: 'margin-bottom:10px' }, [['Tồn thực', N(c.qty) + ' ' + (c.unit || '')], cost ? ['Giá trị tồn', M(c.value) + ' đ'] : null, ['Đang về', N(c.inc.reduce(function (s, x) { return s + x.qty; }, 0))], ['Xuất dự kiến', N(c.out.reduce(function (s, x) { return s + x.qty; }, 0))]].filter(Boolean).map(function (k) { return h('div', { class: 'tkkv' }, h('span', { class: 'mut' }, k[0]), h('b', null, k[1])); })),
+      h('div', { class: 'tkgrid', style: 'margin-bottom:10px' }, [['Tồn thực', N(c.qty) + ' ' + (c.unit || '')], cost ? ['Giá trị tồn', M(c.value) + ' đ'] : null, ['Nhập dự kiến', N(c.inc.reduce(function (s, x) { return s + x.qty; }, 0))], ['Xuất dự kiến', N(c.out.reduce(function (s, x) { return s + x.qty; }, 0))]].filter(Boolean).map(function (k) { return h('div', { class: 'tkkv' }, h('span', { class: 'mut' }, k[0]), h('b', null, k[1])); })),
       h('h4', null, 'Lô còn tồn'), lots.length ? h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Lô', 'Ngày nhập', 'SL nhập', 'Còn lại', 'Giữ cho dự án'].concat(cost ? ['Giá vốn/đvt'] : []).map(function (x, i) { return h('th', { class: i >= 2 ? 'r' : '' }, x); }))),
         h('tbody', null, lots.map(function (l) { return h('tr', null, h('td', null, stkLink(l.link, l.ref)), h('td', null, D(l.date)), h('td', { class: 'r' }, N(l.qty)), h('td', { class: 'r' }, h('b', null, N(l.rem))), h('td', { class: 'r' }, l.reserved ? N(Math.min(l.reserved, l.rem)) : ''), cost ? h('td', { class: 'r' }, M(l.cost)) : null); })))) : h('div', { class: 'mut' }, 'Không còn lô nào.'),
       c.inc.length || c.out.length ? h('div', { class: 'grid g2', style: 'margin-top:10px' },
-        h('div', null, h('h4', null, 'Đang về'), c.inc.length ? h('ul', { style: 'margin:0;padding-left:18px' }, c.inc.map(function (x) { return h('li', null, stkLink(x.link, x.ref), ': ' + N(x.qty) + (x.eta ? ' · dự kiến ' + D(x.eta) : '')); })) : h('div', { class: 'mut' }, 'Không có')),
+        h('div', null, h('h4', null, 'Nhập dự kiến'), c.inc.length ? h('ul', { style: 'margin:0;padding-left:18px' }, c.inc.map(function (x) { return h('li', null, stkLink(x.link, x.ref), ': ' + N(x.qty) + (x.eta ? ' · dự kiến ' + D(x.eta) : '')); })) : h('div', { class: 'mut' }, 'Không có')),
         h('div', null, h('h4', null, 'Xuất dự kiến'), c.out.length ? h('ul', { style: 'margin:0;padding-left:18px' }, c.out.map(function (x) { return h('li', null, stkLink(x.link, x.ref), ': ' + N(x.qty)); })) : h('div', { class: 'mut' }, 'Không có'))) : null,
       h('h4', null, 'Thẻ kho (mới nhất trước)'),
       h('div', { class: 'tw', style: 'max-height:45vh;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Ngày', 'Chứng từ', 'Diễn giải', 'Nhập', 'Xuất', 'Tồn'].concat(cost ? ['Đơn giá', 'Giá trị'] : [], ['Lô xuất']).map(function (x, i) { return h('th', { class: i >= 3 && i <= (cost ? 7 : 5) ? 'r' : '' }, x); }))), mv.length ? tb : h('tbody', null, h('tr', null, h('td', { colspan: 9, class: 'mut' }, 'Chưa có phát sinh.'))))));
@@ -133,31 +143,45 @@ function stkNxt(v, tabs) {
       var uq = function (k) { var m = {}; r.rows.forEach(function (x) { if (x[k]) m[x[k]] = 1; }); return Object.keys(m).sort(); };
       fillSel(fg, uq('group'), st.grp, 'Mọi nhóm'); fillSel(fb, uq('brand'), st.brand, 'Mọi thương hiệu');
       var rows = r.rows.filter(function (x) { return (!st.grp || x.group === st.grp) && (!st.brand || x.brand === st.brand); }).map(function (x) { x.id = x.code; return x; }), T = { ov: 0, iv: 0, xv: 0, cv: 0 };
-      if (st.by !== 'code') {      // gộp: chỉ cộng giá trị (số lượng khác đơn vị không cộng được)
-        var g = {}, ord = []; rows.forEach(function (x) { var k = x[st.by] || '(chưa phân loại)', o = g[k]; if (!o) { o = g[k] = { id: k, key: k, n: 0, ov: 0, iv: 0, xv: 0, cv: 0 }; ord.push(k); } o.n++; ['ov', 'iv', 'xv', 'cv'].forEach(function (f) { o[f] += x[f] || 0; }); });
+      /* bản 35: số lượng trước, giá trị sau (ô "Hiện giá trị"); thêm Nhập / Xuất / Tồn dự kiến (tính đến hôm nay) */
+      var showV = c && !!st.val, past = st.to && r.today && st.to < r.today, dkNote = past ? ' *' : '';
+      if (c) { valCk.checked = showV; valWrap.style.display = ''; } else valWrap.style.display = 'none';
+      if (past) host.appendChild(h('div', { class: 'mut', style: 'margin-bottom:6px;font-size:12px' }, '* Nhập / Xuất / Tồn dự kiến luôn tính đến hôm nay (' + D(r.today) + '), không theo kỳ đã chọn.'));
+      var kpi = function (list) { return h('div', { class: 'grid g3 stkkpi', style: 'margin-bottom:12px' }, list.map(function (k) { return h('div', { class: 'kpi' + (k[3] ? ' ' + k[3] : '') }, h('div', { class: 'l' }, k[0]), h('div', { class: 'v' }, k[1]), h('div', { class: 'l' }, k[2])); })); };
+      var nI = rows.filter(function (x) { return x.iq; }).length, nX = rows.filter(function (x) { return x.xq; }).length, nS = rows.filter(function (x) { return x.fq < 0; }).length;
+      if (st.by !== 'code') {      // gộp: số lượng khác đơn vị không cộng được → đếm số mã; giá trị cộng được
+        var g = {}, ord = []; rows.forEach(function (x) { var k = x[st.by] || '(chưa phân loại)', o = g[k]; if (!o) { o = g[k] = { id: k, key: k, n: 0, ni: 0, nx: 0, npi: 0, npo: 0, ns: 0, ov: 0, iv: 0, xv: 0, cv: 0 }; ord.push(k); } o.n++; if (x.iq) o.ni++; if (x.xq) o.nx++; if (x.pi) o.npi++; if (x.po) o.npo++; if (x.fq < 0) o.ns++; ['ov', 'iv', 'xv', 'cv'].forEach(function (f) { o[f] += x[f] || 0; }); });
         var grows = ord.sort().map(function (k) { return g[k]; }); grows.forEach(function (x) { T.ov += x.ov; T.iv += x.iv; T.xv += x.xv; T.cv += x.cv; });
-        var lb = st.by === 'group' ? 'Nhóm hàng' : 'Thương hiệu', gv = function (k, l) { return { k: k, label: l, cls: 'r', fmt: function (x) { return x[k] ? M(x[k]) : ''; } }; };
-        if (c) host.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:12px' }, [['Tồn đầu kỳ', M(T.ov)], ['Nhập trong kỳ', M(T.iv)], ['Xuất trong kỳ', M(T.xv)], ['Tồn cuối kỳ', M(T.cv)]].map(function (k) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, k[0]), h('div', { class: 'v' }, k[1]), h('div', { class: 'l' }, 'giá vốn, VND')); })));
-        host.appendChild(table({ rows: grows, xls: 'NXT_theo_' + (st.by === 'group' ? 'nhom' : 'thuong_hieu') + '_' + st.from + '_' + st.to, empty: 'Không có phát sinh trong kỳ.', cols: [{ k: 'key', label: lb }, { k: 'n', label: 'Số mã', cls: 'r' }].concat(c ? [gv('ov', 'Tồn đầu (giá trị)'), gv('iv', 'Nhập (giá trị)'), gv('xv', 'Xuất (giá trị)'), gv('cv', 'Tồn cuối (giá trị)')] : []),
-          foot: c ? function (rs) { var t = { ov: 0, iv: 0, xv: 0, cv: 0 }; rs.forEach(function (x) { t.ov += x.ov; t.iv += x.iv; t.xv += x.xv; t.cv += x.cv; }); return h('tr', null, h('td', { colspan: 2, class: 'r' }, 'Cộng'), h('td', { class: 'r' }, h('b', null, M(t.ov))), h('td', { class: 'r' }, h('b', null, M(t.iv))), h('td', { class: 'r' }, h('b', null, M(t.xv))), h('td', { class: 'r' }, h('b', null, M(t.cv)))); } : null,
+        var lb = st.by === 'group' ? 'Nhóm hàng' : 'Thương hiệu', gv = function (k, l) { return { k: k, label: l, cls: 'r tkc', fmt: function (x) { return x[k] ? M(x[k]) : ''; } }; }, gn = function (k, l, neg) { return { k: k, label: l, cls: 'r', fmt: function (x) { return x[k] ? h(neg ? 'b' : 'span', { class: neg ? 'neg' : '' }, N(x[k])) : ''; } }; };
+        host.appendChild(kpi([['Số mã', N(rows.length), 'trong ' + grows.length + ' ' + lb.toLowerCase()], ['Mã có nhập trong kỳ', N(nI), 'mã'], ['Mã có xuất trong kỳ', N(nX), 'mã'], ['Mã sẽ thiếu' + dkNote, N(nS), 'tồn dự kiến âm', nS ? 'neg' : '']]));
+        if (showV) host.appendChild(kpi([['Tồn đầu kỳ', M(T.ov), 'giá vốn, VND'], ['Nhập trong kỳ', M(T.iv), 'giá vốn, VND'], ['Xuất trong kỳ', M(T.xv), 'giá vốn, VND'], ['Tồn cuối kỳ', M(T.cv), 'giá vốn, VND']]));
+        host.appendChild(table({ rows: grows, xls: 'NXT_theo_' + (st.by === 'group' ? 'nhom' : 'thuong_hieu') + '_' + st.from + '_' + st.to, empty: 'Không có phát sinh trong kỳ.', cols: [{ k: 'key', label: lb }, { k: 'n', label: 'Số mã', cls: 'r' }, gn('ni', 'Mã có nhập'), gn('nx', 'Mã có xuất'), gn('npi', 'Mã nhập dự kiến' + dkNote), gn('npo', 'Mã xuất dự kiến' + dkNote), gn('ns', 'Mã sẽ thiếu' + dkNote, 1)].concat(showV ? [gv('ov', 'Tồn đầu (giá trị)'), gv('iv', 'Nhập (giá trị)'), gv('xv', 'Xuất (giá trị)'), gv('cv', 'Tồn cuối (giá trị)')] : []),
+          foot: showV ? function (rs) { var t = { ov: 0, iv: 0, xv: 0, cv: 0 }; rs.forEach(function (x) { t.ov += x.ov; t.iv += x.iv; t.xv += x.xv; t.cv += x.cv; }); return h('tr', null, h('td', { colspan: 7, class: 'r' }, 'Cộng'), h('td', { class: 'r' }, h('b', null, M(t.ov))), h('td', { class: 'r' }, h('b', null, M(t.iv))), h('td', { class: 'r' }, h('b', null, M(t.xv))), h('td', { class: 'r' }, h('b', null, M(t.cv)))); } : null,
           onRow: function (x) { if (st.by === 'group') fg.value = x.key === '(chưa phân loại)' ? '' : x.key; else fb.value = x.key === '(chưa phân loại)' ? '' : x.key; by.value = 'code'; load(); } }));
         return;
       }
       rows.forEach(function (x) { T.ov += x.ov || 0; T.iv += x.iv || 0; T.xv += x.xv || 0; T.cv += x.cv || 0; });
-      var sq = function (k) { return { k: k, label: { oq: 'Tồn đầu', iq: 'Nhập', xq: 'Xuất', cq: 'Tồn cuối' }[k], cls: 'r', fmt: function (x) { return x[k] ? h(k === 'cq' ? 'b' : 'span', { class: x[k] < 0 ? 'neg' : '' }, N(x[k])) : ''; } }; };
-      var sv = function (k) { return { k: k, label: 'Giá trị', cls: 'r tkc', fmt: function (x) { return x[k] ? M(x[k]) : ''; } }; };
-      var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên hàng', max: 40, maxw: '320px' }, { k: 'unit', label: 'ĐVT' }];
+      var sq = function (k, l, bold) { return { k: k, label: l, cls: 'r', fmt: function (x) { return x[k] ? h(bold ? 'b' : 'span', { class: x[k] < 0 ? 'neg' : '' }, N(x[k])) : ''; } }; };
+      var sp = function (k, l, which) { return { k: k, label: l + dkNote, cls: 'r stkdk', fmt: function (x) { return x[k] ? h('a', { href: 'javascript:void 0', class: 'stkpl', title: 'Xem chứng từ', onclick: function (e) { e.stopPropagation(); stkPlanModal(x.code, which); } }, N(x[k])) : ''; } }; };
+      var sv = function (k, l) { return { k: k, label: l, cls: 'r tkc', fmt: function (x) { return x[k] ? M(x[k]) : ''; } }; };
+      var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên hàng', max: 40, maxw: '320px' }, { k: 'unit', label: 'ĐVT' },
+        sq('oq', 'Tồn đầu'), sq('iq', 'Nhập'), sq('xq', 'Xuất'), sq('cq', 'Tồn cuối', 1), sp('pi', 'Nhập dự kiến', 'inc'), sp('po', 'Xuất dự kiến', 'out'),
+        { k: 'fq', label: 'Tồn dự kiến' + dkNote, cls: 'r stkdk', fmt: function (x) { return (x.pi || x.po || x.fq) ? h('b', { class: x.fq < 0 ? 'neg' : '' }, N(x.fq)) : ''; } }];
+      if (showV) cols.push(sv('ov', 'Giá trị tồn đầu'), sv('iv', 'Giá trị nhập'), sv('xv', 'Giá trị xuất'), sv('cv', 'Giá trị tồn cuối'));
       if (st.grp || st.brand) host.appendChild(h('div', { class: 'mut', style: 'margin-bottom:6px' }, 'Đang lọc: ' + [st.grp, st.brand].filter(Boolean).join(' · ')));
-      ['o', 'i', 'x', 'c'].forEach(function (p) { cols.push(sq(p + 'q')); if (c) cols.push(sv(p + 'v')); });
-      if (c) host.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:12px' }, [['Tồn đầu kỳ', M(T.ov)], ['Nhập trong kỳ', M(T.iv)], ['Xuất trong kỳ', M(T.xv)], ['Tồn cuối kỳ', M(T.cv)]].map(function (k) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, k[0]), h('div', { class: 'v' }, k[1]), h('div', { class: 'l' }, 'giá vốn, VND')); })));
+      host.appendChild(kpi([['Số mã', N(rows.length), 'có phát sinh hoặc dự kiến'], ['Mã có nhập trong kỳ', N(nI), 'mã'], ['Mã có xuất trong kỳ', N(nX), 'mã'], ['Mã sẽ thiếu' + dkNote, N(nS), 'tồn dự kiến âm', nS ? 'neg' : '']]));
+      if (showV) host.appendChild(kpi([['Tồn đầu kỳ', M(T.ov), 'giá vốn, VND'], ['Nhập trong kỳ', M(T.iv), 'giá vốn, VND'], ['Xuất trong kỳ', M(T.xv), 'giá vốn, VND'], ['Tồn cuối kỳ', M(T.cv), 'giá vốn, VND']]));
       host.appendChild(table({ rows: rows, xls: 'Nhap_xuat_ton_' + st.from + '_' + st.to, search: function (x) { return [x.code, x.name].join(' '); }, empty: 'Không có phát sinh trong kỳ.', cols: cols,
-        foot: c ? function (rs) { var t = { ov: 0, iv: 0, xv: 0, cv: 0 }; rs.forEach(function (x) { t.ov += x.ov; t.iv += x.iv; t.xv += x.xv; t.cv += x.cv; }); return h('tr', null, h('td', { colspan: 3, class: 'r' }, 'Cộng ' + rs.length + ' mã'), h('td'), h('td', { class: 'r' }, h('b', null, M(t.ov))), h('td'), h('td', { class: 'r' }, h('b', null, M(t.iv))), h('td'), h('td', { class: 'r' }, h('b', null, M(t.xv))), h('td'), h('td', { class: 'r' }, h('b', null, M(t.cv)))); } : null,
+        foot: showV ? function (rs) { var t = { ov: 0, iv: 0, xv: 0, cv: 0 }; rs.forEach(function (x) { t.ov += x.ov; t.iv += x.iv; t.xv += x.xv; t.cv += x.cv; }); return h('tr', null, h('td', { colspan: 10, class: 'r' }, 'Cộng ' + rs.length + ' mã'), h('td', { class: 'r' }, h('b', null, M(t.ov))), h('td', { class: 'r' }, h('b', null, M(t.iv))), h('td', { class: 'r' }, h('b', null, M(t.xv))), h('td', { class: 'r' }, h('b', null, M(t.cv)))); } : null,
         onRow: function (x) { stkCardModal(x.code); } }));
     });
   }
+  var valCk = h('input', { type: 'checkbox', id: 'stkVal' }), valWrap = h('label', { style: 'display:none;align-items:center;gap:5px', title: 'Giá trị theo giá vốn đích danh từng lô (gồm thuế NK, không gồm VAT và chi phí phát sinh)' }, valCk, 'Hiện giá trị');
+  valCk.onchange = function () { st.val = valCk.checked; try { localStorage.setItem('stkVal', st.val ? '1' : ''); } catch (e) { } load(); };
+  if (st.val == null) { try { st.val = localStorage.getItem('stkVal') === '1'; } catch (e) { st.val = false; } }
   [fr, to, by, fg, fb].forEach(function (e) { e.onchange = load; });
   v.innerHTML = ''; v.appendChild(tabs);
-  v.appendChild(h('div', { class: 'bar2' }, h('label', null, 'Từ ', fr), h('label', null, ' đến ', to), by, fg, fb, h('span', { class: 'mut' }, 'Giá trị theo giá vốn đích danh từng lô (gồm thuế NK, không gồm VAT và chi phí phát sinh).')));
+  v.appendChild(h('div', { class: 'bar2' }, h('label', null, 'Từ ', fr), h('label', null, ' đến ', to), by, fg, fb, h('span', { class: 'sp' }), valWrap));
   v.appendChild(host);
   return load();
 }

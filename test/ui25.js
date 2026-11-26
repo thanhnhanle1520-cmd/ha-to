@@ -60,7 +60,7 @@ const txt = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' '
   T('chọn "HĐ + PLHD" + số gõ tay → in đúng', /Căn cứ theo Hợp đồng và Phụ lục hợp đồng số: 12\/2026\/HĐMB &amp; PL01|Căn cứ theo Hợp đồng và Phụ lục hợp đồng số: 12\/2026\/HĐMB & PL01/.test(t), t.slice(0, 500));
   T('phiếu không khai chứng từ → in theo PO (C/O sao y công chứng)', /Chứng chỉ xuất xứ hàng hóa \(C\/O\) 01 bản Sao y công chứng/.test(t), t.slice(800, 1500));
   ex = await A('export', { kind: 'quote', id: q.id, format: 'html' });
-  T('báo giá in cũng theo lề NĐ 30', PR(ex.data.html));
+  T('báo giá in theo lề riêng (bản 35: trái 20 · phải 15 · trên/dưới 15 mm)', /size:A4;margin:0/.test(ex.data.html) && /padding:0 15mm 0 20mm/.test(ex.data.html) && /thead>tr>td\{height:15mm\}/.test(ex.data.html));
 
   console.log('— Cập nhật PO theo báo giá');
   const pj2 = (await A('save', { table: 'projects', rec: { name: 'Văn phòng Bản 25', customer_id: cu.id, status: 'Đang chào giá' } })).data;

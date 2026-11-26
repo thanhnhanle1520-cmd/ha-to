@@ -125,6 +125,10 @@ input.flatpickr-input.form-control,.flatpickr-input[readonly],input.flatpickr-al
 #nav .grp{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8ea3c0;padding:12px 16px 3px 19px;white-space:nowrap;overflow:hidden;opacity:0;height:0;padding-top:0;padding-bottom:0;border-top:1px solid rgba(255,255,255,.08);margin:6px 10px 2px}
 #nav .grp.first{border-top:0;margin-top:2px}
 #nav.open .grp,#nav.hover .grp{opacity:1;height:auto;padding:10px 6px 3px 9px;border-top:0;margin:0}
+#nav .grp,#nav a,#nav .logo,#nav .me{flex:none}   /* bản 35: màn hình thấp — không ép co tên nhóm (bị cắt nửa chữ); menu cuộn dọc */
+#nav{overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+#nav .grp{line-height:1.4}
+.stkkpi{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}.kpi.neg .v{color:var(--bad,#b91c1c)}.kpi.neg{border-left-color:#b91c1c}th.stkdk,td.stkdk{background:#f6f9fc}a.stkpl{color:inherit;text-decoration:underline dotted}
 #nav .logo b{font-size:12.5px}
 /* thanh tiêu đề: chiều cao chuẩn */
 #bar{min-height:52px;padding:0 16px;gap:12px}

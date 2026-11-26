@@ -560,6 +560,7 @@ function lineEditor(o) {
     doc: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['origin', 'Xuất xứ', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 70], ['price_offer', 'Đơn giá chào', 'ro', 100], ['price', 'Đơn giá chốt', 'n', 100], ['cost_list', 'Giá mua (bảng giá)', 'ro', 100], ['cost', 'Giá mua (chốt, sửa được)', 'n', 110], ['_rs', '', 'rs', 28], ['_buy', 'Đơn mua / TK', 'buy', 90], ['amount', 'Thành tiền', 'ro', 110], ['vat_line', 'VAT %', 'vat', 58], ['source', 'Nguồn', 'src', 80], ['note', 'Ghi chú', 'text', 90]],
     delivery: [['doc_code', 'Văn bản', 'ro', 90], ['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL giao', 'n', 80], ['note', 'Ghi chú', 'text', 120]]
   }[mode];
+  if (mode === 'quote' && !lines.some(function (l) { return num(l.disc_pct); })) cols = cols.filter(function (c) { return c[0] !== 'disc_pct'; });   // bản 35: bỏ CK% (chỉ hiện với báo giá cũ đã có chiết khấu)
   if (mode === 'doc' && !(o.buy && Object.keys(o.buy).length)) cols = cols.filter(function (c) { return c[2] !== 'buy'; });      // chưa có đơn mua nào → ẩn cột
   function rp(c, f) { return Math.round(num(c) * num(f) / 100) * 100; }
   function recalc(l, k) {      // giá mua / hệ số → đơn giá; đơn giá → hệ số
