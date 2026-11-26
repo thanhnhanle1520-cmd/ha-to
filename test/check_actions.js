@@ -26,7 +26,7 @@ while ((f = fre.exec(gs))) funcs.push({ name: f[1], start: f.index });
 funcs.forEach(function (x) { x.body = block(x.start); });
 var WR = /\b(upsert_|replaceChildren_|removeByKey_|appendRow|deleteRow|setValues|clearContents)\s*\(/;
 var writerFns = {}; funcs.forEach(function (x) { if (WR.test(x.body) && !/^(upsert_|replaceChildren_|removeByKey_|audit_|logErr_|bump_|ensure\w*|setup\w*|migrate\w*|logError_|currentUser_|images_|nextCode_|appendMany_|rowCount_)$/.test(x.name)) writerFns[x.name] = 1; });
-var ALLOW_NO_LOCK = { bootstrap: 1 }, fails = [], n = 0;
+var ALLOW_NO_LOCK = { bootstrap: 1, stockNocodeSet: 1 /* chỉ gọi lại importSetCodes / purchaseSetCodes / delSetCodes_, mỗi lệnh tự khóa */ }, fails = [], n = 0;
 acts.forEach(function (x) {
   var b = x.body, writes = WR.test(b) || Object.keys(writerFns).some(function (fn) { return new RegExp('\\b' + fn + '\\(').test(b); });
   if (!writes) return; n++;

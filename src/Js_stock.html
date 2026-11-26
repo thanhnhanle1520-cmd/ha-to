@@ -35,7 +35,7 @@ function stkTon(v, tabs) {
     if (r.can_cost) kp.push(['Giá trị tồn kho', M(K.val), 'theo giá vốn từng lô']);
     kp.push(['Thiếu hàng', N(K.thieu), 'khả dụng âm: cần đặt thêm'], ['Chờ hàng về', N(K.cho), 'đủ khi hàng đang về tới'], ['Âm kho', N(K.am), K.am ? 'xuất nhiều hơn nhập: kiểm tra chứng từ' : 'không có']);
     v.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:12px' }, kp.map(function (k) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, k[0]), h('div', { class: 'v' }, k[1]), h('div', { class: 'l' }, k[2])); })));
-    if (r.nocode) v.appendChild(h('div', { class: 'card tkchk warn' }, h('b', null, '⚠ ' + r.nocode + ' dòng chứng từ chưa có mã hàng nên chưa vào sổ kho. '), h('button', { type: 'button', class: 'mini', onclick: stkNocodeModal }, 'Xem danh sách')));
+    if (r.nocode) v.appendChild(h('div', { class: 'card tkchk warn' }, h('b', null, '⚠ ' + r.nocode + ' dòng chứng từ chưa có mã hàng nên chưa vào sổ kho. '), h('button', { type: 'button', class: 'mini', id: 'btnStkNocode', onclick: function () { stkNocodeModal(function () { route(); }); } }, 'Xem và gán mã')));
     if (r.lock) v.appendChild(h('div', { class: 'mut', style: 'margin-bottom:6px' }, '🔒 Sổ kho đã khóa đến ngày ' + D(r.lock) + '.'));
     v.appendChild(h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, 'Khả dụng = Tồn thực + Đang về − Xuất dự kiến. Đang về: đơn mua "Đã đặt" chưa về đủ. Xuất dự kiến: dòng HĐ / PO / PLHĐ còn hiệu lực chưa giao (dự án chưa hoàn thành). Bấm 1 dòng để xem thẻ kho.'));
     var cols = [{ k: 'code', label: 'Mã' }, { k: 'name', label: 'Tên hàng', max: 46, maxw: '380px' }, { k: 'model', label: 'Model', max: 18 }, { k: 'unit', label: 'ĐVT' },
@@ -49,13 +49,29 @@ function stkTon(v, tabs) {
       cols: cols, onRow: function (x) { stkCardModal(x.code); } }));
   });
 }
-function stkNocodeModal() {
+function stkNocodeModal(after, dirty) {
   safe(call('stockNocode', {})).then(function (rs) {
     if (!rs) return;
-    var SRC = { TK: 'Tờ khai', DM: 'Đơn mua', GH: 'Giao hàng' };
-    modal({ title: 'Dòng chứng từ chưa có mã hàng (' + rs.length + ')', wide: true, dismiss: true, body: h('div', null, h('p', { class: 'mut', style: 'margin-top:0' }, 'Gán mã hàng (Bảng giá) cho các dòng này để vào sổ kho. Tờ khai: mở tờ khai, nhập mã hoặc bấm "+ Bảng giá".'),
-      h('div', { class: 'tw', style: 'max-height:60vh;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Nguồn', 'Ngày', 'Chứng từ', 'Hàng', 'SL'].map(function (x) { return h('th', null, x); }))),
-        h('tbody', null, rs.map(function (x) { return h('tr', null, h('td', null, SRC[x.src] || x.src), h('td', null, D(x.date)), h('td', null, stkLink(x.link, x.ref)), h('td', { class: 'wr' }, x.name), h('td', { class: 'r' }, N(x.qty) + ' ' + (x.unit || ''))); }))))) });
+    var SRC = { TK: 'Tờ khai', DM: 'Đơn mua', GH: 'Giao hàng' }, m = null, changed = dirty ? 1 : 0;
+    // 1 dòng chứng từ có thể hiện nhiều lần (nhiều đợt hàng về) → gom theo nguồn + id
+    var seen = {}, rows = []; rs.forEach(function (x) { var k = x.src + '|' + x.id; if (seen[k]) { seen[k].qty += num(x.qty); return; } seen[k] = Object.assign({}, x); rows.push(seen[k]); });
+    function setRows(list) {
+      safe(call('stockNocodeSet', { rows: list.map(function (x) { return { src: x.r.src, id: x.r.id, pid: x.r.pid, code: x.code }; }) })).then(function (r) {
+        if (!r) return; MEMO = {}; changed = 1; toast('Đã gán mã cho ' + r.n_set + ' dòng · sổ kho đã cập nhật'); m.el.parentNode.remove(); stkNocodeModal(after, 1);
+      });
+    }
+    var ns = rows.filter(function (x) { return x.suggest; }).length;
+    var body = h('div', null, h('div', { class: 'bar2', style: 'margin-bottom:6px' }, h('span', { class: 'mut' }, rows.length ? 'Gán mã ngay tại đây: Gán theo gợi ý, 🔍 tìm trong Bảng giá, hoặc "+ Bảng giá" để tạo mã mới. Mã ghi thẳng vào chứng từ gốc (và dòng HĐ / PO đang trống mã).' : 'Mọi dòng chứng từ đã có mã hàng.'), h('span', { class: 'sp' }),
+        ns ? h('button', { type: 'button', class: 'pri', id: 'btnStkSugAll', onclick: function () { setRows(rows.filter(function (x) { return x.suggest; }).map(function (x) { return { r: x, code: x.suggest.code }; })); } }, 'Gán mã gợi ý (' + ns + ' dòng)') : null),
+      rows.length ? h('div', { class: 'tw', style: 'max-height:60vh;overflow:auto' }, h('table', { class: 't stknc' }, h('thead', null, h('tr', null, ['Nguồn', 'Ngày', 'Chứng từ', 'Hàng', 'SL', 'Gán mã'].map(function (x) { return h('th', null, x); }))),
+        h('tbody', null, rows.map(function (x) {
+          var canCat = S.perms.pricelist && S.perms.pricelist.create;
+          return h('tr', { 'data-src': x.src }, h('td', null, SRC[x.src] || x.src), h('td', null, D(x.date)), h('td', null, stkLink(x.link, x.ref)), h('td', { class: 'wr' }, x.name, x.model ? h('div', { class: 'mut', style: 'font-size:12px' }, 'Model ' + x.model + (x.brand ? ' · ' + x.brand : '')) : null), h('td', { class: 'r' }, N(x.qty) + ' ' + (x.unit || '')),
+            h('td', null, x.suggest ? h('div', { class: 'tksug', style: 'margin:0 0 4px' }, 'Gợi ý: ', h('b', null, x.suggest.code), ' ', x.suggest.name || '', h('button', { type: 'button', class: 'mini', style: 'display:block;margin-top:3px', onclick: function () { setRows([{ r: x, code: x.suggest.code }]); } }, 'Gán')) : null,
+              h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, h('button', { type: 'button', class: 'mini', title: 'Tìm mã trong Bảng giá', onclick: function () { catPick(x.model || String(x.name).slice(0, 30), function (t) { setRows([{ r: x, code: t.code }]); }); } }, '🔍 Tìm mã'),
+                canCat ? h('button', { type: 'button', class: 'mini', onclick: function () { puCatAdd([{ name: x.src === 'TK' ? String(x.name).slice(0, 120) : x.name, model: x.model, brand: x.brand, unit: x.unit, price: x.price }], function (res) { if (res.length) setRows([{ r: x, code: res[0].code }]); }); } }, '+ Bảng giá') : null)));
+        })))) : null);
+    m = modal({ title: 'Dòng chứng từ chưa có mã hàng (' + rows.length + ')', wide: true, dismiss: true, body: body, onclose: function () { if (changed && after) after(); } });
   });
 }
 /* ---- Thẻ kho 1 mã ---- */

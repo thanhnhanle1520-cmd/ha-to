@@ -1,5 +1,5 @@
 /* Service worker: lưu sẵn khung ứng dụng để mở nhanh và dùng được khi mất mạng. Dữ liệu nằm trong IndexedDB, không qua đây. */
-var V = 'hato-ff27c780', SHELL = ['./', 'index.html', 'code.js', 'shim.js', 'store.js', 'overrides.js', 'overrides-gas.js', 'xlsx-lite.js', 'tk-parse.js', 'xlsx-write.js', 'migrate.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+var V = 'hato-737a6875', SHELL = ['./', 'index.html', 'code.js', 'shim.js', 'store.js', 'overrides.js', 'overrides-gas.js', 'xlsx-lite.js', 'tk-parse.js', 'xlsx-write.js', 'migrate.js', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(V).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); })); });
 self.addEventListener('activate', function (e) { e.waitUntil(caches.keys().then(function (ks) { return Promise.all(ks.filter(function (k) { return k !== V; }).map(function (k) { return caches.delete(k); })); }).then(function () { return self.clients.claim(); })); });
 self.addEventListener('fetch', function (e) {
