@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.24.0';
+const APP_VERSION = '1.25.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -28,6 +28,8 @@ const PERMS = {
   files:      { view: ALL, create: ALL, edit: SALES },
   purchases:  { view: ALL, create: SALES, edit: SALES },     // mua hàng (bản 20) — đơn mua + đợt hàng về
   imports:    { view: ALL, create: SALES, edit: SALES },     // tờ khai nhập khẩu (bản 31)
+  stock:      { view: ALL, create: ALL, edit: ALL },         // kho: phiếu kho tay, kiểm kê, chọn lô (bản 32)
+  stocklock:  { view: ALL, create: MGR, edit: MGR },         // khóa sổ kho
   suppliers:  { view: ALL, create: SALES, edit: SALES },
   config:     { view: MGR, create: ADM, edit: ADM }
 };
@@ -66,14 +68,19 @@ const TABLES = {
   IMPORT_DECL_ITEMS: ['id', 'decl_id', 'line_no', 'hs_code', 'description', 'model', 'brand', 'origin', 'origin_name', 'qty', 'unit', 'qty2', 'unit2', 'inv_price', 'inv_value', 'inv_currency', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'other_taxes', 'cost_base', 'cost_tax', 'cost_unit', 'item_code', 'item_name', 'updated_at'],
   IMPORT_ALLOCS: ['id', 'decl_id', 'decl_item_id', 'project_id', 'doc_id', 'doc_item_id', 'qty', 'updated_at'],
   ITEM_ALIAS: ['id', 'akey', 'item_code', 'description', 'updated_at'],
+  // Kho (bản 32): sổ kho tự tính từ tờ khai / đợt hàng về / BBGH; chỉ lưu phiếu tay, lô chọn tay, số chốt khi khóa sổ
+  STOCK_VOUCHERS: ['id', 'code', 'kind', 'date', 'warehouse', 'note', 'created_by', 'created_at', 'updated_at'],
+  STOCK_VOUCHER_ITEMS: ['id', 'voucher_id', 'line_no', 'item_code', 'name', 'unit', 'qty', 'cost', 'book_qty', 'lot_key', 'note', 'updated_at'],
+  STOCK_PICKS: ['id', 'out_key', 'lot_key', 'qty', 'updated_at'],
+  STOCK_CLOSES: ['id', 'lock_date', 'data', 'created_by', 'created_at', 'updated_at'],
   // RFQS: bảng của tính năng Nhập Excel khách (đã gỡ 19/11/2026) — giữ cột để không mất dữ liệu đã có
   RFQS: ['id', 'code', 'project_id', 'customer_id', 'file_name', 'file_id', 'file_url', 'sheet', 'header_row', 'header_last', 'map', 'opts', 'rows', 'groups', 'quote_id', 'n_rows', 'n_lines', 'created_by', 'created_at', 'updated_at'],
   IMAGES: ['key', 'value'],
   CONFIG: ['key', 'value'],
   COUNTERS: ['key', 'value']
 };
-const NUM = new Set(['packages', 'gross_kg', 'invoice_total', 'exchange_rate', 'taxable_total', 'nk_total', 'vat_total', 'other_tax_total', 'tax_payable', 'pages', 'qty2', 'inv_price', 'inv_value', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'cost_base', 'cost_tax', 'cost_unit', 'header_row', 'header_last', 'n_rows', 'n_lines', 'qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
-const JSONCOLS = { IMPORT_DECLS: ['extra_costs', 'checks'], IMPORT_DECL_ITEMS: ['other_taxes'], DELIVERIES: ['attached'], DOCS: ['terms', 'attached', 'ext', 'snap'], WARRANTIES: ['items'], CERTS: ['items'], RFQS: ['map', 'opts', 'rows', 'groups'] };
+const NUM = new Set(['book_qty', 'packages', 'gross_kg', 'invoice_total', 'exchange_rate', 'taxable_total', 'nk_total', 'vat_total', 'other_tax_total', 'tax_payable', 'pages', 'qty2', 'inv_price', 'inv_value', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'cost_base', 'cost_tax', 'cost_unit', 'header_row', 'header_last', 'n_rows', 'n_lines', 'qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
+const JSONCOLS = { STOCK_CLOSES: ['data'], IMPORT_DECLS: ['extra_costs', 'checks'], IMPORT_DECL_ITEMS: ['other_taxes'], DELIVERIES: ['attached'], DOCS: ['terms', 'attached', 'ext', 'snap'], WARRANTIES: ['items'], CERTS: ['items'], RFQS: ['map', 'opts', 'rows', 'groups'] };
 
 const DEFAULT_CONFIG = {
   company_name: 'CÔNG TY TNHH KỸ THUẬT VÀ THƯƠNG MẠI HA TO', tax_code: '0313049236', address: 'Số 94/11, Đường số 39, Phường Bình Trưng, TP. Hồ Chí Minh', phone: '028.37438551 - 028 37438556', hotline: '', email: '', website: 'hatoet.com',
@@ -468,7 +475,7 @@ function catalog_() {
   var vals = sh.getDataRange().getValues();
   var hdr = (vals[0] || []).map(function (h) { return strip_(h); });
   function ix(starts) { for (var k = 0; k < hdr.length; k++) if (hdr[k].indexOf(starts) === 0) return k; return -1; }
-  var C = { status: ix('trang thai'), stt: ix('stt'), brand: ix('thuong hieu'), group: ix('nhom hang'), name: ix('ten tieng viet'), model: ix('model'), size: ix('kich co'), origin: ix('xuat xu'), unit: ix('dvt'), spec: (function () { var a = ix('quy cach ky'); return a >= 0 ? a : ix('quy cach'); })(), qc: ix('quy cach bao gia'), coefOwn: ix('he so rieng'), tech: ix('ap luc'), cur: ix('dong tien'), list: ix('don gia niem yet'), disc: ix('chiet khau'), rate: ix('ty gia'), cost: ix('gia von'), margin: ix('he so'), sale: ix('gia ban'), note: ix('ghi chu') };
+  var C = { status: ix('trang thai'), stt: ix('stt'), brand: ix('thuong hieu'), group: ix('nhom hang'), name: ix('ten tieng viet'), model: ix('model'), size: ix('kich co'), origin: ix('xuat xu'), unit: ix('dvt'), spec: (function () { var a = ix('quy cach ky'); return a >= 0 ? a : ix('quy cach'); })(), qc: ix('quy cach bao gia'), coefOwn: ix('he so rieng'), tech: ix('ap luc'), cur: ix('dong tien'), list: ix('don gia niem yet'), disc: ix('chiet khau'), rate: ix('ty gia'), cost: ix('gia von'), margin: ix('he so'), sale: ix('gia ban'), note: ix('ghi chu'), hq: ix('mo ta hai quan') };
   if (C.name < 0 || C.sale < 0 || C.cost < 0) throw new Error('Sheet bảng giá thiếu cột bắt buộc (Tên tiếng Việt / Giá vốn / Giá bán tham chiếu).');
   function g(r, k) { return C[k] < 0 ? '' : r[C[k]]; }
   var rows = [], CI = coefInfo_();
@@ -482,13 +489,13 @@ function catalog_() {
       cur: String(g(row, 'cur')), status: strip_(String(g(row, 'status') || '')).indexOf('ngung') === 0 ? 'Ngừng' : 'Đang bán', list: parseNum_(g(row, 'list')), disc: parsePct_(g(row, 'disc')), rate: parseNum_(g(row, 'rate')),
       cost: round_(parseNum_(g(row, 'cost'))), margin: parsePct_(g(row, 'margin')), sale: round_(parseNum_(g(row, 'sale'))), note: String(g(row, 'note'))
     };
-    o.qc = String(g(row, 'qc') || '').trim(); o.coef_own = num_(parseNum_(g(row, 'coefOwn'))); o.sale_ref = o.sale;
+    o.qc = String(g(row, 'qc') || '').trim(); o.hq_desc = String(g(row, 'hq') || '').trim(); o.coef_own = num_(parseNum_(g(row, 'coefOwn'))); o.sale_ref = o.sale;
     if (o.coef_own > 0) { o.coef = o.coef_own; o.coef_src = 'ma'; }
     else if (num_(CI.brand[o.brand]) > 0) { o.coef = num_(CI.brand[o.brand]); o.coef_src = 'hang'; }
     else if (CI.def > 0) { o.coef = CI.def; o.coef_src = 'chung'; }
     else { o.coef = o.cost > 0 && o.sale > 0 ? Math.round(o.sale / o.cost * 100) / 100 : 0; o.coef_src = ''; }
     if (o.coef_src && o.cost > 0) o.sale = Math.round(o.cost * o.coef / 100) * 100;
-    o.s = strip_([o.stt, o.brand, o.name, o.model, o.size, o.group, o.qc].join(' '));
+    o.s = strip_([o.stt, o.brand, o.name, o.model, o.size, o.group, o.qc, o.hq_desc].join(' '));
     rows.push(o);
   }
   cachePut_('CATALOG', rows, ver);
@@ -784,7 +791,7 @@ ACTIONS.catalogList = function (u, p) {
 // ---------- Sửa / nhập hàng loạt Bảng giá (dữ liệu nằm trong sheet bảng giá) ----------
 var CAT_COLS = [['brand', 'Thương hiệu', 'thuong hieu'], ['group', 'Nhóm hàng', 'nhom hang'], ['name', 'Tên tiếng Việt chuyên ngành', 'ten tieng viet'], ['model', 'Model', 'model'],
   ['size', 'Kích cỡ (Size/DN)', 'kich co'], ['origin', 'Xuất xứ', 'xuat xu'], ['unit', 'ĐVT', 'dvt'], ['qc', 'Quy cách báo giá', 'quy cach bao gia'],
-  ['cost', 'Giá mua (VND)', 'gia von'], ['coef_own', 'Hệ số riêng', 'he so rieng'], ['note', 'Ghi chú', 'ghi chu'], ['status', 'Trạng thái', 'trang thai']];
+  ['cost', 'Giá mua (VND)', 'gia von'], ['coef_own', 'Hệ số riêng', 'he so rieng'], ['note', 'Ghi chú', 'ghi chu'], ['status', 'Trạng thái', 'trang thai'], ['hq_desc', 'Mô tả hải quan (nội bộ)', 'mo ta hai quan']];
 function catSheet_() {
   var sh = null;
   for (var i = 0; i < PRICE_SHEETS.length && !sh; i++) sh = ss_().getSheetByName(PRICE_SHEETS[i]);
@@ -813,7 +820,7 @@ function catRowMap_(sh, m) {
 }
 function catNorm_(r) {
   var o = {};
-  ['brand', 'group', 'name', 'model', 'size', 'origin', 'unit', 'qc', 'note'].forEach(function (k) { if (r[k] !== undefined && r[k] !== null) o[k] = String(r[k]).trim(); });
+  ['brand', 'group', 'name', 'model', 'size', 'origin', 'unit', 'qc', 'note', 'hq_desc'].forEach(function (k) { if (r[k] !== undefined && r[k] !== null) o[k] = String(r[k]).trim(); });
   if (r.status !== undefined && r.status !== null && String(r.status).trim() !== '') o.status = strip_(String(r.status)).indexOf('ngung') === 0 ? 'Ngừng' : 'Đang bán';
   if (r.cost !== undefined && r.cost !== null && String(r.cost).trim() !== '') o.cost = Math.round(parseNum_(r.cost));
   if (r.coef_own !== undefined && r.coef_own !== null && String(r.coef_own).trim() !== '') o.coef_own = Math.max(0, num_(parseNum_(r.coef_own)));
@@ -854,6 +861,21 @@ ACTIONS.catalogSave = function (u, p) {
     audit_(u, code ? 'Sửa' : 'Tạo', 'BANGGIA', out, '', f.name || code);
     RT.cat = null; delete RT['T:CONFIG'];
     return { code: out };
+  });
+};
+// Thêm nhiều mã mới vào Bảng giá (từ dòng tờ khai chưa có mã nội bộ). Giá mua được để trống.
+ACTIONS.catalogAddMany = function (u, p) {
+  need_(u, 'pricelist', 'create');
+  var rows = (p.rows || []).slice(0, 100);
+  if (!rows.length) throw new Error('Chưa có dòng nào để thêm.');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m), out = [];
+    rows.forEach(function (r, i) { if (!String(r.name || '').trim()) throw new Error('Dòng ' + (i + 1) + ': thiếu tên hàng.'); });
+    rows.forEach(function (r) { var f = catNorm_(r); if (!f.status) f.status = 'Đang bán'; out.push({ key: r.key || '', code: catAdd_(sh, m, rm, f), name: f.name }); });
+    audit_(u, 'Tạo', 'BANGGIA', '', '', out.length + ' mã từ tờ khai: ' + out.map(function (x) { return x.code; }).join(', '));
+    RT.cat = null;
+    return out;
   });
 };
 ACTIONS.catalogImport = function (u, p) {
@@ -2281,7 +2303,7 @@ ACTIONS.importSave = function (u, p) {
     if (!out.decl_no) throw new Error('Thiếu số tờ khai.');
     var dup = all.filter(function (x) { return x.decl_no === out.decl_no && x.id !== out.id; })[0];
     if (dup) throw new Error('Tờ khai ' + out.decl_no + ' đã có (' + dup.code + '). Mở tờ khai đó và bấm "Cập nhật từ file" nếu là tờ khai sửa đổi.');
-    if (!IMP_ST[out.status]) out.status = 'THONG_QUAN';
+    out.status = 'THONG_QUAN';            // bản 32: tờ khai là chứng từ cố định, không còn chọn trạng thái
     if (out.channel && !IMP_CH[out.channel]) out.channel = '';
     if (out.supplier_id && !readTable_('SUPPLIERS').some(function (x) { return x.id === out.supplier_id; })) out.supplier_id = '';
     if (out.purchase_id && !readTable_('PURCHASES').some(function (x) { return x.id === out.purchase_id; })) out.purchase_id = '';
@@ -2335,10 +2357,29 @@ ACTIONS.importSave = function (u, p) {
     });
     audit_(u, isNew ? 'Tạo' : 'Sửa', 'IMPORT_DECLS', out.id, '', 'TK ' + out.decl_no + ' · ' + recs.length + ' dòng · ' + out.status);
     RT.ia = null; RT.pm = null;
-    var n = syncPurCost_(out.id);
-    return { decl: out, cost_filled: n };
+    var n = syncPurCost_(out.id), hq = impHqToCatalog_(out, recs);
+    return { decl: out, cost_filled: n, hq_updated: hq.n, hq_error: hq.err };
   });
 };
+/* Mô tả HQ trong Bảng giá = mô tả của tờ khai mới nhất (theo ngày đăng ký) có dòng mang mã đó. Tờ khai cũ nhập sau không ghi đè. */
+function impHqToCatalog_(decl, recs) {
+  var codes = {}; recs.forEach(function (it) { if (it.item_code) codes[it.item_code] = it.description; });
+  if (!Object.keys(codes).length) return { n: 0 };
+  var ds = mapBy_(readTable_('IMPORT_DECLS'), 'id'), latest = {};
+  readTable_('IMPORT_DECL_ITEMS').forEach(function (it) { var d = ds[it.decl_id]; if (!d || !codes[it.item_code] || d.status === 'HUY') return; var k = String(d.reg_date) + '|' + d.decl_no; if (!latest[it.item_code] || k > latest[it.item_code]) latest[it.item_code] = k; });
+  var mine = String(decl.reg_date) + '|' + decl.decl_no, n = 0;
+  try {
+    var cat = {}; catalog_().forEach(function (x) { cat[x.code] = x; });
+    var sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m);
+    Object.keys(codes).forEach(function (c) {
+      if (latest[c] !== mine || !cat[c] || cat[c].hq_desc === codes[c]) return;
+      var rowNo = rm.map[String(parseInt(c.slice(2), 10))]; if (!rowNo) return;
+      catWrite_(sh, m, rowNo, { hq_desc: codes[c] }); n++;
+    });
+    if (n) RT.cat = null;
+    return { n: n };
+  } catch (e) { return { n: n, err: 'Chưa ghi được mô tả HQ vào Bảng giá: ' + (e.message || e) }; }
+}
 ACTIONS.importRemove = function (u, p) {
   need_(u, 'imports', 'edit');
   return withLock_(function () {
@@ -2402,6 +2443,7 @@ ACTIONS.invoiceNames = function (u, p) {
   readTable_('ITEM_ALIAS').forEach(function (a) { if (String(a.akey).indexOf('D:') === 0 && a.item_code && (!byCode[a.item_code] || String(a.updated_at) > String(byCode[a.item_code].t))) byCode[a.item_code] = { d: a.description, t: a.updated_at }; });
   readTable_('IMPORT_ALLOCS').forEach(function (a) { var it = its[a.decl_item_id]; if (it && (!p.doc_ids || p.doc_ids.indexOf(a.doc_id) >= 0)) byLine[a.doc_item_id] = it.description; });
   var codes = {}; Object.keys(byCode).forEach(function (k) { codes[k] = byCode[k].d; });
+  try { catalog_().forEach(function (x) { if (x.hq_desc) codes[x.code] = x.hq_desc; }); } catch (e) { }   // mô tả HQ trong Bảng giá (sửa tay được) ưu tiên
   return { by_code: codes, by_line: byLine };
 };
 /* Chi phí dự án loại "Hải quan / thuế nhập khẩu" trong khi dòng hàng đã lấy giá vốn từ tờ khai có thuế NK → dễ tính trùng */
@@ -2412,12 +2454,297 @@ function impTaxDupWarn_(pid) {
   return c > 0 ? { tk_tax: Math.round(tkTax), cost_tax: Math.round(c) } : null;
 }
 
+// ================= Kho Nhập - Xuất - Tồn (bản 32) =================
+// Sổ kho TỰ SINH từ chứng từ gốc, không nhập lại: tờ khai (nhập), đợt hàng về của đơn mua (nhập), BBGH "Đã giao" (xuất).
+// Phiếu kho tay chỉ cho: tồn đầu kỳ, nhập khác, nhập trả, xuất khác, kiểm kê. 1 kho (cột warehouse để sẵn).
+// Giá vốn ĐÍCH DANH theo lô: lô = 1 dòng tờ khai / 1 dòng đơn mua / 1 dòng phiếu nhập tay.
+// Xuất: lô chọn tay → lô đã gắn đúng dòng HĐ/PO đó → lô tồn chung cũ nhất (không đụng phần đã giữ cho dự án khác) → lô bất kỳ cũ nhất.
+var STK_KIND = { DAU_KY: 'Tồn đầu kỳ', NHAP_KHAC: 'Nhập khác', NHAP_TRA: 'Nhập trả lại', XUAT_KHAC: 'Xuất khác', KIEM_KE: 'Kiểm kê' };
+var STK_IN = { DAU_KY: 1, NHAP_KHAC: 1, NHAP_TRA: 1 };
+function stkLock_() { return String(cfg_().stock_lock || ''); }
+function stkCheckLock_(date) { var l = stkLock_(); if (l && String(date).slice(0, 10) <= l) throw new Error('Sổ kho đã khóa đến ngày ' + l + '. Không ghi / sửa chứng từ kho ngày ' + String(date).slice(0, 10) + '.'); }
+function stkCat_() { var m = {}; try { catalog_().forEach(function (x) { m[x.code] = x; }); } catch (e) { } return m; }
+/* Toàn bộ sổ kho: { items: {code: {code,name,unit,moves,lots}}, nocode: [...], picks } — tính 1 lần mỗi lượt gọi */
+function stockLedger_() {
+  if (RT.sl) return RT.sl;
+  var cat = stkCat_(), items = {}, nocode = [], lots = {}, ins = [], outs = [];
+  function item(code, name, unit) { var c = String(code || '').trim().toUpperCase(); var it = items[c]; if (!it) { var k = cat[c] || {}; it = items[c] = { code: c, name: k.name || name || '', unit: k.unit || unit || '', model: k.model || '', brand: k.brand || '', moves: [], lots: [] }; } return it; }
+  function addIn(code, o) { var it = item(code, o.name, o.unit); var lot = { key: o.lot, code: it.code, date: o.date, qty: o.qty, rem: o.qty, cost: num_(o.cost), ref: o.ref, link: o.link, res: {}, seq: o.seq || '' }; lots[o.lot] = lot; it.lots.push(lot); ins.push({ it: it, lot: lot, m: { date: o.date, dir: 1, kind: o.kind, qty: o.qty, cost: lot.cost, value: Math.round(o.qty * lot.cost), ref: o.ref, link: o.link, note: o.note || '', lot: o.lot, seq: o.seq || '' } }); }
+  function addOut(code, o) { var it = item(code, o.name, o.unit); outs.push({ it: it, m: { date: o.date, dir: -1, kind: o.kind, qty: o.qty, ref: o.ref, link: o.link, note: o.note || '', key: o.key, doc_item_id: o.doc_item_id || '', project_code: o.project_code || '', seq: o.seq || '' } }); }
+  /* 1. tờ khai: lô theo dòng; ngày nhập = ngày thông quan (không có thì ngày đăng ký) */
+  var idx = index_(), dic = {};      // mã hàng của dòng HĐ/PO: dùng khi dòng giao / dòng đơn mua chưa ghi mã
+  Object.keys(idx.itemsByDoc).forEach(function (d) { (idx.itemsByDoc[d] || []).forEach(function (x) { if (x.code) dic[x.id] = x.code; }); });
+  var ds = mapBy_(readTable_('IMPORT_DECLS'), 'id'), tkPu = {};
+  Object.keys(ds).forEach(function (k) { if (ds[k].purchase_id && ds[k].status !== 'HUY') tkPu[ds[k].purchase_id] = 1; });
+  readTable_('IMPORT_DECL_ITEMS').forEach(function (x) {
+    var d = ds[x.decl_id]; if (!d || d.status === 'HUY' || !(num_(x.qty) > 0)) return;
+    var date = String(d.release_date || d.reg_date || '').slice(0, 10), ref = 'TK ' + d.decl_no + ' / ' + x.line_no;
+    if (!x.item_code) { nocode.push({ src: 'TK', date: date, ref: ref, link: 'import/' + d.id, name: String(x.description).slice(0, 120), qty: num_(x.qty), unit: x.unit }); return; }
+    addIn(x.item_code, { lot: 'T:' + x.id, kind: 'TK', date: date, qty: num_(x.qty), cost: num_(x.cost_unit), ref: ref, link: 'import/' + d.id, name: x.item_name || x.description, unit: x.unit, seq: d.created_at });
+  });
+  /* 2. đợt hàng về của đơn mua (bỏ đơn mua đã có tờ khai liên kết — tránh nhập 2 lần) */
+  var pus = mapBy_(readTable_('PURCHASES'), 'id'), pis = mapBy_(readTable_('PURCHASE_ITEMS'), 'id'), rcs = mapBy_(readTable_('RECEIPTS'), 'id'), rcvd = {};
+  readTable_('RECEIPT_ITEMS').forEach(function (r) {
+    var rc = rcs[r.receipt_id], pi = pis[r.purchase_item_id]; if (!rc || !pi || !(num_(r.qty) > 0)) return;
+    var pu = pus[pi.purchase_id]; if (!pu || pu.status === 'HUY' || tkPu[pu.id]) return;
+    var date = String(rc.date || '').slice(0, 10), ref = (pu.code || 'Đơn mua') + ' · ' + (rc.code || 'hàng về');
+    if (!pi.code && dic[pi.doc_item_id]) pi = Object.assign({}, pi, { code: dic[pi.doc_item_id] });
+    if (!pi.code) { nocode.push({ src: 'DM', date: date, ref: ref, link: 'purchase/' + pu.id, name: pi.name, qty: num_(r.qty), unit: pi.unit }); return; }
+    var key = 'P:' + pi.id, lot = lots[key];
+    if (lot) ins.push({ it: items[lot.code], lot: lot, add: true, m: { date: date, dir: 1, kind: 'DM', qty: num_(r.qty), cost: lot.cost, value: Math.round(num_(r.qty) * lot.cost), ref: ref, link: 'purchase/' + pu.id, lot: key, seq: rc.created_at } });
+    else addIn(pi.code, { lot: key, kind: 'DM', date: date, qty: num_(r.qty), cost: num_(pi.price), ref: ref, link: 'purchase/' + pu.id, name: pi.name, unit: pi.unit, seq: rc.created_at });
+  });
+  /* 3. phiếu kho tay */
+  var vs = mapBy_(readTable_('STOCK_VOUCHERS'), 'id');
+  readTable_('STOCK_VOUCHER_ITEMS').forEach(function (x) {
+    var v = vs[x.voucher_id]; if (!v || !x.item_code) return;
+    var date = String(v.date || '').slice(0, 10), ref = v.code + ' · ' + (STK_KIND[v.kind] || v.kind), link = 'stockv/' + v.id;
+    var q = v.kind === 'KIEM_KE' ? num_(x.qty) - num_(x.book_qty) : num_(x.qty);
+    if (!q) return;
+    if (STK_IN[v.kind] || (v.kind === 'KIEM_KE' && q > 0)) addIn(x.item_code, { lot: 'V:' + x.id, kind: v.kind, date: date, qty: Math.abs(q), cost: num_(x.cost), ref: ref, link: link, name: x.name, unit: x.unit, note: x.note, seq: v.created_at });
+    else addOut(x.item_code, { key: 'V:' + x.id, kind: v.kind, date: date, qty: Math.abs(q), ref: ref, link: link, name: x.name, unit: x.unit, note: x.note, seq: v.created_at });
+  });
+  /* 4. BBGH đã giao = xuất kho */
+  var pjs = mapBy_(readTable_('PROJECTS'), 'id');
+  readTable_('DELIVERIES').forEach(function (d) {
+    if (d.status !== 'DA_GIAO') return;
+    var date = String(d.date || '').slice(0, 10), pj = pjs[d.project_id] || {};
+    (idx.delItems[d.id] || []).forEach(function (x) {
+      if (!(num_(x.qty) > 0)) return;
+      if (!x.code && dic[x.doc_item_id]) x = Object.assign({}, x, { code: dic[x.doc_item_id] });
+      var ref = d.code + (pj.code ? ' · ' + pj.code : '');
+      if (!x.code) { nocode.push({ src: 'GH', date: date, ref: ref, link: 'delivery/' + d.id, name: x.name, qty: num_(x.qty), unit: x.unit }); return; }
+      addOut(x.code, { key: 'G:' + x.id, kind: 'GH', date: date, qty: num_(x.qty), ref: ref, link: 'delivery/' + d.id, name: x.name, unit: x.unit, doc_item_id: x.doc_item_id, project_code: pj.code, seq: d.created_at });
+    });
+  });
+  /* giữ hàng đích danh: dòng tờ khai / đơn mua đã gắn dòng HĐ-PO */
+  readTable_('IMPORT_ALLOCS').forEach(function (a) { var l = lots['T:' + a.decl_item_id]; if (l && a.doc_item_id) l.res[a.doc_item_id] = (l.res[a.doc_item_id] || 0) + num_(a.qty); });
+  Object.keys(pis).forEach(function (k) { var pi = pis[k], l = lots['P:' + pi.id]; if (l && pi.doc_item_id) l.res[pi.doc_item_id] = (l.res[pi.doc_item_id] || 0) + num_(pi.qty); });
+  var picks = groupBy_(readTable_('STOCK_PICKS'), 'out_key');
+  /* chạy theo thời gian: cùng ngày thì nhập trước xuất */
+  var ev = ins.map(function (e) { return { t: e.m.date, o: 0, s: String(e.m.seq || ''), e: e }; }).concat(outs.map(function (e) { return { t: e.m.date, o: 1, s: String(e.m.seq || ''), e: e }; }));
+  ev.sort(function (a, b) { return String(a.t).localeCompare(String(b.t)) || a.o - b.o || a.s.localeCompare(b.s); });
+  function resLeft(l) { var s = 0; Object.keys(l.res).forEach(function (k) { s += Math.max(0, l.res[k]); }); return s; }
+  ev.forEach(function (x) {
+    var e = x.e, it = e.it, m = e.m;
+    if (!x.o) { if (e.add) { e.lot.qty += m.qty; e.lot.rem += m.qty; } e.lot.on = 1; it.moves.push(m); return; }
+    var need = m.qty, used = [], val = 0;
+    function take(l, q) { q = Math.min(q, l.rem); if (!(q > 0)) return 0; l.rem -= q; if (m.doc_item_id && l.res[m.doc_item_id]) l.res[m.doc_item_id] = Math.max(0, l.res[m.doc_item_id] - q); used.push({ lot: l.key, ref: l.ref, qty: q, cost: l.cost }); val += q * l.cost; return q; }
+    var live = it.lots.filter(function (l) { return l.on && l.rem > 0; }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)) || String(a.seq).localeCompare(String(b.seq)); });
+    (picks[m.key] || []).forEach(function (p) { var l = lots[p.lot_key]; if (l && l.code === it.code && l.on) need -= take(l, Math.min(need, num_(p.qty))); });
+    if (m.doc_item_id) live.forEach(function (l) { if (need > 0 && l.res[m.doc_item_id]) need -= take(l, Math.min(need, l.res[m.doc_item_id])); });
+    live.forEach(function (l) { if (need > 0) need -= take(l, Math.min(need, Math.max(0, l.rem - resLeft(l)))); });
+    live.forEach(function (l) { if (need > 0) need -= take(l, need); });
+    if (need > 1e-9) { var lc = it.lots.length ? it.lots[it.lots.length - 1].cost : 0; m.short = need; val += need * lc; }
+    m.lots = used; m.picked = !!(picks[m.key] || []).length; m.value = Math.round(val); m.cost = m.qty ? val / m.qty : 0;
+    it.moves.push(m);
+  });
+  Object.keys(items).forEach(function (c) { var it = items[c], q = 0, v = 0; it.moves.forEach(function (m) { q += m.dir * m.qty; v += m.dir * m.value; m.bal = q; m.bal_value = Math.round(v); }); it.qty = q; it.value = Math.round(it.lots.reduce(function (s, l) { return s + (l.on ? l.rem * l.cost : 0); }, 0)); if (q < 0) it.value = Math.round(v); });
+  RT.sl = { items: items, nocode: nocode, lots: lots };
+  return RT.sl;
+}
+/* Đang về (đơn mua đã đặt chưa về đủ) và xuất dự kiến (dòng HĐ/PO hiệu lực chưa giao) theo mã */
+function stockPlan_() {
+  if (RT.sp) return RT.sp;
+  var inc = {}, outp = {}, rc = {}, dic = {}, idx = index_();
+  Object.keys(idx.itemsByDoc).forEach(function (d) { (idx.itemsByDoc[d] || []).forEach(function (x) { if (x.code) dic[x.id] = x.code; }); });
+  var pus = mapBy_(readTable_('PURCHASES'), 'id'), rcs = mapBy_(readTable_('RECEIPTS'), 'id');
+  readTable_('RECEIPT_ITEMS').forEach(function (r) { if (rcs[r.receipt_id]) rc[r.purchase_item_id] = (rc[r.purchase_item_id] || 0) + num_(r.qty); });
+  readTable_('PURCHASE_ITEMS').forEach(function (pi) {
+    var pu = pus[pi.purchase_id]; if (!pu || pu.status !== 'DA_DAT') return;
+    var code = String(pi.code || dic[pi.doc_item_id] || '').toUpperCase();
+    var q = num_(pi.qty) - (rc[pi.id] || 0); if (!(q > 0) || !code) return;
+    var o = inc[code] || (inc[code] = { qty: 0, list: [] }); o.qty += q; o.list.push({ ref: pu.code, link: 'purchase/' + pu.id, qty: q, eta: pu.eta || '' });
+  });
+  readTable_('PROJECTS').forEach(function (pr) {
+    if (pr.archived === '1' || pr.status === 'Hủy' || pr.status === 'Hoàn thành') return;
+    var c = calcProject_(pr.id), dv = deliveredMap_(pr.id);
+    (c.basis_lines || []).forEach(function (l) {
+      if (!l.code) return; var q = num_(l.qty) - (dv[l.doc_id + '|' + l.id] || 0); if (!(q > 0)) return;
+      var k = String(l.code).toUpperCase(), o = outp[k] || (outp[k] = { qty: 0, list: [] }); o.qty += q; o.list.push({ ref: (l.doc_code || '') + ' · ' + pr.code, link: 'doc/' + l.doc_id, qty: q, project_id: pr.id, doc_id: l.doc_id, doc_item_id: l.id, name: l.name, unit: l.unit, line_qty: num_(l.qty) });
+    });
+  });
+  RT.sp = { inc: inc, out: outp };
+  return RT.sp;
+}
+function stkStatus_(r) { if (r.qty < -1e-9) return 'AM'; if (r.avail < -1e-9) return 'THIEU'; if (r.out > 0 && r.qty + 1e-9 < r.out) return 'CHO'; return 'DU'; }
+ACTIONS.stockList = function (u, p) {
+  need_(u, 'stock', 'view');
+  var L = stockLedger_(), P = stockPlan_(), cat = stkCat_(), codes = {}, cost = canCost_(u);
+  Object.keys(L.items).forEach(function (c) { codes[c] = 1; }); Object.keys(P.inc).forEach(function (c) { codes[c] = 1; }); Object.keys(P.out).forEach(function (c) { codes[c] = 1; });
+  var rows = Object.keys(codes).map(function (c) {
+    var it = L.items[c] || {}, k = cat[c] || {}, inc = (P.inc[c] || {}).qty || 0, out = (P.out[c] || {}).qty || 0;
+    var r = { code: c, name: it.name || k.name || '', unit: it.unit || k.unit || '', model: it.model || k.model || '', brand: it.brand || k.brand || '', qty: it.qty || 0, inc: inc, out: out, n_moves: (it.moves || []).length, short: (it.moves || []).some(function (m) { return m.short; }) };
+    if (cost) r.value = it.value || 0;
+    r.avail = r.qty + inc - out; r.status = stkStatus_(r);
+    return r;
+  }).sort(function (a, b) { return a.code.localeCompare(b.code); });
+  return { rows: rows, nocode: L.nocode.length, lock: stkLock_(), can_cost: cost };
+};
+ACTIONS.stockCard = function (u, p) {
+  need_(u, 'stock', 'view');
+  var c = String(p.code || '').toUpperCase(), L = stockLedger_(), P = stockPlan_(), it = L.items[c], k = stkCat_()[c] || {}, cost = canCost_(u);
+  var moves = it ? it.moves.map(function (m) { var o = { date: m.date, dir: m.dir, kind: m.kind, qty: m.qty, ref: m.ref, link: m.link, note: m.note, bal: m.bal, key: m.key || '', short: m.short || 0, picked: !!m.picked, project_code: m.project_code || '' };
+    if (cost) { o.cost = m.cost; o.value = m.value; o.bal_value = m.bal_value; o.lots = m.lots; } return o; }) : [];
+  var lots = it ? it.lots.filter(function (l) { return l.on; }).map(function (l) { var o = { key: l.key, ref: l.ref, link: l.link, date: l.date, qty: l.qty, rem: l.rem, reserved: Object.keys(l.res).reduce(function (s, x) { return s + l.res[x]; }, 0) }; if (cost) o.cost = l.cost; return o; }) : [];
+  return { code: c, name: (it || {}).name || k.name || '', unit: (it || {}).unit || k.unit || '', model: k.model || '', qty: it ? it.qty : 0, value: cost && it ? it.value : null, moves: moves, lots: lots, inc: (P.inc[c] || { list: [] }).list, out: (P.out[c] || { list: [] }).list, lock: stkLock_() };
+};
+/* Báo cáo Nhập - Xuất - Tồn theo kỳ */
+ACTIONS.stockReport = function (u, p) {
+  need_(u, 'stock', 'view');
+  var from = String(p.from || '0000-00-00'), to = String(p.to || '9999-12-31'), L = stockLedger_(), cost = canCost_(u), rows = [], cat = stkCat_();
+  Object.keys(L.items).sort().forEach(function (c) {
+    var it = L.items[c], k = cat[c] || {}, r = { code: c, name: it.name, unit: it.unit, group: k.group || '', brand: k.brand || '', oq: 0, ov: 0, iq: 0, iv: 0, xq: 0, xv: 0 };
+    it.moves.forEach(function (m) { var d = String(m.date); if (d > to) return; if (d < from) { r.oq += m.dir * m.qty; r.ov += m.dir * m.value; } else if (m.dir > 0) { r.iq += m.qty; r.iv += m.value; } else { r.xq += m.qty; r.xv += m.value; } });
+    r.cq = r.oq + r.iq - r.xq; r.cv = r.ov + r.iv - r.xv;
+    if (!r.oq && !r.iq && !r.xq) return;
+    if (!cost) { delete r.ov; delete r.iv; delete r.xv; delete r.cv; }
+    rows.push(r);
+  });
+  /* đối chiếu với số đã chốt khi khóa sổ: chứng từ trước ngày khóa bị sửa sau đó → báo lệch */
+  var diffs = [], lk = stkLock_(), cl = readTable_('STOCK_CLOSES').filter(function (x) { return x.lock_date === lk; }).pop();
+  if (lk && cl && cl.data) {
+    var now = {}; Object.keys(L.items).forEach(function (c) { var q = 0; L.items[c].moves.forEach(function (m) { if (String(m.date) <= lk) q += m.dir * m.qty; }); if (q) now[c] = q; });
+    var all = Object.assign({}, cl.data, now); Object.keys(all).forEach(function (c) { var a = num_((cl.data[c] || {}).q), b = now[c] || 0; if (Math.abs(a - b) > 1e-9) diffs.push({ code: c, locked: a, now: b }); });
+  }
+  return { rows: rows, from: p.from || '', to: p.to || '', lock: lk, diffs: diffs, can_cost: cost };
+};
+/* Nạp file phiếu kho: kiểm tra mã trong Bảng giá, số lượng; kiểm kê thì kèm tồn sổ sách tại ngày */
+ACTIONS.stockImportCheck = function (u, p) {
+  need_(u, 'stock', 'view');
+  var kind = p.kind, cat = stkCat_(), kk = kind === 'KIEM_KE', book = {}, seen = {};
+  if (!STK_KIND[kind]) throw new Error('Loại phiếu kho không hợp lệ.');
+  if (kk) ACTIONS.stockAt(u, { date: p.date, exclude_voucher: p.exclude_voucher || '', all: 1 }).forEach(function (b) { book[b.code] = b; });
+  var lines = (p.rows || []).slice(0, 2000).map(function (r) {
+    var c = String(r.item_code || '').trim().toUpperCase(), k = cat[c], o = { line: r.line, item_code: c, name: k ? k.name : '', unit: k ? k.unit : '', qty: r.qty, cost: r.cost, note: String(r.note || ''), book_qty: 0, error: '' };
+    if (!c) o.error = 'Thiếu mã hàng';
+    else if (!k) o.error = 'Mã không có trong Bảng giá';
+    else if (r.qty === '' || r.qty == null || !isFinite(Number(r.qty))) o.error = kk ? 'Chưa có số đếm thực tế' : 'Thiếu số lượng';
+    else if (kk ? Number(r.qty) < 0 : !(Number(r.qty) > 0)) o.error = kk ? 'Số đếm âm' : 'Số lượng phải lớn hơn 0';
+    else if (r.cost !== '' && r.cost != null && !(Number(r.cost) >= 0)) o.error = 'Giá vốn không hợp lệ';
+    else if (seen[c] && kk) o.error = 'Mã bị lặp trong file';
+    if (!o.error) { seen[c] = 1; o.qty = Number(r.qty); o.cost = r.cost === '' || r.cost == null ? (kk && book[c] ? book[c].cost : (STK_IN[kind] ? (k.cost || 0) : 0)) : Number(r.cost); if (kk) o.book_qty = book[c] ? book[c].book_qty : 0; }
+    return o;
+  });
+  return { lines: lines, ok_n: lines.filter(function (x) { return !x.error; }).length, err_n: lines.filter(function (x) { return x.error; }).length };
+};
+ACTIONS.stockNocode = function (u, p) { need_(u, 'stock', 'view'); return stockLedger_().nocode; };
+/* Phiếu kho tay */
+ACTIONS.stockVoucherList = function (u, p) {
+  need_(u, 'stock', 'view');
+  var its = groupBy_(readTable_('STOCK_VOUCHER_ITEMS'), 'voucher_id');
+  return readTable_('STOCK_VOUCHERS').map(function (v) { return Object.assign({}, v, { kind_label: STK_KIND[v.kind] || v.kind, n_lines: (its[v.id] || []).length }); }).sort(function (a, b) { return String(b.date).localeCompare(String(a.date)) || String(b.code).localeCompare(String(a.code)); });
+};
+ACTIONS.stockVoucherGet = function (u, p) {
+  need_(u, 'stock', 'view');
+  var v = readTable_('STOCK_VOUCHERS').filter(function (x) { return x.id === p.id; })[0]; if (!v) throw new Error('Không tìm thấy phiếu kho.');
+  return { voucher: Object.assign({}, v, { kind_label: STK_KIND[v.kind] }), items: readTable_('STOCK_VOUCHER_ITEMS').filter(function (x) { return x.voucher_id === v.id; }).sort(function (a, b) { return a.line_no - b.line_no; }), lock: stkLock_() };
+};
+/* Tồn sổ sách tại 1 ngày (cho kiểm kê) */
+ACTIONS.stockAt = function (u, p) {
+  need_(u, 'stock', 'view');
+  var d = String(p.date || today_()).slice(0, 10), L = stockLedger_(), out = [], skip = p.exclude_voucher || '';
+  Object.keys(L.items).sort().forEach(function (c) { var it = L.items[c], q = 0, lc = 0; it.moves.forEach(function (m) { if (String(m.date) <= d && !(skip && String(m.link) === 'stockv/' + skip)) q += m.dir * m.qty; }); it.lots.forEach(function (l) { if (String(l.date) <= d) lc = l.cost; }); if (q || p.all) out.push({ code: c, name: it.name, unit: it.unit, book_qty: q, cost: lc }); });
+  return out;
+};
+ACTIONS.stockVoucherSave = function (u, p) {
+  var r = p.rec || {}, isNew = !r.id;
+  need_(u, 'stock', isNew ? 'create' : 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var rec = isNew ? null : readTable_('STOCK_VOUCHERS').filter(function (x) { return x.id === r.id; })[0];
+    if (!isNew && !rec) throw new Error('Không tìm thấy phiếu kho.');
+    if (rec) stkCheckLock_(rec.date);
+    var out = keepSystemCols_(Object.assign({}, rec || {}, r), rec, ['id', 'code', 'created_by', 'created_at']);
+    if (!STK_KIND[out.kind]) throw new Error('Loại phiếu kho không hợp lệ.');
+    if (rec && rec.kind !== out.kind) throw new Error('Không đổi loại phiếu đã lưu.');
+    out.date = today0_(out.date); stkCheckLock_(out.date); out.warehouse = out.warehouse || 'KHO1'; out.updated_at = now_();
+    if (isNew) { out.id = newId_('PK'); out.created_by = u.email; out.created_at = now_(); }
+    var cat = stkCat_(), seen = {};
+    var recs = (p.items || []).filter(function (x) { return String(x.item_code || '').trim(); }).map(function (x, i) {
+      var c = String(x.item_code).trim().toUpperCase(), k = cat[c];
+      if (!k) throw new Error('Dòng ' + (i + 1) + ': mã ' + c + ' không có trong Bảng giá.');
+      if (out.kind === 'KIEM_KE') { if (seen[c]) throw new Error('Mã ' + c + ' bị nhập 2 lần trong phiếu kiểm kê.'); seen[c] = 1; if (num_(x.qty) < 0) throw new Error('Dòng ' + (i + 1) + ': số đếm thực tế không âm.'); }
+      else if (!(num_(x.qty) > 0)) throw new Error('Dòng ' + (i + 1) + ' (' + c + '): số lượng phải lớn hơn 0.');
+      if (num_(x.cost) < 0) throw new Error('Dòng ' + (i + 1) + ': đơn giá âm.');
+      return { id: x.id || newId_('PKI'), voucher_id: out.id, line_no: i + 1, item_code: c, name: k.name, unit: k.unit, qty: num_(x.qty), cost: STK_IN[out.kind] || out.kind === 'KIEM_KE' ? num_(x.cost) : 0, book_qty: out.kind === 'KIEM_KE' ? num_(x.book_qty) : 0, lot_key: '', note: String(x.note || '') };
+    });
+    if (!recs.length) throw new Error('Phiếu chưa có dòng hàng.');
+    if (isNew) out.code = nextCode_('PK', true);
+    upsert_('STOCK_VOUCHERS', out);
+    replaceChildren_('STOCK_VOUCHER_ITEMS', 'voucher_id', out.id, recs);
+    audit_(u, isNew ? 'Tạo' : 'Sửa', 'STOCK_VOUCHERS', out.id, '', out.code + ' · ' + STK_KIND[out.kind] + ' · ' + recs.length + ' dòng');
+    RT.sl = null;
+    return { voucher: out };
+  });
+};
+ACTIONS.stockVoucherRemove = function (u, p) {
+  need_(u, 'stock', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var v = readTable_('STOCK_VOUCHERS').filter(function (x) { return x.id === p.id; })[0]; if (!v) throw new Error('Không tìm thấy phiếu kho.');
+    stkCheckLock_(v.date);
+    readTable_('STOCK_VOUCHER_ITEMS').forEach(function (x) { if (x.voucher_id === v.id) replaceChildren_('STOCK_PICKS', 'out_key', 'V:' + x.id, []); });
+    replaceChildren_('STOCK_VOUCHER_ITEMS', 'voucher_id', v.id, []); removeByKey_('STOCK_VOUCHERS', v.id);
+    audit_(u, 'Xóa', 'STOCK_VOUCHERS', v.id, '', v.code);
+    RT.sl = null; return true;
+  });
+};
+/* Chọn lô tay cho 1 dòng xuất (BBGH / xuất khác / kiểm kê giảm): picks = [{lot_key, qty}], rỗng = bỏ chọn tay */
+ACTIONS.stockPickSet = function (u, p) {
+  need_(u, 'stock', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var key = String(p.out_key || ''); if (!/^[GV]:/.test(key)) throw new Error('Dòng xuất không hợp lệ.');
+    var L = stockLedger_(), mv = null, code = '';
+    Object.keys(L.items).forEach(function (c) { L.items[c].moves.forEach(function (m) { if (m.key === key) { mv = m; code = c; } }); });
+    if (!mv) throw new Error('Không tìm thấy dòng xuất.');
+    stkCheckLock_(mv.date);
+    var tot = 0, recs = (p.picks || []).filter(function (x) { return num_(x.qty) > 0; }).map(function (x) {
+      var l = L.lots[x.lot_key]; if (!l || l.code !== code) throw new Error('Lô không thuộc mã ' + code + '.');
+      if (String(l.date) > String(mv.date)) throw new Error('Lô ' + l.ref + ' nhập sau ngày xuất.');
+      tot += num_(x.qty); return { id: newId_('SP'), out_key: key, lot_key: x.lot_key, qty: num_(x.qty) };
+    });
+    if (tot > mv.qty + 1e-9) throw new Error('Tổng số lấy theo lô (' + tot + ') vượt số xuất (' + mv.qty + ').');
+    replaceChildren_('STOCK_PICKS', 'out_key', key, recs);
+    audit_(u, recs.length ? 'Chọn lô' : 'Bỏ chọn lô', 'STOCK_PICKS', key, '', mv.ref + ' · ' + code);
+    RT.sl = null; return true;
+  });
+};
+/* Khóa sổ: chốt số tồn đến ngày; sau đó không ghi/sửa phiếu kho, chọn lô trước ngày đó */
+ACTIONS.stockLock = function (u, p) {
+  need_(u, 'stocklock', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var d = p.date ? String(p.date).slice(0, 10) : '';
+    if (d && d > today_()) throw new Error('Không khóa sổ cho ngày trong tương lai.');
+    var data = {};
+    if (d) { var L = stockLedger_(); Object.keys(L.items).forEach(function (c) { var q = 0, v = 0; L.items[c].moves.forEach(function (m) { if (String(m.date) <= d) { q += m.dir * m.qty; v += m.dir * m.value; } }); if (q || v) data[c] = { q: q, v: Math.round(v) }; });
+      upsert_('STOCK_CLOSES', { id: newId_('KS'), lock_date: d, data: data, created_by: u.email, created_at: now_() }); }
+    upsert_('CONFIG', { key: 'stock_lock', value: d });
+    delete RT['T:CONFIG'];
+    audit_(u, d ? 'Khóa sổ kho' : 'Mở khóa sổ kho', 'CONFIG', 'stock_lock', '', d || '(bỏ khóa)');
+    return { lock: d, n: Object.keys(data).length };
+  });
+};
+ACTIONS.stockCloses = function (u) { need_(u, 'stock', 'view'); return { lock: stkLock_(), can_lock: can_(u, 'stocklock', 'edit'), rows: readTable_('STOCK_CLOSES').map(function (x) { return { id: x.id, lock_date: x.lock_date, n: Object.keys(x.data || {}).length, created_by: x.created_by, created_at: x.created_at }; }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); }) }; };
+/* Tình trạng kho cho các dòng của 1 văn bản HĐ/PO/PLHĐ */
+ACTIONS.stockForDoc = function (u, p) {
+  need_(u, 'stock', 'view');
+  var d = index_().docById[p.doc_id]; if (!d) throw new Error('Không tìm thấy văn bản.');
+  var L = stockLedger_(), P = stockPlan_(), out = [];
+  (P.out ? Object.keys(P.out) : []).forEach(function (c) { (P.out[c].list || []).forEach(function (x) { if (x.doc_id === d.id) out.push({ doc_item_id: x.doc_item_id, code: c, need: x.qty, name: x.name, unit: x.unit, line_qty: x.line_qty }); }); });
+  var codes = {}; out.forEach(function (x) { codes[x.code] = 1; });
+  var info = {}; Object.keys(codes).forEach(function (c) { var it = L.items[c] || {}, r = { qty: it.qty || 0, inc: (P.inc[c] || {}).qty || 0, out: (P.out[c] || {}).qty || 0 }; r.avail = r.qty + r.inc - r.out; r.status = stkStatus_(r); info[c] = r; });
+  return { lines: out, info: info };
+};
+
 // ================= Xóa dữ liệu để dùng chính thức (bản 23) =================
 // Xóa theo nhóm; nhóm phụ thuộc tự kéo theo (xóa dự án → xóa luôn đơn mua; xóa khách → phải xóa dự án; xóa NCC → phải xóa đơn mua).
 // Client sao lưu toàn bộ lên Drive TRƯỚC khi gọi. Bảng USERS không bao giờ xóa.
 var RESET_GROUPS = {
   projects: { label: 'Dự án và giao dịch (báo giá, HĐ / PO / Phụ lục, giao hàng, xuất xưởng, bảo hành, chi phí, tạm ứng, thanh toán, tệp đính kèm)', tables: ['PROJECTS', 'QUOTES', 'QUOTE_ITEMS', 'DOCS', 'DOC_ITEMS', 'DELIVERIES', 'DELIVERY_ITEMS', 'COSTS', 'ADVANCES', 'PAYMENTS', 'WARRANTIES', 'CERTS', 'FILES', 'RFQS'], counters: true },
-  purchases: { label: 'Mua hàng (đơn mua, đợt hàng về, tờ khai nhập khẩu)', tables: ['PURCHASES', 'PURCHASE_ITEMS', 'RECEIPTS', 'RECEIPT_ITEMS', 'IMPORT_DECLS', 'IMPORT_DECL_ITEMS', 'IMPORT_ALLOCS', 'ITEM_ALIAS'], prefixes: ['DM', 'NH', 'TK'] },
+  purchases: { label: 'Mua hàng và kho (đơn mua, đợt hàng về, tờ khai nhập khẩu, phiếu kho, khóa sổ)', tables: ['PURCHASES', 'PURCHASE_ITEMS', 'RECEIPTS', 'RECEIPT_ITEMS', 'IMPORT_DECLS', 'IMPORT_DECL_ITEMS', 'IMPORT_ALLOCS', 'ITEM_ALIAS', 'STOCK_VOUCHERS', 'STOCK_VOUCHER_ITEMS', 'STOCK_PICKS', 'STOCK_CLOSES'], prefixes: ['DM', 'NH', 'TK', 'PK'] },
   customers: { label: 'Khách hàng', tables: ['CUSTOMERS'], prefixes: ['KH'] },
   suppliers: { label: 'Nhà cung cấp', tables: ['SUPPLIERS'], prefixes: ['NCC'] },
   tasks: { label: 'Công việc, nhật ký thao tác, nhật ký lỗi', tables: ['TASKS', 'AUDIT', 'ERRLOG'] },

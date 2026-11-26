@@ -323,7 +323,8 @@ PAGES.doc = function (p, q) {
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Chứng từ kèm theo (dùng cho biên bản giao nhận chứng từ)'), at));
     v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), docImpBar(doc, d, lines, canEdit), le));
     if (!canEdit) v.querySelectorAll('input,select,textarea').forEach(function (e) { e.disabled = true; });
-    else S.draftCtl = draftWatch({ id: 'doc/' + (isNew ? 'new:' + (q.type || 'PO') + ':' + (q.project || '') : id), label: TYPE_LB[doc.type] + ' ' + (isNew ? 'mới' : doc.code), hash: location.hash, root: v,
+    if (!isNew) { if (S.perms.stock && S.perms.stock.view) v.appendChild(docStockCard(doc)); if (S.perms.costs && S.perms.costs.view) v.appendChild(docCostCard(doc)); }
+    if (canEdit) S.draftCtl = draftWatch({ id: 'doc/' + (isNew ? 'new:' + (q.type || 'PO') + ':' + (q.project || '') : id), label: TYPE_LB[doc.type] + ' ' + (isNew ? 'mới' : doc.code), hash: location.hash, root: v,
       get: function () { return { ext: hdc ? hdc.get() : null, f: f.get(), lines: lines.map(function (x) { return Object.assign({}, x); }), terms: terms.map(function (x) { return Object.assign({}, x); }), attached: attached.map(function (x) { return Object.assign({}, x); }) }; },
       set: function (d) { formSet(f, d.f); if (hdc && d.ext) hdc.set(d.ext); [[lines, d.lines], [terms, d.terms], [attached, d.attached]].forEach(function (p) { p[0].length = 0; (p[1] || []).forEach(function (x) { p[0].push(x); }); }); le.redraw(); at.draw(); if (typeof drawT === 'function') drawT(); } });
   });
