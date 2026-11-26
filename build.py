@@ -20,10 +20,10 @@ idx = idx.replace('<div id="loading"></div>', loader + '<div id="loading"></div>
 # chèn loader NGAY TRƯỚC khối Js_core (đoạn <script> đầu tiên của thân trang)
 pos = idx.index('<script>', idx.index('<div id="toasts">'))
 idx = idx[:pos] + loader + idx[pos:]
-idx = idx.replace('</body>', '<script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>', 1)
+idx = idx.replace('</body>', '<script src="xlsx-lite.js"></script><script src="tk-parse.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>', 1)
 open(D + '/index.html', 'w', encoding='utf-8').write(idx)
 shutil.copy(S + '/Code.gs', D + '/code.js')
-for f in ['shim.js', 'store.js', 'overrides-gas.js', 'overrides.js', 'xlsx-lite.js', 'xlsx-write.js', 'migrate.js', 'manifest.webmanifest']:
+for f in ['shim.js', 'store.js', 'overrides-gas.js', 'overrides.js', 'xlsx-lite.js', 'tk-parse.js', 'xlsx-write.js', 'migrate.js', 'manifest.webmanifest']:
     shutil.copy(R + '/' + f, D + '/' + f)
 # sw.js lấy từ mẫu có chỗ __BUILD__ (sw.js ở thư mục gốc là bản đã đóng gói, có số phiên bản)
 shutil.copy(S + '/sw.template.js' if os.path.exists(S + '/sw.template.js') else R + '/sw.js', D + '/sw.js')

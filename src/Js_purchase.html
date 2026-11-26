@@ -237,5 +237,6 @@ TABS.purchases = function (host, b) {
       { k: 'diff', label: 'Chênh lệch', cls: 'r', val: function (r) { return plan[r.doc_item_id] != null ? (r.price - plan[r.doc_item_id]) * r.qty : 0; }, fmt: function (r) { if (plan[r.doc_item_id] == null) return ''; var x = (r.price - plan[r.doc_item_id]) * r.qty; return x ? h('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '+' : '') + M(x)) : '0'; } },
       { k: 'st', label: 'Trạng thái', val: function (r) { return r.pu.status_label; }, fmt: function (r) { return purBadge(r.pu.status); } }],
     onRow: function (r) { go('purchase/' + r.pu.id); } }));
+  var ic = projectImportsCard(b); if (ic) host.appendChild(ic);
 };
 </script>

@@ -321,7 +321,7 @@ PAGES.doc = function (p, q) {
     }
     var at = attEditor(attached);
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Chứng từ kèm theo (dùng cho biên bản giao nhận chứng từ)'), at));
-    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), le));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), docImpBar(doc, d, lines, canEdit), le));
     if (!canEdit) v.querySelectorAll('input,select,textarea').forEach(function (e) { e.disabled = true; });
     else S.draftCtl = draftWatch({ id: 'doc/' + (isNew ? 'new:' + (q.type || 'PO') + ':' + (q.project || '') : id), label: TYPE_LB[doc.type] + ' ' + (isNew ? 'mới' : doc.code), hash: location.hash, root: v,
       get: function () { return { ext: hdc ? hdc.get() : null, f: f.get(), lines: lines.map(function (x) { return Object.assign({}, x); }), terms: terms.map(function (x) { return Object.assign({}, x); }), attached: attached.map(function (x) { return Object.assign({}, x); }) }; },
@@ -573,7 +573,7 @@ function buyFillBar(buy, lines, le, canEdit) {
     var ds = diff(); if (!ds.length) return toast('Giá chốt đã khớp giá đơn mua.');
     confirmBox('Áp giá từ đơn mua cho ' + ds.length + ' dòng đang có giá chốt khác? (Bấm Lưu để ghi)', function () { ds.forEach(function (l) { l.cost = buy[l.id].price; l.cost_src = buy[l.id].pids; }); le.redraw(); upd(); });
   } }, 'Lấy giá từ đơn mua');
-  function upd() { var k = diff().length; info.textContent = n + ' dòng đã có đơn mua' + (k ? ' · ' + k + ' dòng giá chốt khác giá đơn mua' : ' · giá chốt khớp đơn mua'); btn.style.display = k && canEdit ? '' : 'none'; }
+  function upd() { var k = diff().length; info.textContent = n + ' dòng đã có đơn mua / tờ khai' + (k ? ' · ' + k + ' dòng giá chốt khác giá đơn mua / tờ khai' : ' · giá chốt khớp đơn mua / tờ khai'); btn.style.display = k && canEdit ? '' : 'none'; }
   upd();
   return h('div', { class: 'bar2', style: 'margin-bottom:6px' }, btn, info);
 }

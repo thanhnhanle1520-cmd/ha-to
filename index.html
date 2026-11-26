@@ -202,6 +202,11 @@ table.t tr.picked td{background:#fff7f7}
 .selbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:6px 10px;border:1px solid #fecaca;background:#fff5f5;border-radius:8px}
 .selbar b{color:var(--brand);margin-right:4px}
 button.lnk{border:0;background:none;color:#1d4ed8;padding:4px 6px}button.lnk:hover{background:none;text-decoration:underline}
+.tkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 16px}
+.tkkv{display:flex;flex-direction:column;font-size:13px;min-width:0}.tkkv span{font-size:11.5px}.tkkv b{font-weight:600;overflow-wrap:anywhere}
+.tkchk{border-left:4px solid #16a34a;padding:8px 12px}.tkchk.warn{border-left-color:#d97706;background:#fffbeb}
+.tkdrop{border:2px dashed var(--line);text-align:center;padding:14px;cursor:pointer;background:#fafbfc}.tkdrop.on,.tkdrop:hover{border-color:var(--brand);background:#fff5f6}.tkdrop:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+table.tkitems td,table.tkitems th{vertical-align:top}table.tkitems td.tkd{white-space:normal;min-width:300px;max-width:440px}.tkitems .tkc{background:#f8fafc;font-variant-numeric:tabular-nums}.tkitems .tkcost{background:#eef6ff}
 </style>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
@@ -258,8 +263,8 @@ function perfNote(a, tot, ms, ms0) {
 var busyN = 0;
 function busy(d) { busyN += d; var l = $('#loading'); l.style.width = busyN > 0 ? '70%' : '100%'; if (busyN <= 0) { busyN = 0; setTimeout(function () { l.style.width = '0'; }, 250); } }
 /* ---- Gọi máy chủ + bộ nhớ đệm phía trình duyệt (mở trang tức thì, tự cập nhật ngầm) ---- */
-var MEMO = {}, READS = { dataRows: 1, deletePreview: 1, dupCodes: 1, deliveryBasis: 1, list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1 };
-var WRITES = { deleteRecords: 1, renumberCode: 1, syncDocFromQuote: 1, projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, endBidding: 1, resetData: 1 };
+var MEMO = {}, READS = { dataRows: 1, deletePreview: 1, dupCodes: 1, deliveryBasis: 1, list: 1, get: 1, projectBundle: 1, deliveryStats: 1, deliverable: 1, dashboard: 1, catalogList: 1, catalogSearch: 1, coefGet: 1, hdDefaults: 1, getConfig: 1, history: 1, todayList: 1, taskList: 1, taskHistory: 1, reconcile: 1, catalogHistory: 1, lastPrices: 1, customerBundle: 1, supplierList: 1, purchaseList: 1, purchaseGet: 1, buyableLines: 1, importList: 1, importGet: 1, importPrepare: 1, importLinesFor: 1, importReport: 1, invoiceNames: 1 };
+var WRITES = { deleteRecords: 1, renumberCode: 1, syncDocFromQuote: 1, projectArchive: 1, saveImage: 1, ensureRetail: 1, save: 1, remove: 1, reviseQuote: 1, convertQuote: 1, saveConfig: 1, saveUser: 1, uploadFile: 1, catalogSave: 1, catalogImport: 1, coefSave: 1, copyQuote: 1, copyProject: 1, taskSave: 1, taskDone: 1, taskRemove: 1, setFileKind: 1, supplierSave: 1, supplierRemove: 1, purchaseSave: 1, purchaseRemove: 1, receiptSave: 1, receiptRemove: 1, importSave: 1, importRemove: 1, importAllocSet: 1, endBidding: 1, resetData: 1 };
 var MEMO_TTL = 300000, REVAL_AFTER = 15000;
 function raw(action, payload, quiet) {
   return new Promise(function (res, rej) {
@@ -776,7 +781,7 @@ function lineEditor(o) {
   var lines = o.lines, mode = o.mode, canPrice = S.perms.canPrice, root = h('div'), body = h('tbody'), foot = h('tfoot');
   var cols = {
     quote: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 110], ['model', 'Model', 'text', 90], ['brand', 'Hãng', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 65], ['cost', 'Giá mua (nội bộ)', 'n', 100], ['coef', 'Hệ số', 'n', 62], ['price', 'Đơn giá', 'n', 100], ['disc_pct', 'CK %', 'n', 55], ['amount', 'Thành tiền', 'ro', 110], ['vat_line', 'VAT %', 'vat', 58], ['note', 'Ghi chú', 'text', 100]],
-    doc: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['origin', 'Xuất xứ', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 70], ['price_offer', 'Đơn giá chào', 'ro', 100], ['price', 'Đơn giá chốt', 'n', 100], ['cost_list', 'Giá mua (bảng giá)', 'ro', 100], ['cost', 'Giá mua (chốt, sửa được)', 'n', 110], ['_rs', '', 'rs', 28], ['_buy', 'Đơn mua', 'buy', 90], ['amount', 'Thành tiền', 'ro', 110], ['vat_line', 'VAT %', 'vat', 58], ['source', 'Nguồn', 'src', 80], ['note', 'Ghi chú', 'text', 90]],
+    doc: [['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['origin', 'Xuất xứ', 'text', 70], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL', 'n', 70], ['price_offer', 'Đơn giá chào', 'ro', 100], ['price', 'Đơn giá chốt', 'n', 100], ['cost_list', 'Giá mua (bảng giá)', 'ro', 100], ['cost', 'Giá mua (chốt, sửa được)', 'n', 110], ['_rs', '', 'rs', 28], ['_buy', 'Đơn mua / TK', 'buy', 90], ['amount', 'Thành tiền', 'ro', 110], ['vat_line', 'VAT %', 'vat', 58], ['source', 'Nguồn', 'src', 80], ['note', 'Ghi chú', 'text', 90]],
     delivery: [['doc_code', 'Văn bản', 'ro', 90], ['name', 'Tên hàng', 'text', 220], ['spec', 'Quy cách / kích thước', 'text', 100], ['model', 'Model', 'text', 90], ['unit', 'ĐVT', 'text', 50], ['qty', 'SL giao', 'n', 80], ['note', 'Ghi chú', 'text', 120]]
   }[mode];
   if (mode === 'doc' && !(o.buy && Object.keys(o.buy).length)) cols = cols.filter(function (c) { return c[2] !== 'buy'; });      // chưa có đơn mua nào → ẩn cột
@@ -818,14 +823,14 @@ function lineEditor(o) {
         }
         else if (type === 'rs') { var diff = mode === 'doc' && num(l.cost) > 0; td.appendChild(diff ? h('button', { title: 'Xóa giá chốt, dùng lại giá bảng giá (' + M(l.cost_list || 0) + ')', style: 'border:none;background:none;color:#d97706', onclick: function () { l.cost = ''; l.cost_src = ''; draw(); if (o.onChange) o.onChange(); } }, '↺') : h('span')); }
         else if (type === 'ro') td.appendChild(h('span', { style: 'padding:4px 5px;display:block;text-align:' + (k === 'doc_code' ? 'left' : 'right') }, k === 'amount' ? M(amt(l)) : k === 'doc_code' ? (l.doc_code || '—') : k === 'cost_list' ? (num(l.cost) > 0 ? h('span', { class: 'mut', title: 'Đã có giá mua chốt — báo cáo dùng giá chốt' }, '—') : M(l.cost_list != null && l.cost_list !== '' ? l.cost_list : '')) : M(l[k])));
-        else if (type === 'buy') { var bb = o.buy && l.id ? o.buy[l.id] : null; if (bb) { var ids = String(bb.pids).split(','), rf = String(bb.refs).split('; '); ids.forEach(function (pid, j) { var cd = (rf[j] || '').split(' · '); td.appendChild(h('a', { href: '#/purchase/' + pid, title: (cd[1] || '') + ' — mở đơn mua', style: 'display:block;padding:2px 4px;font-size:12px;white-space:nowrap' }, cd[0] || pid)); }); } else td.appendChild(h('span', { class: 'mut', style: 'padding:4px;display:block' }, '—')); }
+        else if (type === 'buy') { var bb = o.buy && l.id ? o.buy[l.id] : null; if (bb) { var ids = String(bb.pids).split(','), rf = String(bb.refs).split('; '); ids.forEach(function (pid, j) { var cd = (rf[j] || '').split(' · '); var isTk = /^TK/.test(pid); td.appendChild(h('a', { href: (isTk ? '#/import/' : '#/purchase/') + pid, title: (cd[1] || '') + (isTk ? ' — mở tờ khai' : ' — mở đơn mua'), style: 'display:block;padding:2px 4px;font-size:12px;white-space:nowrap' }, cd[0] || pid)); }); } else td.appendChild(h('span', { class: 'mut', style: 'padding:4px;display:block' }, '—')); }
         else if (type === 'src') td.appendChild(h('span', { class: 'badge ' + (l.source === 'QUOTE' ? 'b-info' : 'b-warn'), style: 'margin:4px' }, l.source === 'QUOTE' ? 'Trong BG' : 'Ngoài BG'));
         else {
           var priceLocked = (k === 'price' || k === 'disc_pct' || k === 'cost' || k === 'coef') && !canPrice;
           var inp = h('input', { type: type === 'n' ? 'number' : 'text', step: 'any', value: l[k] == null ? '' : l[k], disabled: priceLocked, style: k === 'coef' && mode === 'quote' ? (num(l.coef) > 0 && num(l.coef) < 1 ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : '') : k === 'cost' && mode === 'doc' ? (num(l.cost) === 0 && !num(l.cost_list) ? 'background:#fee2e2' : num(l.cost) > 0 ? 'background:#fef3c7' : '') : '', placeholder: k === 'cost' && mode === 'doc' ? 'chưa chốt' : '',
             oninput: function (e) { l[k] = type === 'n' ? (e.target.value === '' ? '' : num(e.target.value)) : e.target.value; if (k === 'cost' && mode === 'doc') l.cost_src = ''; if (type === 'n') { drawFoot(); var a = tr.querySelector('[data-amt]'); if (a) a.textContent = M(amt(l)); } if (o.onChange) o.onChange(); }, onchange: function () { if (mode === 'quote' && (k === 'cost' || k === 'coef' || k === 'price')) { recalc(l, k); draw(); if (o.onChange) o.onChange(); } else if (k === 'cost' && mode === 'doc') draw(); } });
           td.appendChild(inp);
-          if (k === 'cost' && mode === 'doc' && o.buy && l.id && o.buy[l.id]) { var bq = o.buy[l.id], same = num(l.cost) === bq.price; td.appendChild(h('div', { class: 'buyref', title: 'Giá mua theo đơn mua: ' + bq.refs, style: 'font-size:11px;line-height:1.2;padding:2px 4px;white-space:normal;color:' + (same ? '#166534' : '#b45309') }, (same ? '✓ ' : '≠ ') + 'đơn mua: ' + M(bq.price))); }
+          if (k === 'cost' && mode === 'doc' && o.buy && l.id && o.buy[l.id]) { var bq = o.buy[l.id], same = num(l.cost) === bq.price, tkx = (bq.tk || []).map(function (t) { return 'TK ' + t.decl_no + ' dòng ' + t.line_no + ': ' + M(t.base) + ' + thuế NK ' + M(t.tax) + ' = ' + M(t.cost); }).join('\n'); td.appendChild(h('div', { class: 'buyref', title: 'Giá mua theo ' + (tkx ? 'tờ khai / đơn mua: ' + bq.refs + '\n' + tkx : 'đơn mua: ' + bq.refs), style: 'font-size:11px;line-height:1.2;padding:2px 4px;white-space:normal;color:' + (same ? '#166534' : '#b45309') }, (same ? '✓ ' : '≠ ') + ((bq.tk || []).length ? 'tờ khai: ' : 'đơn mua: ') + M(bq.price))); }
         }
         if (k === 'amount') { td.firstChild.setAttribute('data-amt', '1'); }
         tr.appendChild(td);
@@ -923,6 +928,7 @@ var ICONS = {
   quotes: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 13h7M8.5 17h4"/>',
   docs: '<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 12.5h7"/><path d="M9 18c1-1.6 1.8-1.6 2.4 0 .5 1.3 1.2 1.3 2.1 0"/>',
   deliveries: '<path d="M2.5 6.5h11v10h-11z"/><path d="M13.5 10h4l3 3.2v3.3h-7z"/><circle cx="6.5" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+  imports: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><circle cx="12.5" cy="14" r="3"/><path d="M9 8h3"/>',
   purchases: '<path d="M3 4h2.5l2.2 11h10.6l2-8H7"/><circle cx="9" cy="19.5" r="1.6"/><circle cx="17" cy="19.5" r="1.6"/>',
   certs: '<path d="M3 21V10l5 3V10l5 3V6l8 4v11z"/><path d="M7 17h2M12 17h2M17 17h1"/>',
   warranties: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z"/><path d="M8.8 12.2l2.2 2.2 4.3-4.6"/>',
@@ -997,7 +1003,7 @@ function menuBtn(label, items, attrs) {
 var MENU_GROUPS = [
   ['Tổng quan', [['dashboard', 'Dashboard']]],
   ['Kinh doanh', [['customers', 'Khách hàng'], ['projects', 'Dự án'], ['pricelist', 'Bảng giá'], ['quotes', 'Báo giá']]],
-  ['Hợp đồng và vận hành', [['docs', 'HĐ / PO / Phụ lục HĐ'], ['purchases', 'Mua hàng'], ['deliveries', 'Giao hàng'], ['certs', 'Xuất xưởng'], ['warranties', 'Bảo hành']]],
+  ['Hợp đồng và vận hành', [['docs', 'HĐ / PO / Phụ lục HĐ'], ['purchases', 'Mua hàng'], ['imports', 'Tờ khai nhập khẩu'], ['deliveries', 'Giao hàng'], ['certs', 'Xuất xưởng'], ['warranties', 'Bảo hành']]],
   ['Tài chính', [['costs', 'Chi phí dự án'], ['advances', 'Tạm ứng'], ['payments', 'Thanh toán']]],
   ['Hệ thống', [['config', 'Cấu hình']]]
 ];
@@ -1030,7 +1036,7 @@ function go(path) { location.hash = '#/' + path; }
 function route() {
   if (!S.user) return;
   var r = parseHash(), p = r.path, page = p[0] || (S.perms.dashboard.view ? 'dashboard' : 'projects');
-  var k = page === 'quote' ? 'quotes' : page === 'customer' ? 'customers' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page === 'purchase' || page === 'suppliers' ? 'purchases' : page;
+  var k = page === 'quote' ? 'quotes' : page === 'customer' ? 'customers' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page === 'purchase' || page === 'suppliers' ? 'purchases' : page === 'import' ? 'imports' : page;
   document.querySelectorAll('#nav a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-k') === k); });
   if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
   if (S.draftCtl) { S.draftCtl.end(); S.draftCtl = null; draftStatus(''); }
@@ -2147,7 +2153,7 @@ PAGES.doc = function (p, q) {
     }
     var at = attEditor(attached);
     v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Chứng từ kèm theo (dùng cho biên bản giao nhận chứng từ)'), at));
-    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), le));
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, doc.type === 'PLHD' ? 'Dòng hàng điều chỉnh / thêm mới' : 'Dòng hàng (khối lượng)'), doc.type === 'PLHD' ? plhdPicker(doc, d, le, f) : doc.type === 'PO' && canEdit ? poPicker(doc, le, f) : null, buyFillBar(d.buy || {}, lines, le, canEdit), docImpBar(doc, d, lines, canEdit), le));
     if (!canEdit) v.querySelectorAll('input,select,textarea').forEach(function (e) { e.disabled = true; });
     else S.draftCtl = draftWatch({ id: 'doc/' + (isNew ? 'new:' + (q.type || 'PO') + ':' + (q.project || '') : id), label: TYPE_LB[doc.type] + ' ' + (isNew ? 'mới' : doc.code), hash: location.hash, root: v,
       get: function () { return { ext: hdc ? hdc.get() : null, f: f.get(), lines: lines.map(function (x) { return Object.assign({}, x); }), terms: terms.map(function (x) { return Object.assign({}, x); }), attached: attached.map(function (x) { return Object.assign({}, x); }) }; },
@@ -2399,7 +2405,7 @@ function buyFillBar(buy, lines, le, canEdit) {
     var ds = diff(); if (!ds.length) return toast('Giá chốt đã khớp giá đơn mua.');
     confirmBox('Áp giá từ đơn mua cho ' + ds.length + ' dòng đang có giá chốt khác? (Bấm Lưu để ghi)', function () { ds.forEach(function (l) { l.cost = buy[l.id].price; l.cost_src = buy[l.id].pids; }); le.redraw(); upd(); });
   } }, 'Lấy giá từ đơn mua');
-  function upd() { var k = diff().length; info.textContent = n + ' dòng đã có đơn mua' + (k ? ' · ' + k + ' dòng giá chốt khác giá đơn mua' : ' · giá chốt khớp đơn mua'); btn.style.display = k && canEdit ? '' : 'none'; }
+  function upd() { var k = diff().length; info.textContent = n + ' dòng đã có đơn mua / tờ khai' + (k ? ' · ' + k + ' dòng giá chốt khác giá đơn mua / tờ khai' : ' · giá chốt khớp đơn mua / tờ khai'); btn.style.display = k && canEdit ? '' : 'none'; }
   upd();
   return h('div', { class: 'bar2', style: 'margin-bottom:6px' }, btn, info);
 }
@@ -2988,7 +2994,361 @@ TABS.purchases = function (host, b) {
       { k: 'diff', label: 'Chênh lệch', cls: 'r', val: function (r) { return plan[r.doc_item_id] != null ? (r.price - plan[r.doc_item_id]) * r.qty : 0; }, fmt: function (r) { if (plan[r.doc_item_id] == null) return ''; var x = (r.price - plan[r.doc_item_id]) * r.qty; return x ? h('span', { class: x > 0 ? 'neg' : 'pos' }, (x > 0 ? '+' : '') + M(x)) : '0'; } },
       { k: 'st', label: 'Trạng thái', val: function (r) { return r.pu.status_label; }, fmt: function (r) { return purBadge(r.pu.status); } }],
     onRow: function (r) { go('purchase/' + r.pu.id); } }));
+  var ic = projectImportsCard(b); if (ic) host.appendChild(ic);
 };
+</script>
+
+<script>
+/* ===== Tờ khai nhập khẩu (bản 31) =====
+   Kéo file ECUS (ToKhaiHQ7N_*.xlsx) vào → app tự đọc trang 1–2 (thông tin chung) và trang 3+ (mỗi trang 1 dòng hàng) → xem lại → Lưu.
+   Giá vốn/đvt = Đơn giá tính thuế + Thuế NK/đvt (chi phí phát sinh KHÔNG cộng vào). Dòng tờ khai gắn dòng HĐ/PO → giá mua chốt tự điền như đơn mua.
+   Mô tả hải quan chỉ dùng nội bộ (đối chiếu, xuất hóa đơn) — không in ra Báo giá / BBGH / BBCT. */
+var IMP_ST = { THONG_QUAN: 'Đã thông quan', NHAP: 'Nháp', HUY: 'Hủy' }, IMP_CLS = { THONG_QUAN: 'b-ok', NHAP: '', HUY: 'b-bad' };
+var IMP_CH = { XANH: 'Xanh', VANG: 'Vàng', DO: 'Đỏ' }, IMP_CHC = { XANH: 'b-ok', VANG: 'b-warn', DO: 'b-bad' };
+function impBadge(st) { return h('span', { class: 'badge ' + (IMP_CLS[st] || '') }, IMP_ST[st] || st || ''); }
+function chBadge(c) { return c ? h('span', { class: 'badge ' + (IMP_CHC[c] || ''), title: 'Phân luồng hải quan' }, 'Luồng ' + IMP_CH[c]) : null; }
+function impNewId(p) { return p + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7); }
+/* đọc 1 file → kết quả TkParse (head, items, checks, errors, warnings) */
+function tkReadFile(file) {
+  if (!/\.xlsx$/i.test(file.name)) return Promise.reject(new Error(file.name + ': cần file .xlsx xuất từ ECUS.'));
+  return file.arrayBuffer().then(XlsxLite.read).then(function (book) { var r = TkParse.parseBook(book); r.file_name = file.name; return r; });
+}
+/* gợi ý mã hàng + NCC + tờ khai trùng số */
+function tkPrepare(r) {
+  return call('importPrepare', { decl_no: r.head.decl_no, exporter_name: r.head.exporter_name, contract_no: r.head.contract_no, items: r.items.map(function (it) { return { description: it.description, model: it.model, brand: it.brand }; }) }).then(function (x) {
+    r.prep = x; r.items.forEach(function (it, i) { var s = x.suggest[i]; if (s && !it.item_code) { it.item_code = s.code; it.item_name = s.name; it.code_by = s.by; } });
+    if (x.my_tax && r.head.importer_tax && x.my_tax !== r.head.importer_tax) r.warnings.push('Mã số thuế người nhập khẩu trên tờ khai (' + r.head.importer_tax + ') khác MST công ty trong Cấu hình (' + x.my_tax + ').');
+    return r;
+  });
+}
+function tkPayload(r, extra) {
+  var H = r.head;
+  var rec = Object.assign({ decl_no: H.decl_no, reg_date: H.reg_date, type_code: H.type_code, customs_office: H.customs_office, channel: H.channel, exporter_name: H.exporter_name, exporter_country: H.exporter_country, exporter_address: H.exporter_address,
+    bill_no: H.bill_no, port: H.port, arrival_date: H.arrival_date, release_date: H.release_date, packages: H.packages, package_unit: H.package_unit, gross_kg: H.gross_kg, invoice_no: H.invoice_no, invoice_date: H.invoice_date,
+    contract_no: H.contract_no, contract_date: H.contract_date, incoterm: H.incoterm, currency: H.currency, pay_method: H.pay_method, invoice_total: H.invoice_total, exchange_rate: H.exchange_rate, taxable_total: H.taxable_total,
+    tax_payable: H.tax_payable, pages: H.pages, status: 'THONG_QUAN', checks: r.checks, file_name: r.file_name || '', supplier_id: r.prep && r.prep.supplier ? r.prep.supplier.id : '' }, extra || {});
+  return { rec: rec, items: r.items.map(function (it) { var o = {}; ['id', 'line_no', 'hs_code', 'description', 'model', 'brand', 'origin', 'origin_name', 'qty', 'unit', 'qty2', 'unit2', 'inv_price', 'inv_value', 'inv_currency', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'other_taxes', 'item_code', 'item_name'].forEach(function (k) { if (it[k] != null) o[k] = it[k]; }); return o; }) };
+}
+/* nhập file: 1 file → màn hình xem lại; nhiều file → lưu thẳng các tờ khai đọc sạch, báo lại tờ khai cần xem */
+function tkImportFiles(files) {
+  files = Array.prototype.slice.call(files || []); if (!files.length) return;
+  if (files.length === 1) return tkReadFile(files[0]).then(tkPrepare).then(function (r) {
+    if (r.errors.length) return modal({ title: 'Không đọc được tờ khai', body: h('ul', null, r.errors.map(function (e) { return h('li', null, e); })) });
+    if (r.prep.existing) return modal({ title: 'Tờ khai ' + r.head.decl_no + ' đã có', body: h('p', null, 'Tờ khai này đã lưu (' + r.prep.existing.code + '). Cập nhật theo file mới (tờ khai sửa đổi)? Mã hàng và phần gắn dự án của các dòng cùng số được giữ lại.'),
+      buttons: [{ label: 'Cập nhật theo file', cls: 'pri', fn: function (c) { c(); S.tkDraft = r; go('import/' + r.prep.existing.id + '?upd=1'); } }], closeLabel: 'Thôi' });
+    r.items.forEach(function (it) { it.id = impNewId('TI'); });
+    S.tkDraft = r; go('import/new');
+  }).catch(function (e) { toast(e.message || String(e), true); });
+  var ok = [], bad = [], i = 0;
+  (function next() {
+    if (i >= files.length) {
+      MEMO = {}; route();
+      return modal({ title: 'Đã nhập ' + ok.length + '/' + files.length + ' tờ khai', body: h('div', null, ok.length ? h('p', null, 'Đã lưu: ' + ok.join(', ')) : null, bad.length ? h('div', null, h('b', null, 'Chưa lưu (mở từng file để xem):'), h('ul', null, bad.map(function (b) { return h('li', null, b); }))) : null) });
+    }
+    var f = files[i++];
+    tkReadFile(f).then(tkPrepare).then(function (r) {
+      if (r.errors.length) { bad.push(f.name + ': ' + r.errors[0]); return; }
+      if (r.prep.existing) { bad.push(f.name + ': tờ khai ' + r.head.decl_no + ' đã có'); return; }
+      if (r.checks.some(function (c) { return !c.ok; })) { bad.push(f.name + ': số liệu không khớp (' + r.warnings[0] + ')'); return; }
+      return raw('importSave', tkPayload(r)).then(function () { ok.push(r.head.decl_no); });
+    }).catch(function (e) { bad.push(f.name + ': ' + (e.message || e)); }).then(next);
+  })();
+}
+function tkFileInput() {
+  var inp = h('input', { type: 'file', accept: '.xlsx', multiple: true, style: 'display:none', onchange: function () { tkImportFiles(inp.files); inp.value = ''; } });
+  return inp;
+}
+
+/* ---- Danh sách tờ khai + báo cáo thuế NK ---- */
+PAGES.imports = function (p, q) {
+  var tab = q.tab === 'report' ? 'report' : 'list', inp = tkFileInput(), v = $('#view');
+  setTitle('Tờ khai nhập khẩu', [S.perms.imports.create ? h('button', { class: 'pri', onclick: function () { inp.click(); } }, '+ Nhập file tờ khai') : null, inp]);
+  var tabs = h('div', { class: 'tabs' }, [['list', 'Tờ khai'], ['report', 'Báo cáo thuế nhập khẩu']].map(function (t) { return h('a', { class: t[0] === tab ? 'on' : '', onclick: function () { go('imports' + (t[0] === 'list' ? '' : '?tab=' + t[0])); } }, t[1]); }));
+  if (tab === 'report') return impReport(v, tabs);
+  return call('importList', {}).then(function (rows) {
+    v.innerHTML = ''; v.appendChild(tabs);
+    if (S.perms.imports.create) v.appendChild(tkDrop(inp));
+    v.appendChild(table({ rows: rows, xls: 'To_khai_nhap_khau', empty: 'Chưa có tờ khai nào. Bấm "+ Nhập file tờ khai" và chọn file Excel xuất từ ECUS (ToKhaiHQ7N_…xlsx).',
+      search: function (r) { return [r.decl_no, r.exporter_name, r.invoice_no, r.contract_no, r.bill_no, r.code].join(' '); },
+      filters: [{ label: 'Mọi trạng thái', opts: Object.keys(IMP_ST).map(function (k) { return [k, IMP_ST[k]]; }), get: function (r) { return r.status; } }, { label: 'Mọi luồng', opts: Object.keys(IMP_CH).map(function (k) { return [k, 'Luồng ' + IMP_CH[k]]; }), get: function (r) { return r.channel; } }],
+      cols: [{ k: 'decl_no', label: 'Số tờ khai', fmt: function (r) { return h('b', { class: 'code' }, r.decl_no); } }, { k: 'reg_date', label: 'Ngày ĐK', fmt: function (r) { return D(r.reg_date); } }, { k: 'type_code', label: 'Loại hình' },
+        { k: 'channel', label: 'Luồng', val: function (r) { return IMP_CH[r.channel] || ''; }, fmt: function (r) { return chBadge(r.channel) || ''; } },
+        { k: 'exporter_name', label: 'Người xuất khẩu', max: 28 }, { k: 'invoice_no', label: 'Số hóa đơn' }, { k: 'contract_no', label: 'Số HĐ ngoại' },
+        { k: 'n_lines', label: 'Dòng', cls: 'r' }, { k: 'taxable_total', label: 'Trị giá tính thuế', cls: 'r', fmt: function (r) { return M(r.taxable_total); } },
+        { k: 'nk_total', label: 'Thuế NK', cls: 'r', fmt: function (r) { return M(r.nk_total); } }, { k: 'vat_total', label: 'VAT NK', cls: 'r', fmt: function (r) { return M(r.vat_total); } },
+        { k: 'alloc_pct', label: 'Đã gắn dự án', cls: 'r', fmt: function (r) { return h('span', { class: r.alloc_pct >= 0.999 ? 'pos' : r.alloc_pct > 0 ? '' : 'mut' }, P(r.alloc_pct)); } },
+        { k: 'status', label: 'Trạng thái', val: function (r) { return IMP_ST[r.status]; }, fmt: function (r) { return impBadge(r.status); } }],
+      foot: function (rs) { var t = 0, nk = 0, vt = 0; rs.forEach(function (r) { t += r.taxable_total; nk += r.nk_total; vt += r.vat_total; }); return h('tr', null, h('td', { colspan: 8, class: 'r' }, 'Cộng ' + rs.length + ' tờ khai'), h('td', { class: 'r' }, h('b', null, M(t))), h('td', { class: 'r' }, h('b', null, M(nk))), h('td', { class: 'r' }, h('b', null, M(vt))), h('td', { colspan: 2 })); },
+      onRow: function (r) { go('import/' + r.id); } }));
+  });
+};
+function tkDrop(inp) {
+  var z = h('div', { class: 'card tkdrop', tabindex: 0, role: 'button', 'aria-label': 'Kéo thả file tờ khai vào đây hoặc bấm để chọn file', onclick: function () { inp.click(); }, onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inp.click(); } } },
+    h('b', null, 'Kéo thả file tờ khai vào đây'), h('span', { class: 'mut' }, ' hoặc bấm để chọn · file Excel xuất từ ECUS (ToKhaiHQ7N_…xlsx), chọn được nhiều file cùng lúc'));
+  z.addEventListener('dragover', function (e) { e.preventDefault(); z.classList.add('on'); });
+  z.addEventListener('dragleave', function () { z.classList.remove('on'); });
+  z.addEventListener('drop', function (e) { e.preventDefault(); z.classList.remove('on'); tkImportFiles(e.dataTransfer.files); });
+  return z;
+}
+function impReport(v, tabs) {
+  var y = String(THIS_YEAR), st = S.impRep || (S.impRep = { from: y + '-01-01', to: y + '-12-31', by: 'month' });
+  var fr = h('input', { type: 'date', value: st.from }), to = h('input', { type: 'date', value: st.to });
+  var by = sel([['month', 'Theo tháng'], ['exporter', 'Theo người xuất khẩu'], ['country', 'Theo nước xuất xứ'], ['hs', 'Theo mã HS'], ['decl', 'Theo tờ khai']], st.by);
+  var host = h('div');
+  function load() {
+    st.from = fr.value; st.to = to.value; st.by = by.value;
+    return call('importReport', { from: st.from, to: st.to }).then(function (rows) {
+      host.innerHTML = '';
+      var key = { month: function (r) { return String(r.reg_date).slice(0, 7); }, exporter: function (r) { return r.exporter || '(không rõ)'; }, country: function (r) { return r.origin || '(không rõ)'; }, hs: function (r) { return r.hs_code; }, decl: function (r) { return r.decl_no; } }[st.by];
+      var g = {}, order = []; rows.forEach(function (r) { var k = key(r), x = g[k]; if (!x) { x = g[k] = { id: k, k: k, decls: {}, n: 0, tv: 0, nk: 0, vat: 0, oth: 0 }; order.push(k); } x.decls[r.decl_no] = 1; x.n++; x.tv += r.tax_value; x.nk += r.nk_amount; x.vat += r.vat_amount; x.oth += r.other_tax; });
+      var grp = order.map(function (k) { var x = g[k]; x.nd = Object.keys(x.decls).length; return x; }).sort(function (a, b) { return st.by === 'month' ? String(b.k).localeCompare(String(a.k)) : b.tv - a.tv; });
+      var lbl = by.options[by.selectedIndex].text.replace('Theo ', '');
+      var T = { nd: 0, n: 0, tv: 0, nk: 0, vat: 0 }; var dset = {}; rows.forEach(function (r) { dset[r.decl_no] = 1; T.n++; T.tv += r.tax_value; T.nk += r.nk_amount; T.vat += r.vat_amount; }); T.nd = Object.keys(dset).length;
+      host.appendChild(h('div', { class: 'grid g3', style: 'margin-bottom:12px' }, [['Số tờ khai', N(T.nd), T.n + ' dòng hàng'], ['Trị giá tính thuế', M(T.tv), 'VND'], ['Thuế nhập khẩu', M(T.nk), T.tv > 0 ? 'bình quân ' + N(Math.round(T.nk / T.tv * 10000) / 100) + '% trị giá' : ''], ['Thuế GTGT nhập khẩu', M(T.vat), 'được khấu trừ, không vào giá vốn']].map(function (k) { return h('div', { class: 'kpi' }, h('div', { class: 'l' }, k[0]), h('div', { class: 'v' }, k[1]), h('div', { class: 'l' }, k[2])); })));
+      host.appendChild(h('div', { class: 'card' }, h('h3', null, 'Tổng hợp ' + lbl.toLowerCase()), table({ rows: grp, xls: 'Thue_NK_tong_hop', empty: 'Không có tờ khai trong kỳ.',
+        cols: [{ k: 'k', label: lbl.charAt(0).toUpperCase() + lbl.slice(1), fmt: function (r) { return st.by === 'month' ? r.k.slice(5) + '/' + r.k.slice(0, 4) : r.k; } }, { k: 'nd', label: 'Số tờ khai', cls: 'r' }, { k: 'n', label: 'Dòng hàng', cls: 'r' },
+          { k: 'tv', label: 'Trị giá tính thuế', cls: 'r', fmt: function (r) { return M(r.tv); } }, { k: 'nk', label: 'Thuế NK', cls: 'r', fmt: function (r) { return M(r.nk); } }, { k: 'vat', label: 'Thuế GTGT NK', cls: 'r', fmt: function (r) { return M(r.vat); } }, { k: 'oth', label: 'Thuế khác', cls: 'r', fmt: function (r) { return r.oth ? M(r.oth) : ''; } }] })));
+      rows.forEach(function (r, i) { r.id = r.decl_id + ':' + r.line_no; });
+      host.appendChild(h('div', { class: 'card' }, h('h3', null, 'Chi tiết dòng hàng'), table({ rows: rows, xls: 'Thue_NK_chi_tiet', pageSize: 30, search: function (r) { return [r.decl_no, r.description, r.model, r.hs_code, r.exporter, r.item_code].join(' '); },
+        cols: [{ k: 'decl_no', label: 'Số tờ khai', fmt: function (r) { return h('span', { class: 'code' }, r.decl_no); } }, { k: 'reg_date', label: 'Ngày ĐK', fmt: function (r) { return D(r.reg_date); } }, { k: 'line_no', label: 'Dòng', cls: 'r' },
+          { k: 'hs_code', label: 'Mã HS' }, { k: 'description', label: 'Mô tả hàng hóa', max: 40 }, { k: 'origin', label: 'Xuất xứ' }, { k: 'qty', label: 'SL', cls: 'r', fmt: function (r) { return N(r.qty) + ' ' + r.unit; } },
+          { k: 'tax_value', label: 'Trị giá tính thuế', cls: 'r', fmt: function (r) { return M(r.tax_value); } }, { k: 'nk_rate', label: 'TS NK', cls: 'r', fmt: function (r) { return N(r.nk_rate) + '%'; } }, { k: 'nk_amount', label: 'Thuế NK', cls: 'r', fmt: function (r) { return M(r.nk_amount); } },
+          { k: 'vat_amount', label: 'Thuế GTGT', cls: 'r', fmt: function (r) { return M(r.vat_amount); } }, { k: 'cost_unit', label: 'Giá vốn/đvt', cls: 'r', fmt: function (r) { return M(r.cost_unit); } }],
+        onRow: function (r) { go('import/' + r.decl_id); } })));
+    });
+  }
+  [fr, to, by].forEach(function (e) { e.onchange = load; });
+  v.innerHTML = ''; v.appendChild(tabs);
+  v.appendChild(h('div', { class: 'bar2' }, h('label', null, 'Từ ', fr), h('label', null, ' đến ', to), by, h('span', { class: 'mut' }, 'Theo ngày đăng ký tờ khai; không tính tờ khai đã hủy.')));
+  v.appendChild(host);
+  return load();
+}
+
+/* ---- Trang 1 tờ khai: xem lại sau khi đọc file / chi tiết đã lưu ---- */
+PAGES.import = function (p, q) {
+  var id = p[1], isNew = id === 'new', upd = !isNew && q.upd === '1' && S.tkDraft, v = $('#view');
+  if (isNew && !S.tkDraft) { go('imports'); return; }
+  var ld = isNew ? Promise.resolve(null) : call('importGet', { id: id });
+  return Promise.all([ld, call('supplierList', {}), call('purchaseList', {})]).then(function (a) {
+    var g = a[0], sups = a[1] || [], pus = (a[2] || []).filter(function (x) { return x.status !== 'HUY'; }), dr = S.tkDraft;
+    var canEdit = isNew ? S.perms.imports.create : S.perms.imports.edit;
+    var decl, items, allocs, checks, warns = [];
+    if (isNew) { decl = Object.assign({ status: 'THONG_QUAN', supplier_id: dr.prep.supplier ? dr.prep.supplier.id : '', purchase_id: dr.prep.purchases.length === 1 ? dr.prep.purchases[0].id : '', extra_costs: [] }, tkPayload(dr).rec); items = dr.items; allocs = []; checks = dr.checks; warns = dr.warnings; }
+    else {
+      decl = g.decl; allocs = g.allocs.slice(); checks = decl.checks || [];
+      items = g.items.map(function (x) { return Object.assign({}, x); });
+      if (upd) {        // tờ khai sửa đổi: lấy số liệu file mới, giữ id + mã hàng theo số dòng
+        var byLn = {}; items.forEach(function (x) { byLn[x.line_no] = x; });
+        items = dr.items.map(function (x) { var o = byLn[x.line_no]; return Object.assign({}, x, { id: o ? o.id : impNewId('TI'), item_code: o && o.item_code ? o.item_code : x.item_code, item_name: o && o.item_code ? o.item_name : x.item_name, allocated: o ? o.allocated : 0 }); });
+        decl = Object.assign({}, decl, tkPayload(dr).rec, { status: decl.status, supplier_id: decl.supplier_id || (dr.prep.supplier || {}).id || '', purchase_id: decl.purchase_id, extra_costs: decl.extra_costs, note: decl.note });
+        checks = dr.checks; warns = dr.warnings.concat(['Đang cập nhật theo file ' + dr.file_name + ' — bấm "Lưu tờ khai" để ghi.']);
+      }
+    }
+    S.tkDraft = isNew || upd ? S.tkDraft : null;
+    items.forEach(function (it) { var c = TkParse.costOf(it); it._c = c; });
+    v.innerHTML = '';
+    /* --- đầu trang: thông tin chung --- */
+    var f = form([{ k: 'status', label: 'Trạng thái', type: 'select', opts: Object.keys(IMP_ST).map(function (k) { return [k, IMP_ST[k]]; }) },
+      { k: 'channel', label: 'Phân luồng', type: 'select', opts: Object.keys(IMP_CH).map(function (k) { return [k, 'Luồng ' + IMP_CH[k]]; }), blank: '— chưa rõ —' },
+      { k: 'supplier_id', label: 'Nhà cung cấp (liên kết)', type: 'select', opts: sups.map(function (s) { return [s.id, s.name]; }), blank: '— chưa liên kết —' },
+      { k: 'purchase_id', label: 'Đơn mua liên quan', type: 'select', opts: pus.map(function (x) { return [x.id, x.code + ' · ' + x.supplier_name]; }), blank: '— không —' },
+      { k: 'note', label: 'Ghi chú nội bộ', full: true }], decl);
+    var kv = function (l, val) { return val ? h('div', { class: 'tkkv' }, h('span', { class: 'mut' }, l), h('b', null, val)) : null; };
+    var H = decl;
+    var head = h('div', { class: 'card' },
+      h('div', { class: 'bar2', style: 'margin-bottom:8px' }, h('span', { style: 'font-size:18px;font-weight:700', class: 'code' }, 'TK ' + H.decl_no), impBadge(H.status), chBadge(H.channel), H.type_code ? h('span', { class: 'badge b-info' }, H.type_code) : null,
+        h('span', { class: 'mut', style: 'margin-left:auto' }, (H.file_name ? 'File: ' + H.file_name : '') + (H.created_by ? ' · ' + H.created_by : ''))),
+      h('div', { class: 'tkgrid' }, kv('Ngày đăng ký', D(H.reg_date)), kv('Ngày cấp phép', D(H.release_date)), kv('Hải quan', H.customs_office), kv('Người xuất khẩu', [H.exporter_name, H.exporter_country].filter(Boolean).join(' · ')),
+        kv('Số vận đơn', H.bill_no), kv('Ngày hàng đến', D(H.arrival_date) + (H.port ? ' · ' + H.port : '')), kv('Số kiện / trọng lượng', H.packages ? N(H.packages) + ' ' + (H.package_unit || '') + ' · ' + N(H.gross_kg) + ' kg' : ''),
+        kv('Số hóa đơn', [H.invoice_no, D(H.invoice_date)].filter(Boolean).join(' · ')), kv('Hợp đồng ngoại', [H.contract_no, D(H.contract_date)].filter(Boolean).join(' · ')),
+        kv('Tổng trị giá hóa đơn', H.invoice_total ? [H.incoterm, H.currency, N(H.invoice_total)].filter(Boolean).join(' ') : ''), kv('Tỷ giá tính thuế', H.exchange_rate ? M(H.exchange_rate) : ''),
+        kv('Trị giá tính thuế', M(H.taxable_total) + ' đ'), kv('Thuế phải nộp', H.tax_payable ? M(H.tax_payable) + ' đ' : '')),
+      h('div', { style: 'margin-top:10px' }, f.el));
+    v.appendChild(head);
+    /* --- kiểm tra chéo --- */
+    var bad = (checks || []).filter(function (c) { return !c.ok; });
+    v.appendChild(h('div', { class: 'card tkchk ' + (bad.length || warns.length ? 'warn' : 'ok') }, bad.length ? h('b', null, '⚠ Số liệu chưa khớp — kiểm tra trước khi lưu') : h('b', null, '✓ Đã đối chiếu với tờ khai: khớp'),
+      h('div', { class: 'mut', style: 'font-size:13px' }, (checks || []).map(function (c) { return (c.ok ? '✓ ' : '✗ ') + c.label + (c.ok ? '' : ' (cộng dòng ' + N(c.sum) + ' ≠ ' + N(c.file) + ')'); }).join(' · ') || 'Không có số tổng để đối chiếu.'),
+      warns.length ? h('ul', { style: 'margin:6px 0 0 18px' }, warns.map(function (w) { return h('li', null, w); })) : null));
+    /* --- dòng hàng --- */
+    var tb = h('tbody'), tf = h('tfoot');
+    function drawItems() {
+      tb.innerHTML = ''; var tv = 0, nk = 0, gc = 0;
+      items.forEach(function (it) {
+        var c = it._c, alloc = allocQty(it.id); tv += num(it.tax_value); nk += Math.max(0, num(it.nk_amount) - num(it.nk_exempt)); gc += num(it.qty) * c.cost;
+        var codeIn = h('input', { type: 'text', value: it.item_code || '', placeholder: 'mã hàng', style: 'width:84px', 'aria-label': 'Mã hàng nội bộ dòng ' + it.line_no, oninput: function () { it.item_code = codeIn.value.trim().toUpperCase(); it.item_name = ''; it.code_by = ''; nm.textContent = ''; } });
+        var nm = h('div', { class: 'mut', style: 'font-size:11px;max-width:150px' }, it.item_name ? it.item_name : '', it.code_by ? h('span', { class: 'badge ' + (it.code_by === 'nho' ? 'b-ok' : 'b-info'), style: 'margin-left:4px;font-size:10px' }, it.code_by === 'nho' ? 'đã nhớ' : 'theo model') : null);
+        var pick = h('button', { type: 'button', class: 'mini', title: 'Tìm mã trong bảng giá', 'aria-label': 'Tìm mã hàng dòng ' + it.line_no, onclick: function () { catPick(it.model || it.description.slice(0, 30), function (t) { it.item_code = t.code; it.item_name = t.name; it.code_by = ''; drawItems(); }); } }, '🔍');
+        tb.appendChild(h('tr', null, h('td', { class: 'c mut' }, it.line_no),
+          h('td', { class: 'tkd' }, h('div', { style: 'font-size:13px;line-height:1.35' }, it.description), h('div', { class: 'mut', style: 'font-size:12px' }, ['HS ' + it.hs_code, it.model ? 'Model ' + it.model : '', it.brand ? 'Hiệu ' + it.brand : '', it.origin_name || it.origin].filter(Boolean).join(' · ')), (it.flags || []).length ? h('div', { class: 'neg', style: 'font-size:12px' }, '⚠ ' + it.flags.join(', ')) : null),
+          h('td', { class: 'r' }, h('b', null, N(it.qty)), ' ', it.unit),
+          h('td', { class: 'r' }, N(it.inv_price), h('div', { class: 'mut', style: 'font-size:11px' }, it.inv_currency || '')),
+          h('td', { class: 'r' }, M(it.tax_value)),
+          h('td', { class: 'r' }, N(it.nk_rate) + '%', h('div', { class: 'mut', style: 'font-size:11px' }, M(Math.max(0, num(it.nk_amount) - num(it.nk_exempt))))),
+          h('td', { class: 'r tkc' }, M(c.base)), h('td', { class: 'r tkc' }, M(c.tax)), h('td', { class: 'r tkc tkcost' }, h('b', null, M(c.cost))),
+          h('td', null, h('div', { style: 'display:flex;gap:3px;align-items:center' }, codeIn, canEdit ? pick : null), nm),
+          h('td', { class: 'r' }, h('span', { class: alloc >= num(it.qty) - 1e-9 ? 'pos' : alloc > 0 ? '' : 'mut' }, N(alloc) + '/' + N(it.qty)), canEdit && H.status !== 'HUY' ? h('div', null, h('button', { type: 'button', class: 'mini', onclick: function () { allocModal(it); } }, 'Gắn dự án')) : null)));
+      });
+      tf.innerHTML = ''; tf.appendChild(h('tr', null, h('td', { colspan: 4, class: 'r' }, 'Cộng ' + items.length + ' dòng'), h('td', { class: 'r' }, h('b', null, M(tv))), h('td', { class: 'r' }, h('b', null, M(nk))), h('td', { colspan: 2, class: 'r mut' }, 'Tổng giá vốn'), h('td', { class: 'r' }, h('b', null, M(gc))), h('td', { colspan: 2 })));
+      if (!canEdit) tb.querySelectorAll('input').forEach(function (e) { e.disabled = true; });
+    }
+    function allocQty(iid) { return allocs.filter(function (a) { return a.decl_item_id === iid; }).reduce(function (s, a) { return s + num(a.qty); }, 0); }
+    v.appendChild(h('div', { class: 'card' }, h('h3', null, 'Dòng hàng (' + items.length + ')'),
+      h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, 'Giá vốn/đvt = Đơn giá tính thuế + Thuế NK/đvt (gồm thuế khác không khấu trừ nếu có). Thuế GTGT nhập khẩu và chi phí phát sinh không cộng vào giá vốn. Mô tả hải quan chỉ dùng nội bộ, không in ra báo giá / biên bản.'),
+      h('div', { class: 'tw' }, h('table', { class: 't tkitems' }, h('thead', null, h('tr', null, h('th', { class: 'c' }, '#'), h('th', null, 'Mô tả hàng hóa (theo tờ khai)'), h('th', { class: 'r' }, 'Số lượng'), h('th', { class: 'r' }, 'Đơn giá HĐ'), h('th', { class: 'r' }, 'Trị giá tính thuế'), h('th', { class: 'r' }, 'Thuế NK'),
+        h('th', { class: 'r tkc' }, 'Đơn giá tính thuế'), h('th', { class: 'r tkc' }, 'Thuế NK/đvt'), h('th', { class: 'r tkc tkcost' }, 'Giá vốn/đvt'), h('th', null, 'Mã hàng nội bộ'), h('th', { class: 'r' }, 'Đã gắn'))), tb, tf))));
+    /* --- gắn dự án (dòng HĐ/PO) --- */
+    var acard = h('div', { class: 'card' });
+    function drawAllocs() {
+      acard.innerHTML = ''; acard.appendChild(h('h3', null, 'Gắn cho dự án (giá vốn vào HĐ / PO)'));
+      var byId = {}; items.forEach(function (it) { byId[it.id] = it; });
+      if (!allocs.length) { acard.appendChild(h('div', { class: 'mut' }, 'Chưa gắn dòng nào. Bấm "Gắn dự án" ở từng dòng hàng, hoặc mở HĐ / PO và bấm "Gắn tờ khai". Sau khi lưu, giá vốn tự điền vào cột Giá mua của dòng HĐ / PO đã gắn (dòng đã chốt giá tay thì giữ nguyên, có nút áp giá).')); return; }
+      acard.appendChild(h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Dòng TK', 'Dự án', 'Văn bản', 'Hàng trong văn bản', 'SL gắn', 'Giá vốn/đvt', 'Thành tiền', ''].map(function (x, i) { return h('th', { class: i >= 4 && i <= 6 ? 'r' : '' }, x); }))),
+        h('tbody', null, allocs.map(function (a, i) { var it = byId[a.decl_item_id] || {}, c = it._c || { cost: 0 }; return h('tr', null, h('td', { class: 'c' }, it.line_no || '?'), h('td', null, h('span', { class: 'code' }, a.project_code), ' ', h('span', { class: 'mut' }, a.project_name || '')), h('td', null, a.doc_code ? h('a', { href: '#/doc/' + a.doc_id }, a.doc_code) : ''), h('td', null, a.line_name + (a.missing ? '' : ' (' + N(a.line_qty) + ' ' + (a.line_unit || '') + ')')),
+          h('td', { class: 'r' }, N(a.qty)), h('td', { class: 'r' }, M(c.cost)), h('td', { class: 'r' }, M(num(a.qty) * c.cost)), h('td', null, canEdit ? h('button', { type: 'button', class: 'dng mini', title: 'Bỏ gắn', 'aria-label': 'Bỏ gắn', onclick: function () { allocs.splice(i, 1); drawAllocs(); drawItems(); } }, '✕') : null)); })))));
+    }
+    v.appendChild(acard);
+    function allocModal(it) {
+      safe(call('buyableLines', {})).then(function (all) {
+        if (!all) return;
+        var used = {}; allocs.forEach(function (a) { used[a.doc_item_id] = 1; });
+        var key = strip((it.model || '').split('/')[0]), code = it.item_code, q0 = h('input', { type: 'search', placeholder: 'Tìm hàng, model, mã dự án…', value: it.model ? it.model.split('/')[0] : '', style: 'flex:1;min-width:200px' });
+        var remain = num(it.qty) - allocQty(it.id), tb2 = h('tbody'), rows = all.map(function (l) { return { l: l, ck: h('input', { type: 'checkbox' }), qi: h('input', { type: 'number', step: 'any', style: 'width:80px', value: '' }) }; });
+        rows.forEach(function (r) { r.score = (code && r.l.code === code ? 2 : 0) + (key && strip(r.l.model).indexOf(key) >= 0 ? 1 : 0); });
+        rows.sort(function (a, b) { return b.score - a.score; });
+        function draw() {
+          tb2.innerHTML = ''; var t = strip(q0.value), n = 0;
+          rows.forEach(function (r) { var l = r.l; if (t && strip([l.name, l.model, l.brand, l.code, l.project_code, l.project_name, l.doc_code].join(' ')).indexOf(t) < 0 && !(r.score && !t)) return; if (n++ > 80) return;
+            if (!r.qi.value) r.qi.value = Math.max(0, Math.min(remain, l.need > 0 ? l.need : l.qty));
+            tb2.appendChild(h('tr', { class: used[l.doc_item_id] ? 'mut' : '' }, h('td', { class: 'c' }, r.ck), h('td', null, h('span', { class: 'code' }, l.project_code), h('div', { class: 'mut', style: 'font-size:12px' }, l.doc_code)), h('td', null, l.name + (l.model ? ' · ' + l.model : ''), r.score ? h('span', { class: 'badge b-ok', style: 'margin-left:4px;font-size:10px' }, r.score >= 2 ? 'cùng mã' : 'cùng model') : null),
+              h('td', { class: 'c' }, l.unit), h('td', { class: 'r' }, N(l.qty)), h('td', { class: 'r' }, l.ordered ? N(l.ordered) : ''), h('td', { class: 'r' }, r.qi))); });
+          if (!n) tb2.appendChild(h('tr', null, h('td', { colspan: 7, class: 'mut' }, 'Không thấy dòng HĐ/PO phù hợp. Xóa ô tìm để xem tất cả.')));
+        }
+        q0.oninput = draw; draw();
+        modal({ title: 'Gắn dòng ' + it.line_no + ' (' + (it.model || it.description.slice(0, 30)) + ') cho dự án', wide: true,
+          body: h('div', null, h('div', { class: 'bar2' }, q0, h('span', { class: 'mut' }, 'Còn chưa gắn: ', h('b', null, N(remain) + ' ' + it.unit), ' · Giá vốn ', h('b', null, M(it._c.cost)), '/đvt')),
+            h('div', { class: 'tw', style: 'max-height:55vh;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, h('th'), h('th', null, 'Dự án / văn bản'), h('th', null, 'Hàng trong HĐ / PO'), h('th', { class: 'c' }, 'ĐVT'), h('th', { class: 'r' }, 'SL HĐ/PO'), h('th', { class: 'r' }, 'Đã đặt / gắn'), h('th', { class: 'r' }, 'Gắn SL'))), tb2))),
+          buttons: [{ label: 'Gắn các dòng đã chọn', cls: 'pri', fn: function (close) {
+            var add = rows.filter(function (r) { return r.ck.checked && num(r.qi.value) > 0; }); if (!add.length) return toast('Chưa chọn dòng nào', true);
+            var tot = add.reduce(function (s, r) { return s + num(r.qi.value); }, 0); if (tot > remain + 1e-9) return toast('Tổng SL gắn ' + N(tot) + ' vượt số còn lại ' + N(remain), true);
+            add.forEach(function (r) { var l = r.l, ex = allocs.filter(function (a) { return a.decl_item_id === it.id && a.doc_item_id === l.doc_item_id; })[0];
+              if (ex) ex.qty = num(ex.qty) + num(r.qi.value); else allocs.push({ decl_item_id: it.id, project_id: l.project_id, project_code: l.project_code, project_name: l.project_name, doc_id: l.doc_id, doc_code: l.doc_code, doc_item_id: l.doc_item_id, line_name: l.name, line_qty: l.qty, line_unit: l.unit, qty: num(r.qi.value) }); });
+            close(); drawAllocs(); drawItems(); toast('Đã gắn ' + add.length + ' dòng — bấm "Lưu tờ khai" để ghi');
+          } }] });
+      });
+    }
+    /* --- chi phí phát sinh: chỉ tham khảo --- */
+    var ex = (decl.extra_costs || []).map(function (x) { return Object.assign({}, x); }), ecard = h('div', { class: 'card' });
+    function drawEx() {
+      ecard.innerHTML = ''; ecard.appendChild(h('h3', null, 'Chi phí phát sinh (tham khảo)'));
+      ecard.appendChild(h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, 'Không cộng vào giá vốn. Muốn tính vào lãi dự án, nhập ở Chi phí dự án như hiện nay.'));
+      var t = 0; ex.forEach(function (x, i) { t += num(x.amount);
+        ecard.appendChild(h('div', { class: 'bar2' }, sel([['Local charge', 'Local charge'], ['Dịch vụ hải quan', 'Dịch vụ hải quan'], ['Vận chuyển nội địa', 'Vận chuyển nội địa'], ['Kiểm hóa / kiểm định', 'Kiểm hóa / kiểm định'], ['Khác', 'Khác']], x.type, function (e) { x.type = e.target.value; }),
+          h('input', { type: 'number', step: 'any', value: x.amount || '', placeholder: 'Số tiền (VND)', style: 'width:140px', oninput: function (e) { x.amount = num(e.target.value); } }), h('input', { type: 'text', value: x.note || '', placeholder: 'Ghi chú', oninput: function (e) { x.note = e.target.value; } }),
+          canEdit ? h('button', { type: 'button', class: 'dng mini', 'aria-label': 'Bỏ khoản này', onclick: function () { ex.splice(i, 1); drawEx(); } }, '✕') : null)); });
+      if (canEdit) ecard.appendChild(h('button', { type: 'button', onclick: function () { ex.push({ type: 'Local charge', amount: 0 }); drawEx(); } }, '+ Khoản chi phí'));
+      if (t) ecard.appendChild(h('div', { class: 'mut', style: 'margin-top:6px' }, 'Cộng: ' + M(t) + ' đ'));
+    }
+    drawEx(); v.appendChild(ecard);
+    drawItems(); drawAllocs();
+    if (!canEdit) v.querySelectorAll('.card input, .card select, .card textarea').forEach(function (e) { e.disabled = true; });
+    function save() {
+      var rec = Object.assign({}, decl, f.get(), { id: isNew ? '' : decl.id, extra_costs: ex, checks: checks });
+      ['status_label', 'channel_label', 'cost_total', 'alloc_pct', 'n_coded'].forEach(function (k) { delete rec[k]; });
+      var body = { rec: rec, items: tkPayload({ head: {}, items: items }).items, allocs: allocs.map(function (a) { return { id: a.id || '', decl_item_id: a.decl_item_id, doc_id: a.doc_id, doc_item_id: a.doc_item_id, qty: a.qty }; }) };
+      safe(call('importSave', body)).then(function (r) {
+        if (!r) return; S.tkDraft = null;
+        toast('Đã lưu tờ khai ' + r.decl.decl_no + (r.cost_filled ? ' · điền giá vốn cho ' + r.cost_filled + ' dòng HĐ / PO' : ''));
+        if (isNew || upd) go('import/' + r.decl.id); else route();
+      });
+    }
+    var updInp = tkFileInput(); updInp.multiple = false; updInp.onchange = function () { var fl = updInp.files[0]; updInp.value = ''; if (!fl) return; tkReadFile(fl).then(tkPrepare).then(function (r) {
+      if (r.errors.length) return toast(r.errors[0], true);
+      if (r.head.decl_no !== decl.decl_no) return toast('File là tờ khai ' + r.head.decl_no + ', khác tờ khai đang mở (' + decl.decl_no + ').', true);
+      S.tkDraft = r; MEMO = {}; go('import/' + decl.id + '?upd=1'); if (q.upd === '1') route();
+    }).catch(function (e) { toast(e.message || String(e), true); }); };
+    var acts = [h('button', { onclick: function () { go('imports'); } }, 'Danh sách')];
+    if (canEdit) acts.push(h('button', { class: 'pri', onclick: save }, isNew ? 'Lưu tờ khai' : 'Lưu tờ khai'));
+    if (!isNew && canEdit) acts.push(h('button', { onclick: function () { updInp.click(); } }, 'Cập nhật từ file'), updInp);
+    if (!isNew && S.perms.imports.edit) acts.push(h('button', { class: 'dng', onclick: function () { confirmBox('Xóa tờ khai ' + decl.decl_no + '? Giá vốn đã điền vào HĐ / PO từ tờ khai này sẽ bỏ.', function () { safe(call('importRemove', { id: decl.id })).then(function (x) { if (x) { toast('Đã xóa'); go('imports'); } }); }); } }, 'Xóa'));
+    setTitle((isNew ? 'Xem lại tờ khai ' : 'Tờ khai ') + decl.decl_no, acts);
+  });
+};
+/* tìm mã hàng trong bảng giá */
+function catPick(q, onPick) {
+  var inp = h('input', { type: 'search', value: q || '', placeholder: 'Tên, model, hãng…', style: 'width:100%' }), res = h('div', { style: 'max-height:55vh;overflow:auto;margin-top:6px' }), m;
+  function run() { safe(call('catalogSearch', { q: inp.value, limit: 30, all: 1 })).then(function (rs) { res.innerHTML = ''; (rs || []).forEach(function (t) { res.appendChild(h('div', { class: 'rw', style: 'padding:6px;border-bottom:1px solid var(--line);cursor:pointer', tabindex: 0, onclick: function () { m.close(); onPick(t); }, onkeydown: function (e) { if (e.key === 'Enter') { m.close(); onPick(t); } } }, h('b', null, t.code), ' ', t.name, ' · ', t.model || '', ' · ', t.brand || '', ' · ', t.unit || '')); }); if (!res.children.length) res.appendChild(h('div', { class: 'mut' }, 'Không thấy hàng phù hợp trong bảng giá.')); }); }
+  var tm = null; inp.oninput = function () { clearTimeout(tm); tm = setTimeout(run, 250); };
+  m = modal({ title: 'Chọn mã hàng trong bảng giá', body: h('div', null, inp, res) }); run(); setTimeout(function () { inp.focus(); }, 50);
+}
+
+/* ---- Trang HĐ / PO: gắn tờ khai (lấy giá vốn nhập khẩu) ---- */
+function docImpBar(doc, d, lines, canEdit) {
+  if (!doc.id) return null;
+  var tkOn = S.perms.imports && S.perms.imports.view && d.n_imports > 0, n = 0; Object.keys(d.buy || {}).forEach(function (k) { if ((d.buy[k].tk || []).length) n++; });
+  return h('div', { class: 'bar2', style: 'margin-bottom:6px' }, tkOn && canEdit && S.perms.imports.edit ? h('button', { id: 'btnTkLink', onclick: function () { tkLinkModal(doc, lines); } }, 'Gắn tờ khai') : null,
+    h('button', { id: 'btnInvList', title: 'Tên hàng theo tờ khai nhập khẩu + SL + đơn giá, để xuất hóa đơn', onclick: function () { invoiceListModal(doc, lines); } }, 'DS xuất hóa đơn'),
+    tkOn ? h('span', { class: 'mut' }, n ? n + ' dòng lấy giá vốn từ tờ khai nhập khẩu' : 'Hàng nhập khẩu: bấm "Gắn tờ khai" để lấy giá vốn (đơn giá tính thuế + thuế NK) vào cột Giá mua.') : null);
+}
+function tkLinkModal(doc, lines) {
+  safe(call('importLinesFor', { doc_id: doc.id })).then(function (r) {
+    if (!r) return;
+    var tk = r.lines, rows = [];
+    var mine = lines.filter(function (l) { return l.id; });
+    if (!mine.length) return toast('Văn bản chưa có dòng hàng đã lưu.', true);
+    var tb = h('tbody');
+    mine.forEach(function (l) {
+      var key = strip(String(l.model || '').split('/')[0]).replace(/[^a-z0-9]/g, ''), cand = tk.map(function (t) { var s = (l.code && t.item_code === String(l.code).toUpperCase() ? 2 : 0) + (key && strip(t.model).replace(/[^a-z0-9]/g, '').indexOf(key) >= 0 ? 1 : 0); return { t: t, s: s }; }).filter(function (x) { return x.s > 0 || r.mine[x.t.id + '|' + l.id]; }).sort(function (a, b) { return b.s - a.s; });
+      var cur = tk.filter(function (t) { return r.mine[t.id + '|' + l.id]; })[0];
+      var opts = (cand.length ? cand.map(function (x) { return x.t; }) : tk);
+      var ss = sel(opts.map(function (t) { return [t.id, 'TK ' + t.decl_no + ' · dòng ' + t.line_no + ' · ' + (t.model || t.description.slice(0, 30)) + ' · còn ' + N(t.qty - t.allocated + (r.mine[t.id + '|' + l.id] || 0)) + ' ' + t.unit]; }), cur ? cur.id : (cand[0] && cand[0].s >= 1 ? cand[0].t.id : ''), null, '— không gắn —');
+      var qi = h('input', { type: 'number', step: 'any', style: 'width:80px', value: cur ? r.mine[cur.id + '|' + l.id] : num(l.qty) });
+      var c1 = h('td', { class: 'r' }), c2 = h('td', { class: 'r' }), c3 = h('td', { class: 'r' });
+      function show() { var t = tk.filter(function (x) { return x.id === ss.value; })[0]; c1.textContent = t ? M(t.base) : ''; c2.textContent = t ? M(t.tax) : ''; c3.innerHTML = ''; if (t) c3.appendChild(h('b', null, M(t.cost))); }
+      ss.addEventListener('change', show); show();
+      rows.push({ l: l, ss: ss, qi: qi, cur: cur ? cur.id : '', curQ: cur ? r.mine[cur.id + '|' + l.id] : 0 });
+      tb.appendChild(h('tr', null, h('td', null, l.name + (l.model ? ' · ' + l.model : ''), h('div', { class: 'mut', style: 'font-size:12px' }, N(l.qty) + ' ' + (l.unit || ''))), h('td', null, ss), h('td', { class: 'r' }, qi), c1, c2, c3));
+    });
+    modal({ title: 'Gắn tờ khai cho ' + doc.code, wide: true, body: h('div', null, h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, 'App gợi ý dòng tờ khai cùng mã hàng / cùng model. Giá vốn = Đơn giá tính thuế + Thuế NK/đvt, tự điền vào cột Giá mua (dòng đã chốt giá tay thì có nút áp giá).'),
+      h('div', { class: 'tw', style: 'max-height:60vh;overflow:auto' }, h('table', { class: 't' }, h('thead', null, h('tr', null, h('th', null, 'Hàng trong văn bản'), h('th', null, 'Dòng tờ khai'), h('th', { class: 'r' }, 'SL gắn'), h('th', { class: 'r' }, 'Đơn giá tính thuế'), h('th', { class: 'r' }, 'Thuế NK/đvt'), h('th', { class: 'r' }, 'Giá vốn/đvt'))), tb))),
+      buttons: [{ label: 'Lưu gắn tờ khai', cls: 'pri', fn: function (close) {
+        var ops = []; rows.forEach(function (x) {
+          var nv = x.ss.value, nq = num(x.qi.value);
+          if (x.cur && (x.cur !== nv || nq !== x.curQ)) ops.push({ decl_item_id: x.cur, doc_id: doc.id, doc_item_id: x.l.id, qty: 0 });
+          if (nv && nq > 0 && (nv !== x.cur || nq !== x.curQ)) ops.push({ decl_item_id: nv, doc_id: doc.id, doc_item_id: x.l.id, qty: nq });
+        });
+        if (!ops.length) { close(); return; }
+        var i = 0, filled = 0; (function next() { if (i >= ops.length) { close(); MEMO = {}; toast('Đã gắn tờ khai' + (filled ? ' · điền giá vốn ' + filled + ' dòng' : '')); route(); return; } safe(call('importAllocSet', ops[i++])).then(function (x) { if (!x) { MEMO = {}; route(); return; } filled += x.cost_filled || 0; next(); }); })();
+      } }] });
+  });
+}
+/* ---- Danh sách xuất hóa đơn: tên hàng theo tờ khai (khớp hóa đơn với hải quan) ---- */
+function invoiceListModal(doc, lines) {
+  safe(call('invoiceNames', { doc_ids: [doc.id] })).then(function (r) {
+    if (!r) return;
+    var rows = lines.filter(function (l) { return num(l.qty) > 0; }).map(function (l) { var nm = r.by_line[l.id] || r.by_code[String(l.code || '').toUpperCase()] || ''; return { tk: !!nm, name: nm || l.name, unit: l.unit || '', qty: num(l.qty), price: num(l.price), amt: Math.round(num(l.qty) * num(l.price)) }; });
+    var hit = rows.filter(function (x) { return x.tk; }).length;
+    var tsv = function () { return rows.map(function (x) { return [x.name, x.unit, x.qty, x.price, x.amt].join('\t'); }).join('\n'); };
+    modal({ title: 'Danh sách xuất hóa đơn · ' + doc.code, wide: true, body: h('div', null,
+      h('div', { class: 'mut', style: 'font-size:12px;margin-bottom:6px' }, hit + '/' + rows.length + ' dòng lấy tên theo tờ khai nhập khẩu (đánh dấu TK); dòng khác giữ tên trong văn bản.'),
+      h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['#', 'Tên hàng hóa, dịch vụ', 'ĐVT', 'Số lượng', 'Đơn giá', 'Thành tiền'].map(function (x, i) { return h('th', { class: i >= 3 ? 'r' : '' }, x); }))),
+        h('tbody', null, rows.map(function (x, i) { return h('tr', null, h('td', { class: 'c mut' }, i + 1), h('td', null, x.name, x.tk ? h('span', { class: 'badge b-info', style: 'margin-left:4px;font-size:10px' }, 'TK') : null), h('td', null, x.unit), h('td', { class: 'r' }, N(x.qty)), h('td', { class: 'r' }, M(x.price)), h('td', { class: 'r' }, M(x.amt))); }))))),
+      buttons: [{ label: 'Chép để dán', cls: 'pri', fn: function () { try { navigator.clipboard.writeText(tsv()).then(function () { toast('Đã chép ' + rows.length + ' dòng — dán vào phần mềm hóa đơn / Excel'); }); } catch (e) { toast('Trình duyệt không cho chép tự động', true); } } },
+        { label: 'Excel', fn: function () { XlsxWrite.download('DS_xuat_hoa_don_' + doc.code + '.xlsx', [{ name: 'Hoa don', rows: [['STT', 'Tên hàng hóa, dịch vụ', 'ĐVT', 'Số lượng', 'Đơn giá', 'Thành tiền']].concat(rows.map(function (x, i) { return [i + 1, x.name, x.unit, x.qty, x.price, x.amt]; })), widths: [6, 70, 8, 10, 14, 16], boldRows: [0] }]); } }] });
+  });
+}
+
+/* ---- Tab trong dự án: hàng nhập khẩu đã gắn ---- */
+function projectImportsCard(b) {
+  var rows = b.imports || []; if (!rows.length && !b.imp_warn) return null;
+  var card = h('div', { class: 'card' }, h('h3', null, 'Hàng nhập khẩu (theo tờ khai)'));
+  if (b.imp_warn) card.appendChild(h('div', { class: 'tkchk warn', style: 'margin-bottom:8px' }, '⚠ Dễ tính trùng thuế nhập khẩu: giá vốn từ tờ khai đã gồm thuế NK ' + M(b.imp_warn.tk_tax) + ' đ, trong khi Chi phí dự án vẫn có khoản "Hải quan / thuế nhập khẩu" ' + M(b.imp_warn.cost_tax) + ' đ. Kiểm tra lại khoản chi phí đó.'));
+  rows.forEach(function (r, i) { r.id = r.decl_id + ':' + r.line_no + ':' + i; });
+  var cols = [{ k: 'decl_no', label: 'Tờ khai', fmt: function (r) { return h('span', { class: 'code' }, r.decl_no); } }, { k: 'line_no', label: 'Dòng', cls: 'r' }, { k: 'doc_code', label: 'Văn bản' }, { k: 'name', label: 'Hàng hóa', fmt: function (r) { return r.name + (r.model ? ' · ' + r.model : ''); } }, { k: 'qty', label: 'SL', cls: 'r', fmt: function (r) { return N(r.qty) + ' ' + r.unit; } }];
+  if (rows.length && rows[0].cost != null) cols.push({ k: 'base', label: 'Đơn giá tính thuế', cls: 'r', fmt: function (r) { return M(r.base); } }, { k: 'tax', label: 'Thuế NK/đvt', cls: 'r', fmt: function (r) { return M(r.tax); } }, { k: 'cost', label: 'Giá vốn/đvt', cls: 'r', fmt: function (r) { return h('b', null, M(r.cost)); } });
+  if (rows.length) card.appendChild(table({ rows: rows, cols: cols, onRow: function (r) { go('import/' + r.decl_id); } }));
+  return card;
+}
 </script>
 
 <script>
@@ -3441,5 +3801,5 @@ function dupCodesModal() {
 
 </script>
 
-<script src="xlsx-lite.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
+<script src="xlsx-lite.js"></script><script src="tk-parse.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
 </html>
