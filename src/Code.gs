@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.25.0';
+const APP_VERSION = '1.26.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -816,6 +816,7 @@ function catRowMap_(sh, m) {
     var v = String(r[0]).trim(); if (v === '') return;
     map[v] = i + 2; var n = Number(v); if (isFinite(n) && n > max) max = n;
   });
+  max = Math.max(max, num_(cfg_().cat_max_stt));      // bản 33: mã đã xóa không cấp lại
   return { map: map, max: max, last: last };
 }
 function catNorm_(r) {
@@ -877,6 +878,71 @@ ACTIONS.catalogAddMany = function (u, p) {
     RT.cat = null;
     return out;
   });
+};
+/* ---- Xóa / gộp mã Bảng giá (bản 33) ---- */
+var CAT_USE_ = [['QUOTE_ITEMS', 'code', 'báo giá'], ['DOC_ITEMS', 'code', 'HĐ / PO / PL'], ['PURCHASE_ITEMS', 'code', 'đơn mua'], ['DELIVERY_ITEMS', 'code', 'BBGH'], ['IMPORT_DECL_ITEMS', 'item_code', 'tờ khai'], ['STOCK_VOUCHER_ITEMS', 'item_code', 'phiếu kho']];
+function catUsage_() {
+  if (RT.cu) return RT.cu;
+  var u = {}; CAT_USE_.forEach(function (t) { readTable_(t[0]).forEach(function (r) { var c = String(r[t[1]] || '').trim().toUpperCase(); if (!c) return; var o = u[c] || (u[c] = {}); o[t[2]] = (o[t[2]] || 0) + 1; }); });
+  RT.cu = u; return u;
+}
+function catUseText_(o) { return Object.keys(o || {}).map(function (k) { return o[k] + ' ' + k; }).join(', '); }
+ACTIONS.catalogUsage = function (u, p) { need_(u, 'pricelist', 'view'); var us = catUsage_(), out = {}; (p.codes || []).forEach(function (c) { c = String(c).toUpperCase(); out[c] = { used: !!us[c], text: catUseText_(us[c]) }; }); return out; };
+/* Xóa mã CHƯA dùng ở chứng từ nào. Mã đã dùng → trả về danh sách bị chặn (gợi ý gộp / ngừng bán). */
+ACTIONS.catalogRemove = function (u, p) {
+  need_(u, 'pricelist', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var codes = (p.codes || []).map(function (c) { return String(c).trim().toUpperCase(); }).filter(Boolean), us = catUsage_(), sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m), del = [], blocked = [];
+    codes.forEach(function (c) { var rn = rm.map[String(parseInt(c.slice(2), 10))]; if (!rn) blocked.push({ code: c, reason: 'không có trong Bảng giá' }); else if (us[c]) blocked.push({ code: c, reason: 'đang dùng ở ' + catUseText_(us[c]) }); else del.push({ code: c, row: rn }); });
+    if (del.length) {
+      upsert_('CONFIG', { key: 'cat_max_stt', value: String(rm.max) }); delete RT['T:CONFIG'];
+      del.sort(function (a, b) { return b.row - a.row; }).forEach(function (x) { sh.deleteRows(x.row, 1); });
+      replaceAliasCode_(del.map(function (x) { return x.code; }), '');
+      audit_(u, 'Xóa', 'BANGGIA', '', '', del.map(function (x) { return x.code; }).join(', '));
+    }
+    RT.cat = null;
+    return { removed: del.map(function (x) { return x.code; }), blocked: blocked };
+  });
+};
+function replaceAliasCode_(froms, to) { readTable_('ITEM_ALIAS').forEach(function (a) { if (froms.indexOf(a.item_code) >= 0) { if (to) upsert_('ITEM_ALIAS', Object.assign({}, a, { item_code: to })); else removeByKey_('ITEM_ALIAS', a.id); } }); }
+/* Gộp mã trùng: chuyển mọi chứng từ / sổ kho / bộ nhớ ghép mã từ "from" sang "to", rồi xóa "from" khỏi Bảng giá */
+ACTIONS.catalogMerge = function (u, p) {
+  need_(u, 'pricelist', 'edit');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var to = String(p.to || '').trim().toUpperCase(), froms = (p.from || []).map(function (c) { return String(c).trim().toUpperCase(); }).filter(function (c) { return c && c !== to; });
+    if (!to || !froms.length) throw new Error('Chọn mã giữ lại và ít nhất 1 mã cần gộp.');
+    var cat = {}; catalog_().forEach(function (x) { cat[x.code] = x; });
+    if (!cat[to]) throw new Error('Mã giữ lại ' + to + ' không có trong Bảng giá.');
+    froms.forEach(function (c) { if (!cat[c]) throw new Error('Mã ' + c + ' không có trong Bảng giá.'); });
+    var n = 0;
+    CAT_USE_.forEach(function (t) { readTable_(t[0]).forEach(function (r) { var c = String(r[t[1]] || '').trim().toUpperCase(); if (froms.indexOf(c) < 0) return; var o = Object.assign({}, r); o[t[1]] = to; if (t[0] === 'IMPORT_DECL_ITEMS') o.item_name = cat[to].name; if (t[0] === 'STOCK_VOUCHER_ITEMS') { o.name = cat[to].name; o.unit = cat[to].unit; } upsert_(t[0], o); n++; }); });
+    replaceAliasCode_(froms, to);
+    var sh = catSheet_(), m = catCols_(sh), rm = catRowMap_(sh, m);
+    var hq = froms.map(function (c) { return cat[c].hq_desc; }).filter(Boolean)[0];
+    if (!cat[to].hq_desc && hq) catWrite_(sh, m, rm.map[String(parseInt(to.slice(2), 10))], { hq_desc: hq });
+    upsert_('CONFIG', { key: 'cat_max_stt', value: String(rm.max) }); delete RT['T:CONFIG'];
+    froms.map(function (c) { return rm.map[String(parseInt(c.slice(2), 10))]; }).filter(Boolean).sort(function (a, b) { return b - a; }).forEach(function (rn) { sh.deleteRows(rn, 1); });
+    audit_(u, 'Gộp mã', 'BANGGIA', to, '', froms.join(', ') + ' → ' + to + ' (' + n + ' dòng chứng từ)');
+    RT.cat = null; RT.cu = null; RT.sl = null;
+    return { to: to, merged: froms, lines: n };
+  });
+};
+/* Nhóm mã nghi trùng: cùng model + hãng, hoặc cùng tên + kích cỡ (bỏ dấu, khoảng trắng) */
+ACTIONS.catalogDupes = function (u, p) {
+  need_(u, 'pricelist', 'view');
+  var g = {}, us = catUsage_(), norm = function (x) { return strip_(x).replace(/[^a-z0-9]/g, ''); };
+  catalog_().forEach(function (x) {
+    var keys = []; if (norm(x.model)) keys.push('M|' + norm(x.model) + '|' + norm(x.brand)); if (norm(x.name)) keys.push('N|' + norm(x.name) + '|' + norm(x.size));
+    keys.forEach(function (k) { (g[k] = g[k] || []).push(x); });
+  });
+  var seen = {}, out = [];
+  Object.keys(g).forEach(function (k) {
+    var a = g[k]; if (a.length < 2) return; var sig = a.map(function (x) { return x.code; }).sort().join(','); if (seen[sig]) return; seen[sig] = 1;
+    out.push({ by: k.charAt(0) === 'M' ? 'Cùng model + hãng' : 'Cùng tên hàng', items: a.map(function (x) { return { code: x.code, name: x.name, model: x.model, brand: x.brand, unit: x.unit, cost: x.cost, status: x.status, used: catUseText_(us[x.code]) }; }) });
+  });
+  return out;
 };
 ACTIONS.catalogImport = function (u, p) {
   need_(u, 'pricelist', 'edit');
@@ -2279,7 +2345,20 @@ ACTIONS.importGet = function (u, p) {
     return Object.assign({}, a, { project_code: pr.code || '', project_name: pr.name || '', doc_code: dc.code || '', doc_type: dc.type || '', line_name: di.name || '(dòng đã xóa)', line_qty: num_(di.qty), line_unit: di.unit || '', missing: !dis[a.doc_item_id] });
   });
   var sup = d.supplier_id ? (readTable_('SUPPLIERS').filter(function (x) { return x.id === d.supplier_id; })[0] || null) : null;
-  return { decl: impRow_(d, its, aq), items: its.map(function (it) { return Object.assign({}, it, { allocated: aq[it.id] || 0 }); }), allocs: al, supplier: sup };
+  var nc = its.filter(function (it) { return !it.item_code; }), sg = {}; impSuggest_(nc).forEach(function (s, i) { if (s && s.code) sg[nc[i].id] = s; });   // bản 33: dòng chưa có mã → gợi ý theo Bảng giá hiện tại
+  return { decl: impRow_(d, its, aq), items: its.map(function (it) { return Object.assign({}, it, { allocated: aq[it.id] || 0, suggest: sg[it.id] || null }); }), allocs: al, supplier: sup };
+};
+/* Ghi mã hàng nội bộ cho các dòng của tờ khai ĐÃ LƯU ngay (không cần bấm Lưu): codes = [{item_id, item_code}] */
+ACTIONS.importSetCodes = function (u, p) {
+  need_(u, 'imports', 'edit');
+  var d = readTable_('IMPORT_DECLS').filter(function (x) { return x.id === p.decl_id; })[0]; if (!d) throw new Error('Không tìm thấy tờ khai.');
+  var cat = {}; catalog_().forEach(function (x) { cat[x.code] = x; });
+  var set = {}; (p.codes || []).forEach(function (c) { var k = String(c.item_code || '').trim().toUpperCase(); if (k && !cat[k]) throw new Error('Mã ' + k + ' không có trong Bảng giá.'); set[c.item_id] = k; });
+  var its = readTable_('IMPORT_DECL_ITEMS').filter(function (x) { return x.decl_id === d.id; }).sort(byLine_).map(function (x) { var o = Object.assign({}, x); if (x.id in set) { o.item_code = set[x.id]; o.item_name = set[x.id] ? cat[set[x.id]].name : ''; } return o; });
+  var n = Object.keys(set).filter(function (k) { return its.some(function (x) { return x.id === k; }); }).length;
+  if (!n) throw new Error('Không có dòng nào để ghi mã.');
+  var r = ACTIONS.importSave(u, { rec: Object.assign({}, d), items: its });
+  r.n_set = n; return r;
 };
 /* gợi ý mã hàng + tìm tờ khai trùng số trước khi lưu (gọi ngay sau khi đọc file) */
 ACTIONS.importPrepare = function (u, p) {

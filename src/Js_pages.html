@@ -169,13 +169,53 @@ function plCoefModal(done) {
         safe(call('coefSave', { def: num(def.value), min: num(mn.value), brand: br })).then(function (r) { if (r) { S.cfg.min_coef = num(mn.value) > 0 ? String(num(mn.value)) : ''; close(); toast('Đã lưu hệ số'); done && done(); } }); } }] });
   });
 }
+/* ---- Xóa / gộp mã (bản 33): mã đã dùng ở chứng từ thì không xóa, cho gộp vào mã khác hoặc ngừng bán ---- */
+function plRemove(codes, done) {
+  confirmBox('Xóa ' + (codes.length === 1 ? 'mã ' + codes[0] : codes.length + ' mã') + ' khỏi Bảng giá? Chỉ xóa được mã chưa dùng ở báo giá, HĐ, đơn mua, tờ khai, phiếu kho, BBGH. Mã đã xóa không cấp lại.', function () {
+    safe(call('catalogRemove', { codes: codes })).then(function (r) {
+      if (!r) return; MEMO = {};
+      if (r.removed.length) toast('Đã xóa ' + r.removed.join(', '));
+      if (r.blocked.length) modal({ title: r.blocked.length + ' mã không xóa được', wide: true, body: h('div', null, h('p', { class: 'mut', style: 'margin-top:0' }, 'Các mã này đang có trong chứng từ. Nếu là hàng trùng: bấm "Gộp vào mã khác" để chuyển chứng từ sang mã giữ lại. Nếu không bán nữa: "Ngừng bán".'),
+        h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['Mã', 'Lý do', ''].map(function (x) { return h('th', null, x); }))), h('tbody', null, r.blocked.map(function (b) {
+          return h('tr', null, h('td', { class: 'code' }, b.code), h('td', null, b.reason), h('td', null, h('div', { style: 'display:flex;gap:6px' },
+            h('button', { type: 'button', class: 'mini', onclick: function () { catPick('', function (t) { if (t.code === b.code) return toast('Chọn mã khác ' + b.code, true); confirmBox('Gộp ' + b.code + ' vào ' + t.code + ' (' + t.name + ')? Mọi chứng từ và sổ kho của ' + b.code + ' chuyển sang ' + t.code + ', rồi xóa ' + b.code + '.', function () { safe(call('catalogMerge', { to: t.code, from: [b.code] })).then(function (x) { if (x) { closeAllModals(); MEMO = {}; toast('Đã gộp ' + b.code + ' → ' + t.code + ' (' + x.lines + ' dòng chứng từ)'); done && done(); } }); }); }); } }, 'Gộp vào mã khác…'),
+            h('button', { type: 'button', class: 'mini', onclick: function () { safe(call('catalogSave', { rec: { code: b.code, status: 'Ngừng' } })).then(function (x) { if (x) { toast(b.code + ': đã chuyển Ngừng bán'); done && done(); } }); } }, 'Ngừng bán')))); }))))), dismiss: true });
+      if (r.removed.length) done && done();
+    });
+  });
+}
+function closeAllModals() { var m = document.getElementById('modals'); if (m) m.innerHTML = ''; }
+function plMergeModal(codes, done) {
+  safe(call('catalogList', { q: '', size: 200 })).then(function () {
+    return call('catalogUsage', { codes: codes });
+  }).then(function (us) {
+    if (!us) return;
+    var keep = codes[0], rows = codes.map(function (c) { return h('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0' }, h('input', { type: 'radio', name: 'plkeep', value: c, checked: c === keep, onchange: function () { keep = c; } }), h('b', { class: 'code' }, c), h('span', { class: 'mut' }, us[c] && us[c].text ? 'đang dùng: ' + us[c].text : 'chưa dùng')); });
+    modal({ title: 'Gộp ' + codes.length + ' mã', body: h('div', null, h('p', { class: 'mut', style: 'margin-top:0' }, 'Chọn mã GIỮ LẠI. Các mã còn lại: chứng từ (báo giá, HĐ, đơn mua, BBGH, tờ khai, phiếu kho) chuyển sang mã giữ lại, rồi bị xóa khỏi Bảng giá.'), rows),
+      buttons: [{ label: 'Gộp', cls: 'pri', fn: function (close) { safe(call('catalogMerge', { to: keep, from: codes.filter(function (c) { return c !== keep; }) })).then(function (x) { if (x) { close(); MEMO = {}; toast('Đã gộp ' + x.merged.join(', ') + ' → ' + x.to + ' (' + x.lines + ' dòng chứng từ)'); done && done(); } }); } }] });
+  });
+}
+function plDupesModal(done) {
+  safe(call('catalogDupes', {})).then(function (gs) {
+    if (!gs) return;
+    var body = h('div', null, h('p', { class: 'mut', style: 'margin-top:0' }, gs.length ? gs.length + ' nhóm nghi trùng (cùng model + hãng, hoặc cùng tên + kích cỡ). Chọn mã giữ lại rồi bấm "Gộp nhóm này".' : 'Không thấy mã trùng.'));
+    gs.forEach(function (g, gi) {
+      var keep = g.items[0].code;
+      body.appendChild(h('div', { class: 'card plgrp', style: 'padding:8px;margin-bottom:8px' }, h('div', { class: 'bar2', style: 'margin-bottom:4px' }, h('b', null, g.by), h('span', { class: 'sp' }), h('button', { type: 'button', class: 'pri mini', onclick: function () { var from = g.items.map(function (x) { return x.code; }).filter(function (c) { return c !== keep; });
+          confirmBox('Gộp ' + from.join(', ') + ' vào ' + keep + '?', function () { safe(call('catalogMerge', { to: keep, from: from })).then(function (x) { if (x) { closeAllModals(); MEMO = {}; toast('Đã gộp ' + x.merged.join(', ') + ' → ' + x.to); done && done(); } }); }); } }, 'Gộp nhóm này')),
+        h('div', { class: 'tw' }, h('table', { class: 't' }, h('tbody', null, g.items.map(function (x) { return h('tr', null, h('td', { class: 'c' }, h('input', { type: 'radio', name: 'dg' + gi, checked: x.code === keep, 'aria-label': 'Giữ lại ' + x.code, onchange: function () { keep = x.code; } })), h('td', { class: 'code' }, x.code), h('td', null, x.name), h('td', null, x.model), h('td', null, x.brand), h('td', { class: 'r' }, x.cost ? M(x.cost) : ''), h('td', { class: 'mut', style: 'font-size:12px;white-space:normal;min-width:110px' }, x.used ? 'dùng: ' + x.used : 'chưa dùng')); }))))));
+    });
+    modal({ title: 'Tìm mã trùng trong Bảng giá', wide: true, dismiss: true, body: body });
+  });
+}
 var PL_ST = null;
 PAGES.pricelist = function () {
   var ed = S.perms.pricelist.edit || S.perms.pricelist.create;
   setTitle('Bảng giá', [ed ? h('button', { class: 'pri', onclick: function () { plEditModal(null, function (r) { meta = null; load(r && r.code); }, meta); } }, '+ Thêm hàng') : null,
     ed ? h('button', { onclick: function () { plImport(function () { meta = null; load(); }); } }, 'Nhập hàng loạt') : null,
     ed ? h('button', { onclick: plDownloadTemplate }, 'Tải file mẫu') : null, h('button', { onclick: function () { plDownloadCurrent(); } }, 'Tải Bảng giá hiện tại'),
-    ed ? h('button', { onclick: function () { plCoefModal(function () { load(); }); } }, 'Hệ số') : null]);
+    ed ? h('button', { onclick: function () { plCoefModal(function () { load(); }); } }, 'Hệ số') : null,
+    ed ? h('button', { id: 'btnPlDupes', onclick: function () { plDupesModal(function () { meta = null; load(); }); } }, 'Tìm mã trùng') : null]);
   // st giữ bộ lọc / trang đang xem cả khi trang vẽ lại (PL_ST chỉ xóa khi mở Bảng giá từ menu)
   var view = $('#view'), st = PL_ST || (PL_ST = { q: '', brand: '', group: '', page: 1 }), host = h('div'), meta = null;
   function load(hl) {
@@ -191,17 +231,24 @@ PAGES.pricelist = function () {
         view.appendChild(host);
       }
       host.innerHTML = '';
+      st.sel = st.sel || {};
+      var selBar = h('div', { class: 'selbar', id: 'plSelBar', style: 'display:none' });
+      function drawSel() { var ks = Object.keys(st.sel); selBar.innerHTML = ''; selBar.style.display = ks.length ? '' : 'none'; if (!ks.length) return;
+        selBar.append(h('b', null, 'Đã chọn ' + ks.length + ' mã'), h('button', { type: 'button', class: 'dng', onclick: function () { plRemove(ks, function () { st.sel = {}; meta = null; load(); }); } }, 'Xóa'), ks.length > 1 ? h('button', { type: 'button', onclick: function () { plMergeModal(ks, function () { st.sel = {}; meta = null; load(); }); } }, 'Gộp các mã đã chọn') : null, h('button', { type: 'button', class: 'lnk', onclick: function () { st.sel = {}; load(); } }, 'Bỏ chọn')); }
+      host.appendChild(selBar); drawSel();
       var pages = Math.max(1, Math.ceil(r.total / r.size));
       var ell = function (t, w) { return h('div', { class: 'ellx', style: 'max-width:' + w }, t || ''); };
-      host.appendChild(h('div', { class: 'tw' }, h('table', { class: 't pl' }, h('thead', null, h('tr', null, ['Mã', 'Hãng', 'Nhóm', 'Tên hàng', 'Model', 'Size', 'ĐVT'].map(function (x) { return h('th', null, x); }), h('th', { class: 'r' }, 'Giá mua'),
-          h('th', { class: 'r', title: 'Giá bán = Giá mua × Hệ số. Hệ số lấy theo thứ tự: riêng của mã (●) → theo hãng → hệ số chung. Bấm nút “Hệ số” để chỉnh.' }, 'Hệ số ⓘ'), h('th', { class: 'r' }, 'Giá bán'))),
+      host.appendChild(h('div', { class: 'tw' }, h('table', { class: 't pl' }, h('thead', null, h('tr', null, ed ? h('th', { class: 'ck' }) : null, ['Mã', 'Hãng', 'Nhóm', 'Tên hàng', 'Model', 'Size', 'ĐVT'].map(function (x) { return h('th', null, x); }), h('th', { class: 'r' }, 'Giá mua'),
+          h('th', { class: 'r', title: 'Giá bán = Giá mua × Hệ số. Hệ số lấy theo thứ tự: riêng của mã (●) → theo hãng → hệ số chung. Bấm nút “Hệ số” để chỉnh.' }, 'Hệ số ⓘ'), h('th', { class: 'r' }, 'Giá bán'), ed ? h('th') : null)),
         h('tbody', null, r.rows.map(function (x) {
           return h('tr', { class: 'rw' + (hl && x.code === hl ? ' flash' : ''), 'data-code': x.code, onclick: function () { if (ed) plEditModal(x, function () { load(x.code); }, meta); else modal({ title: x.name, dismiss: true, body: h('div', null, x.qc ? h('p', null, h('b', null, 'Quy cách: '), x.qc) : null, h('p', null, h('b', null, 'Mô tả kỹ thuật: '), x.spec), h('p', null, h('b', null, 'Thông số: '), x.tech), x.hq_desc ? h('p', null, h('b', null, 'Mô tả hải quan: '), x.hq_desc) : null, x.note ? h('p', { class: 'neg' }, x.note) : null) }); } },
+            ed ? h('td', { class: 'ck', onclick: function (e) { e.stopPropagation(); } }, h('input', { type: 'checkbox', checked: !!st.sel[x.code], 'aria-label': 'Chọn ' + x.code, onchange: function (e) { if (e.target.checked) st.sel[x.code] = 1; else delete st.sel[x.code]; drawSel(); } })) : null,
             h('td', { class: 'code' }, x.code), h('td', { title: x.brand }, ell(x.brand, '130px')), h('td', { title: x.group }, ell(x.group, '170px')),
             h('td', { title: [x.name, x.qc ? 'Quy cách: ' + x.qc : '', x.origin ? 'Xuất xứ: ' + x.origin : '', x.spec ? 'Mô tả: ' + String(x.spec).slice(0, 300) : '', x.hq_desc ? 'Mô tả HQ: ' + String(x.hq_desc).slice(0, 300) : ''].filter(Boolean).join('\n') }, h('div', { style: 'display:flex;align-items:center;gap:6px' }, ell(x.name, '520px'), x.hq_desc ? h('span', { class: 'badge b-info', style: 'font-size:10px', title: 'Có mô tả theo tờ khai hải quan' }, 'HQ') : null, x.status === 'Ngừng' ? h('span', { class: 'badge b-warn' }, 'Ngừng') : null)),
             h('td', { title: x.model }, ell(x.model, '170px')), h('td', { title: x.size }, ell(x.size, '120px')), h('td', null, x.unit),
             h('td', { class: 'r' }, M(x.cost)), h('td', { class: 'r', title: ({ ma: 'Hệ số riêng của mã', hang: 'Theo hãng', chung: 'Hệ số chung' }[x.coef_src] || 'Từ giá bán tham chiếu') }, x.coef ? N(x.coef) + (x.coef_src === 'ma' ? ' ●' : '') : ''),
-            h('td', { class: 'r' }, x.sale ? M(x.sale) : h('span', { class: 'neg' }, 'Chưa có giá')));
+            h('td', { class: 'r' }, x.sale ? M(x.sale) : h('span', { class: 'neg' }, 'Chưa có giá')),
+            ed ? h('td', { class: 'c' }, h('button', { type: 'button', class: 'dng mini plx', title: 'Xóa mã ' + x.code, 'aria-label': 'Xóa mã ' + x.code, onclick: function (e) { e.stopPropagation(); plRemove([x.code], function () { meta = null; load(); }); } }, '✕')) : null);
         })))));
       host.appendChild(h('div', { class: 'pager' }, h('span', null, r.total + ' sản phẩm'), h('button', { disabled: st.page <= 1, onclick: function () { st.page--; load(); } }, '‹'), h('span', null, st.page + '/' + pages), h('button', { disabled: st.page >= pages, onclick: function () { st.page++; load(); } }, '›')));
       if (hl) { $('#main').scrollTop = y; if (!r.rows.some(function (x) { return x.code === hl; })) toast('Đã lưu ' + hl + ' — hàng này không nằm trong bộ lọc / trang đang xem'); }
