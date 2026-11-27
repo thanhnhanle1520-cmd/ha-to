@@ -108,12 +108,13 @@
       function save() { return IDB.set('localdrive', mem); }
       return {
         init: function () { return all().then(function () { return 'local'; }); },
-        list: function () { return all().then(function (m) { return Object.keys(m.files).filter(function (k) { return k.indexOf('data/') === 0; }).map(function (k) { return { id: k, name: k.slice(5), version: String(m.files[k].v) }; }); }); },
+        list: function () { return all().then(function (m) { return Promise.all(Object.keys(m.files).filter(function (k) { return k.indexOf('data/') === 0; }).map(function (k) { return sha256(m.files[k].text).then(function (h) { return { id: k, name: k.slice(5).replace(/#.*$/, ''), version: String(m.files[k].v), sha256Checksum: h }; }); })); }); },     // tên sau dấu # = tệp trùng tên (chỉ dùng trong kiểm thử)
+        readText: function (id) { return all().then(function (m) { return m.files[id].text; }); },
         read: function (id) { return all().then(function (m) { return JSON.parse(m.files[id].text); }); },
         version: function (id) { return all().then(function (m) { return m.files[id] ? String(m.files[id].v) : null; }); },
         write: function (name, obj, existing) { return all().then(function (m) { var id = existing || ('data/' + name); m.files[id] = { text: JSON.stringify(obj), v: (m.files[id] ? m.files[id].v : 0) + 1 }; return save().then(function () { return { id: id, version: String(m.files[id].v) }; }); }); },
         upload: function (path, blob) { return all().then(function (m) { m.n++; var id = 'files/' + m.n + '/' + blob.getName(); m.files[id] = { text: '(tệp thử)', v: 1 }; return save().then(function () { return { id: id, url: 'https://local.invalid/' + encodeURIComponent(id) }; }); }); },
-        trash: function () { return Promise.resolve(); }, backup: function (name, obj) { return all().then(function (m) { m.files['backup/' + name] = { text: JSON.stringify(obj), v: 1, t: Date.now() }; return save(); }); }, pruneBackups: function () { return Promise.resolve(); },
+        trash: function (id) { return all().then(function (m) { if (String(id).indexOf('data/') === 0 && m.files[id]) { delete m.files[id]; return save(); } }); }, backup: function (name, obj) { return all().then(function (m) { m.files['backup/' + name] = { text: JSON.stringify(obj), v: 1, t: Date.now() }; return save(); }); }, pruneBackups: function () { return Promise.resolve(); },
         putBlob: function (segs, name, blob) { return all().then(function (m) { return blob.arrayBuffer().then(function (ab) { m.n++; var id = 'files/' + m.n + '/' + name; m.files[id] = { text: '', bin: ab, v: 1 }; return save().then(function () { return { id: id, url: 'https://local.invalid/' + encodeURIComponent(id) }; }); }); }); },
         download: function (id) { return all().then(function (m) { var f = m.files[id]; if (!f || !f.bin) throw new Error('Không tìm thấy file trên Drive (thử).'); return f.bin; }); },
         listBackups: function () { return all().then(function (m) { return Object.keys(m.files).filter(function (k) { return k.indexOf('backup/') === 0; }).map(function (k) { return { id: k, name: k.slice(7), t: m.files[k].t || 0, size: m.files[k].text.length }; }).sort(function (a, b) { return b.t - a.t; }); }); }
@@ -146,7 +147,8 @@
     var dataFolder = null;
     return {
       init: function () { return ensurePath([ROOT_NAME, DATA_NAME]).then(function (id) { dataFolder = id; return id; }); },
-      list: function () { return j(API + 'files?q=' + q("'" + dataFolder + "' in parents and trashed=false") + '&fields=files(id,name,version)&pageSize=200').then(function (r) { return r.files || []; }); },
+      list: function () { return j(API + 'files?q=' + q("'" + dataFolder + "' in parents and trashed=false") + '&orderBy=createdTime&fields=files(id,name,version,sha256Checksum,createdTime)&pageSize=200').then(function (r) { return r.files || []; }); },     // bản 41: cũ nhất trước (giữ tệp gốc khi có tệp trùng tên)
+      readText: function (id) { return f(API + 'files/' + id + '?alt=media').then(function (r) { return r.text(); }); },
       read: function (id) { return f(API + 'files/' + id + '?alt=media').then(function (r) { return r.json(); }); },
       version: function (id) { return j(API + 'files/' + id + '?fields=version').then(function (r) { return r.version == null ? null : String(r.version); }); },
       write: function (name, obj, existing) { return multipart(existing ? {} : { name: name, parents: [dataFolder], mimeType: 'application/json' }, JSON.stringify(obj), 'application/json', existing).then(function (r) { return { id: r.id, version: String(r.version) }; }); },
@@ -197,6 +199,22 @@
   }
   window.__hatoBackupTrashList = backupTrashList;
 
+  function sha256(txt) {
+    if (!(window.crypto && crypto.subtle && window.TextEncoder)) return Promise.resolve('');
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt)).then(function (b) { return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); });
+  }
+  function verCmp(a, b) { var x = String(a || '0').split('.'), y = String(b || '0').split('.'); for (var i = 0; i < 3; i++) { var d = (+x[i] || 0) - (+y[i] || 0); if (d) return d; } return 0; }
+  /* bản 41: máy này chạy bản cũ hơn dữ liệu trên Drive (máy khác đã lên bản mới) → khóa, mời tải lại, không cho bản cũ ghi đè */
+  var tooOld = '';
+  function lockOld(v) {
+    if (tooOld) return; tooOld = String(v); passive = true; isReady = false; clearTimeout(pushTimer); window.__redirecting = true;
+    logEv('error', 'Dữ liệu đang dùng bản ' + v + ', máy này còn bản ' + APP_VERSION + ' → tạm khóa, cần tải lại');
+    IDB.set('meta', clone(meta)).catch(function () { });
+    showGate([el('h2', { style: 'margin:0 0 6px;color:#dc2626' }, 'Cần tải lại HA TO'), el('p', { style: 'color:#374151;margin:0' }, 'Dữ liệu đang dùng bản ' + v + ' nhưng máy này còn chạy bản ' + APP_VERSION + '. Để không ghi đè dữ liệu mới, máy này tạm khóa.'),
+      el('button', { id: 'hato-reload', style: BTN, onclick: function () { var go = function () { location.reload(); }; if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) navigator.serviceWorker.getRegistration().then(function (r) { return r && r.update(); }).then(go, go); else go(); } }, 'Tải lại bản mới')]);
+  }
+  function checkSchema(props) { var v = props && props.SCHEMA; if (v && typeof APP_VERSION !== 'undefined' && verCmp(v, APP_VERSION) > 0) { lockOld(v); return true; } return false; }
+
   /* ---------- Kiểm tra tệp JSON trước khi nhận (tệp hỏng / rỗng bất thường thì không ghi đè dữ liệu máy này) ---------- */
   var acceptEmpty = {};
   function checkPayload(n, p) {
@@ -210,8 +228,14 @@
     if (have >= 5 && p.rows.length <= 1 && !LOGT[n] && !acceptEmpty[n]) return 'rỗng bất thường (máy này đang có ' + have + ' dòng)';
     return '';
   }
-  function readChecked(n, id) {
-    return Drive.read(id).then(function (p) { var e = checkPayload(n, p); if (e) throw new Error(e); return p; }, function (e) { throw new Error('không đọc được (' + ((e && e.message) || e) + ')'); });
+  function readChecked(n, id, sha) {
+    return Drive.readText(id).then(function (txt) {
+      return (sha ? sha256(txt) : Promise.resolve('')).then(function (h) {
+        if (h && h !== String(sha).toLowerCase()) { var st = new Error('Drive chưa cập nhật xong nội dung'); st.stale = true; throw st; }    // bản 41: nội dung tải về không khớp mã kiểm tra → dữ liệu cũ, không nhận
+        var p; try { p = JSON.parse(txt); } catch (e) { throw new Error('không phải JSON hợp lệ'); }
+        return p;
+      });
+    }, function (e) { throw new Error('không đọc được (' + ((e && e.message) || e) + ')'); }).then(function (p) { var e = checkPayload(n, p); if (e) throw new Error(e); return p; });
   }
 
   /* ---------- Lưu / nạp dữ liệu ---------- */
@@ -315,22 +339,50 @@
   }
   function saveBase(n, p) { return n === '_props' || n === TOMB ? Promise.resolve() : IDB.set('base:' + n, { rows: (p && p.rows) || [] }); }
   function seq(list, fn) { return list.reduce(function (p, x) { return p.then(function () { return fn(x); }); }, Promise.resolve()); }
-  var RETRY = { retry: true };
+  var RETRY = { retry: true }, LOCKED = { locked: true }, staleN = {};
+  function nameOf(x) { return x.name.replace(/\.json$/, ''); }
+  /* bản 41: Drive có 2 tệp cùng tên (vd hai cửa sổ cùng tạo TASKS.json khi bảng còn trống) → app nhận xen kẽ hai tệp, dữ liệu lúc ẩn lúc hiện.
+     Gộp dòng của mọi tệp trùng tên vào máy này, ghi lại vào một tệp (tệp đang dùng / cũ nhất), các tệp thừa bỏ vào thùng rác sau khi ghi xong. */
+  function fixDupes(remote, ctx) {
+    var by = {}; remote.forEach(function (x) { var n = nameOf(x); (by[n] = by[n] || []).push(x); });
+    var dups = Object.keys(by).filter(function (n) { return by[n].length > 1; });
+    if (!dups.length) return Promise.resolve(remote);
+    return seq(dups, function (n) {
+      var list = by[n], known = meta.versions[n], keep = list.filter(function (x) { return known && x.id === known.id; })[0] || list[0];
+      return seq(list, function (x) {
+        return readChecked(n, x.id, x.sha256Checksum).then(function (p) {
+          if (n === TOMB) tombUnion(p);
+          else if (n === '_props') { if (checkSchema(p.props)) throw LOCKED; wb.props = Object.assign({}, p.props || {}, wb.props || {}); }
+          else { var loc = wb.sheets[n] ? wb.sheets[n].exportRows() : []; applyPayload(n, { rows: mergeRows(n, null, loc, p.rows || [], tombOf(n)) }); }
+        });
+      }).then(function () {
+        meta.versions[n] = { id: keep.id, version: keep.version }; meta.dirty[n] = 1; ctx.pulled = true;
+        list.forEach(function (x) { if (x !== keep) ctx.trash.push({ n: n, id: x.id }); });
+        by[n] = [keep]; logEv('merge', 'Drive có ' + list.length + ' tệp ' + FILE(n) + ' trùng tên → gộp dữ liệu vào một tệp, bỏ tệp thừa');
+        return IDB.del('base:' + n).then(function () { return persistLocal([n]); });       // không dùng bản nền cũ (lấy từ một trong các tệp) → không xóa nhầm dòng của tệp kia
+      }, function (e) { if (e === LOCKED) throw e; by[n] = []; ctx.bad.push(n); logEv('error', 'Chưa gộp được các tệp ' + FILE(n) + ' trùng tên: ' + ((e && e.message) || e) + ' — sẽ thử lại'); });
+    }).then(function () { return remote.filter(function (x) { return by[nameOf(x)].indexOf(x) >= 0; }); });
+  }
   function doSync(attempt) {
     attempt = typeof attempt === 'number' ? attempt : 0;
     if (state.conflict) return Promise.resolve();
     var ts = Date.now(); if (Object.keys(meta.dirty).length) setState({ phase: 'syncing' });     // hỏi Drive định kỳ không làm nhấp nháy biểu tượng
-    var merged = [], pulled = false, bad = [], pushed = [], got = [];
-    return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
+    var merged = [], pulled = false, bad = [], pushed = [], got = [], stale = [], ctx = { pulled: false, trash: [], bad: bad };
+    return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) { return fixDupes(remote, ctx); }).then(function (remote) {
+      if (ctx.pulled) pulled = true;
       var tasks = [];
       remote.forEach(function (x) {
         var n = x.name.replace(/\.json$/, ''), known = meta.versions[n];
         if (known && known.version === x.version && known.id === x.id) return;             // Drive không đổi
+        if (bad.indexOf(n) >= 0) return;
         tasks.push({ n: n, x: x, merge: !!meta.dirty[n] });
       });
       tasks.sort(function (a, b) { return (b.n === TOMB) - (a.n === TOMB); });          // nhận danh sách đã xóa trước khi gộp các bảng
       return seq(tasks, function (t) {
-        return readChecked(t.n, t.x.id).then(function (p) {
+        var sk = t.n + '@' + t.x.version, sha = (staleN[sk] || 0) >= 5 ? '' : t.x.sha256Checksum;      // đã thử 5 lần vẫn lệch mã → nhận (tránh kẹt mãi)
+        return readChecked(t.n, t.x.id, sha).then(function (p) {
+          delete staleN[sk];
+          if (t.n === '_props' && checkSchema(p.props)) throw LOCKED;                 // bản 41: dữ liệu đã lên bản mới hơn máy này
           if (t.n === TOMB) { tombUnion(p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; return IDB.set('meta', clone(meta)); }
           var dirtyNow = !!(meta.dirty[t.n] || (wb.dirty && wb.dirty[t.n]));     // bản 39: xét lại lúc dữ liệu về — người dùng có thể vừa lưu trong lúc đang tải từ Drive
           if (dirtyNow && !t.merge) { t.merge = true; logEv('merge', t.n + ': có thay đổi mới trong lúc đang tải từ Drive → gộp, không ghi đè'); }
@@ -341,7 +393,11 @@
             applyPayload(t.n, { rows: mergeRows(t.n, b && b.rows, loc, p.rows || [], tombOf(t.n)) });
             meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; merged.push(t.n); return persistLocal([t.n]);
           });
-        }, function (e) { bad.push(t.n); logEv('error', t.n + '.json trên Drive ' + e.message + ' — giữ dữ liệu máy này, không ghi đè'); });
+        }, function (e) {
+          if (e === LOCKED) throw e;
+          if (e && e.stale) { staleN[sk] = (staleN[sk] || 0) + 1; stale.push(t.n); if (staleN[sk] === 1) logEv('pull', t.n + ': Drive chưa cập nhật xong (nội dung lệch mã kiểm tra) → chưa nhận, thử lại sau vài giây'); return; }
+          bad.push(t.n); logEv('error', t.n + '.json trên Drive ' + e.message + ' — giữ dữ liệu máy này, không ghi đè');
+        });
       });
     }).then(function () {
       if (pulled) { env.resetCache(); try { if (typeof refreshIfPageChanged === 'function') refreshIfPageChanged(); else if (typeof softRefresh === 'function') softRefresh(); if (window.refreshReminders) refreshReminders(); } catch (e) { } }     // bản 39: hỏi lại dữ liệu trang đang xem (không dùng bản nhớ cũ)
@@ -355,7 +411,7 @@
       });
       if (fixed.length) { env.resetCache(); logEv('merge', 'Bỏ dòng đã bị xóa nhưng còn trong máy: ' + fixed.join(', ')); return persistLocal(Object.keys(meta.dirty).filter(function (n) { return wb.sheets[n]; })); }
     }).then(function () {
-      var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || n === TOMB || wb.sheets[n]) && bad.indexOf(n) < 0; });
+      var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || n === TOMB || wb.sheets[n]) && bad.indexOf(n) < 0 && stale.indexOf(n) < 0; });     // bản 41: bảng nhận về chưa khớp mã → chưa gửi (tránh ghi đè bằng dữ liệu cũ)
       names.sort(function (a, b) { return (b === TOMB) - (a === TOMB); });              // gửi danh sách đã xóa trước   // bảng có tệp lỗi: không ghi đè, chờ xử lý
       return seq(names, function (n) {
         var k = meta.versions[n], pl;
@@ -363,7 +419,8 @@
           pl = sheetPayload(n);                                                              // bản 39: chụp dữ liệu ngay lúc gửi (không phải trước khi đọc bản nền)
           if (b && JSON.stringify(b.rows) === JSON.stringify(pl.rows)) { delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }   // giống bản đã đồng bộ → khỏi ghi lên Drive
           meta.dirty[n] = 2;                                                                  // đang gửi; nếu trong lúc gửi có sửa thêm thì onChange đặt lại = 1
-          return (k && k.id ? Drive.version(k.id) : Promise.resolve(null)).then(function (v) {
+          return (k && k.id ? Drive.version(k.id) : Drive.list().then(function (rm) { return rm.some(function (x) { return x.name === FILE(n); }) ? 'exists' : null; })).then(function (v) {
+            if (!(k && k.id) && v === 'exists') { meta.dirty[n] = 1; throw RETRY; }   // bản 41: thiết bị khác vừa tạo tệp này → gộp vào tệp đó, không tạo tệp thứ hai
             if (k && k.id && v != null && String(v) !== String(k.version)) { meta.dirty[n] = 1; throw RETRY; }   // thiết bị khác vừa ghi: gộp lại trước khi ghi
             return Drive.write(FILE(n), pl, k && k.id);
           }).then(function (r) {
@@ -377,9 +434,14 @@
       if (got.length) logEv('pull', 'Nhận từ Drive: ' + got.join(', '));
       if (merged.length) { logEv('merge', 'Gộp với thiết bị khác: ' + merged.join(', ')); setState({ note: 'Đã gộp thay đổi từ thiết bị khác (' + merged.join(', ') + ')' }); setTimeout(function () { setState({ note: '' }); }, 8000); }
       if (pushed.length) logEv('push', 'Gửi lên Drive: ' + pushed.join(', '));
+      if (stale.length) setTimeout(syncNow, 3000);
+      var tr = ctx.trash.filter(function (x) { return pushed.indexOf(x.n) >= 0; });      // chỉ bỏ tệp thừa sau khi đã ghi bản gộp lên tệp giữ lại
+      if (tr.length) return Promise.all(tr.map(function (x) { return Drive.trash(x.id); })).then(function () { logEv('merge', 'Đã bỏ ' + tr.length + ' tệp trùng tên vào thùng rác Drive: ' + tr.map(function (x) { return FILE(x.n); }).join(', ')); });
+    }).then(function () {
       PERF.syncs = PERF.syncs.concat([{ t: Date.now(), ms: Date.now() - ts, n: got.length + merged.length + pushed.length }]).slice(-20);
       return IDB.set('meta', clone(meta)).then(maybeBackup);
     }).then(function () { setState({ phase: 'idle', needLogin: false, msg: bad.length ? 'Tệp lỗi trên Drive: ' + bad.join(', ') : '', err: false, bad: bad }); }, function (e) {
+      if (e === LOCKED) { setState({ phase: 'idle' }); return; }
       if (e === RETRY) { if (attempt < 3) return doSync(attempt + 1); setState({ phase: 'idle', msg: 'Thiết bị khác đang ghi liên tục — sẽ thử lại.' }); setTimeout(syncNow, 15000); return; }
       var m = String((e && e.message) || e), login = /popup|access_denied|immediate_failed|login|consent|401|Client ID|đăng nhập/i.test(m);
       if (!login) { logEv('error', m); IDB.set('meta', clone(meta)).catch(function () { }); }
@@ -493,6 +555,7 @@
   }
   function start() {
     var from = wb.props && wb.props.SCHEMA, to = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+    if (checkSchema(wb.props)) return;                 // bản 41: dữ liệu đã lên bản mới hơn → không mở bằng bản cũ
     if (from && to && from !== to) {                 // bản mới sẽ thêm cột / đổi cấu trúc: chụp dữ liệu cũ trước (lưu cả trong máy lẫn trên Drive)
       var snap = clone(wb.snapshot()); IDB.set('preupgrade', { from: from, to: to, t: Date.now(), snap: snap }).catch(function () { });
       logEv('backup', 'Chụp dữ liệu trước nâng cấp ' + from + ' → ' + to);
