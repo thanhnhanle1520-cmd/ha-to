@@ -159,7 +159,7 @@ PAGES.quote = function (p, q) {
       ['vat_pct', 'valid_text', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'contact_name', 'contact_phone', 'contact_email'].forEach(function (k) { if (tp[k] != null && tp[k] !== '' && pf.inputs[k]) setVal(pf.inputs[k], tp[k]); });
       if (pf.inputs.vat_pct) pf.inputs.vat_pct.dispatchEvent(new Event('input'));
     }
-    var le = lineEditor({ mode: 'quote', lines: lines, getVat: function () { return pf.inputs.vat_pct.value; }, getCoef: function () { return pf.inputs.coef ? pf.inputs.coef.value : 0; } });
+    var le = lineEditor({ mode: 'quote', lines: lines, disc: qt, readOnly: !canEdit, getVat: function () { return pf.inputs.vat_pct.value; }, getCoef: function () { return pf.inputs.coef ? pf.inputs.coef.value : 0; } });
     vatSync(pf.inputs.vat_pct, le);
     if (S.perms.canPrice && pf.inputs.coef) pf.inputs.coef.parentNode.appendChild(h('button', { type: 'button', style: 'margin-top:4px', onclick: function () { var n = le.applyCoef(pf.inputs.coef.value); toast(n ? 'Đã áp hệ số cho ' + n + ' dòng' : 'Nhập hệ số > 0 và có giá mua', !n); } }, 'Áp cho tất cả dòng'));
     if (isNew && qt.project_id) applyTermsPref(qt.project_id);
@@ -231,8 +231,9 @@ function convertModal(qt) {
   bx.onchange = function () { if (bx.checked) { bx.checked = false; costBalanceModal(qt, { applyLabel: 'Dùng cách cân này', onApply: function (opt) { bal = opt; bx.checked = true; showBal(); } }); } else { bal = null; showBal(); } };
   modal({ title: 'Chuyển báo giá ' + qNo(qt), body: h('div', { class: 'fg' }, h('label', null, 'Loại văn bản', type), h('label', null, 'Số văn bản', no),
       h('div', { class: 'full', style: 'display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb' }, bx, h('div', null, h('label', { for: 'cvBal', style: 'display:inline;font-weight:600;cursor:pointer' }, 'Cân chi phí vào đơn giá'), h('div', { class: 'mut' }, 'Chia chi phí vận chuyển, chi phí ngoài vào đơn giá các dòng hàng; văn bản không còn dòng chi phí riêng.'), bInfo)),
+      +qt.disc_value > 0 ? h('div', { class: 'full', id: 'cvDisc', style: 'padding:8px 10px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb' }, h('b', null, 'Giảm giá tổng' + (qt.disc_mode === 'pct' ? ' ' + N(qt.disc_value) + '%' : ' ' + M(qt.disc_value) + 'đ')), ' sẽ được trừ thẳng vào đơn giá các dòng hàng (làm tròn 100đ). Văn bản không có dòng giảm giá riêng, tổng tiền khớp với báo giá.') : null,
       h('div', { class: 'full mut' }, 'Dòng hàng được sao chép sang văn bản; đơn giá chốt = đơn giá báo giá sau chiết khấu. Có thể chỉnh lại trong văn bản. Báo giá gốc giữ nguyên.')),
-    buttons: [{ label: 'Chuyển', cls: 'pri', fn: function (close) { safe(call('convertQuote', { quote_id: qt.id, type: type.value, doc_no: no.value, balance: bal || undefined })).then(function (r) { if (r) { close(); toast('Đã tạo ' + r.doc.code + (r.balanced ? ' (đã cân ' + M(r.balanced.cost_total) + 'đ chi phí vào đơn giá)' : '')); go('doc/' + r.doc.id); } }); } }] });
+    buttons: [{ label: 'Chuyển', cls: 'pri', fn: function (close) { safe(call('convertQuote', { quote_id: qt.id, type: type.value, doc_no: no.value, balance: bal || undefined })).then(function (r) { if (r) { close(); toast('Đã tạo ' + r.doc.code + (r.balanced ? ' (đã cân ' + M(r.balanced.cost_total) + 'đ chi phí vào đơn giá)' : '') + (r.discount ? ' (đã trừ giảm giá ' + M(r.discount.amount) + 'đ vào đơn giá' + (r.discount.diff ? ', lệch ' + M(r.discount.diff) + 'đ do làm tròn' : '') + ')' : '')); go('doc/' + r.doc.id); } }); } }] });
 }
 /* ---- Cân chi phí vào đơn giá (bản 38) ----
    opts.onApply(opt): khi bấm áp dụng (opt = {cost, target, mode, round}); opts.applyLabel: chữ trên nút */

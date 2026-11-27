@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.32.0';
+const APP_VERSION = '1.33.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -42,7 +42,7 @@ const TABLES = {
   USERS: ['email', 'name', 'role', 'active', 'phone'],
   CUSTOMERS: ['id', 'code', 'name', 'tax_code', 'address', 'contact', 'phone', 'email', 'status', 'created_at', 'updated_at', 'short_name', 'rep_name', 'rep_title', 'bank_account', 'terms_pref', 'rfq_maps'],
   PROJECTS: ['id', 'code', 'name', 'customer_id', 'owner_email', 'start_date', 'end_date', 'status', 'rep_name', 'rep_phone', 'receiver', 'note', 'created_by', 'created_at', 'updated_at', 'kind', 'archived'],
-  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'coef', 'status', 'rfq_id', 'customer_id'],
+  QUOTES: ['id', 'code', 'project_id', 'version', 'date', 'vat_pct', 'note', 'converted_to', 'created_by', 'created_at', 'updated_at', 'valid_days', 'valid_text', 'contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method', 'coef', 'status', 'rfq_id', 'customer_id', 'disc_mode', 'disc_value'],
   QUOTE_ITEMS: ['id', 'quote_id', 'line_no', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price', 'cost', 'disc_pct', 'note', 'spec', 'coef', 'updated_at', 'src_rows', 'vat_line'],
   DOCS: ['id', 'code', 'type', 'project_id', 'parent_id', 'doc_no', 'sign_date', 'delivery_date', 'pay_method', 'currency', 'vat_pct', 'terms', 'warranty_months', 'late_penalty', 'pay_docs', 'attached', 'source_quote_id', 'note', 'created_by', 'created_at', 'updated_at', 'ext', 'status', 'snap', 'customer_id'],
   DOC_ITEMS: ['id', 'doc_id', 'line_no', 'ref_item_id', 'code', 'name', 'model', 'brand', 'origin', 'unit', 'qty', 'price_offer', 'price', 'cost', 'source', 'note', 'cost_list', 'spec', 'updated_at', 'vat_line', 'cost_src'],
@@ -79,7 +79,7 @@ const TABLES = {
   CONFIG: ['key', 'value'],
   COUNTERS: ['key', 'value']
 };
-const NUM = new Set(['book_qty', 'packages', 'gross_kg', 'invoice_total', 'exchange_rate', 'taxable_total', 'nk_total', 'vat_total', 'other_tax_total', 'tax_payable', 'pages', 'qty2', 'inv_price', 'inv_value', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'cost_base', 'cost_tax', 'cost_unit', 'header_row', 'header_last', 'n_rows', 'n_lines', 'qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
+const NUM = new Set(['book_qty', 'packages', 'gross_kg', 'invoice_total', 'exchange_rate', 'taxable_total', 'nk_total', 'vat_total', 'other_tax_total', 'tax_payable', 'pages', 'qty2', 'inv_price', 'inv_value', 'tax_value', 'tax_unit_price', 'nk_rate', 'nk_amount', 'nk_exempt', 'vat_rate', 'vat_amount', 'other_tax', 'cost_base', 'cost_tax', 'cost_unit', 'header_row', 'header_last', 'n_rows', 'n_lines', 'qty', 'price', 'cost', 'cost_list', 'price_offer', 'amount', 'pct', 'disc_pct', 'disc_value', 'vat_pct', 'months', 'warranty_months', 'coef', 'coef_own', 'old_cost', 'new_cost', 'size', 'version', 'line_no', 'term_index', 'active', 'copies', 'copies_a', 'copies_b']);
 const JSONCOLS = { STOCK_CLOSES: ['data'], IMPORT_DECLS: ['extra_costs', 'checks'], IMPORT_DECL_ITEMS: ['other_taxes'], DELIVERIES: ['attached'], DOCS: ['terms', 'attached', 'ext', 'snap'], WARRANTIES: ['items'], CERTS: ['items'], RFQS: ['map', 'opts', 'rows', 'groups'] };
 
 const DEFAULT_CONFIG = {
@@ -532,11 +532,24 @@ function vatGroups_(rows) {        // rows: [{amount, rate}] → [{rate, base, v
   var g = {}; rows.forEach(function (r) { var k = String(num_(r.rate)); var o = g[k] || (g[k] = { rate: num_(r.rate), base: 0, vat: 0 }); o.base += num_(r.amount); o.vat += lineVatAmt_(r.amount, r.rate); });
   return Object.keys(g).map(function (k) { return g[k]; }).sort(function (a, b) { return a.rate - b.rate; });
 }
+/* Giảm giá tổng (bản 40): disc_mode 'pct' (disc_value = %) | 'amt' (disc_value = số tiền). Trừ vào từng mức VAT theo tỷ lệ. */
+function discAmt_(q, gross) {
+  var v = num_(q && q.disc_value); if (!(v > 0) || !(gross > 0)) return 0;
+  var d = q.disc_mode === 'pct' ? round_(gross * v / 100) : round_(v);
+  return Math.max(0, Math.min(gross, d));
+}
+function discGroups_(groups, D) {
+  var gross = 0; groups.forEach(function (g) { gross += g.base; }); if (!D || !gross) return groups;
+  var left = D;
+  return groups.map(function (g, i) { var gd = i === groups.length - 1 ? left : round_(D * g.base / gross); left -= gd; return { rate: g.rate, base: g.base - gd, vat: g.vat - lineVatAmt_(gd, g.rate), base0: g.base, disc: gd }; });
+}
 function quoteTotals_(q, items) {
   var rows = items.map(function (i) { return { amount: lineAmt_(i.qty, i.price, i.disc_pct), rate: lineVat_(i, q) }; });
-  var groups = vatGroups_(rows), sub = 0, vat = 0;
-  groups.forEach(function (x) { sub += x.base; vat += x.vat; });
-  return { sub: sub, vat: vat, total: sub + vat, groups: groups };
+  var groups = vatGroups_(rows), gross = 0;
+  groups.forEach(function (x) { gross += x.base; });
+  var D = discAmt_(q, gross), gs = discGroups_(groups, D), vat = 0;
+  gs.forEach(function (x) { vat += x.vat; });
+  return { gross: gross, disc: D, disc_pct: D && q.disc_mode === 'pct' ? num_(q.disc_value) : 0, sub: gross - D, vat: vat, total: gross - D + vat, groups: gs };
 }
 
 function index_() {
@@ -1320,6 +1333,9 @@ function saveQuote_(u, p) {
   out.valid_days = r.valid_days == null || r.valid_days === '' ? (rec && rec.valid_days ? num_(rec.valid_days) : 30) : num_(r.valid_days);
   ['contact_name', 'contact_phone', 'contact_email', 'warranty_text', 'deliver_place', 'deliver_time', 'pay_method'].forEach(function (k) { out[k] = r[k] == null ? (rec && rec[k] != null ? rec[k] : '') : String(r[k]).trim(); });
   out.coef = Math.max(0, num_(r.coef == null ? (rec ? rec.coef : 0) : r.coef));
+  out.disc_mode = r.disc_mode == null ? (rec ? rec.disc_mode || '' : '') : (['pct', 'amt'].indexOf(r.disc_mode) >= 0 ? r.disc_mode : '');
+  out.disc_value = Math.max(0, num_(r.disc_value == null ? (rec ? rec.disc_value : 0) : r.disc_value)); if (!out.disc_value) out.disc_mode = '';
+  if (out.disc_mode === 'pct' && out.disc_value > 100) throw new Error('Giảm giá tổng không quá 100%.');
   out.status = ['Nháp', 'Đã gửi', 'Không chốt'].indexOf(r.status) >= 0 ? r.status : (rec && rec.status ? rec.status : 'Nháp');
   out.customer_id = String(r.customer_id == null ? (rec ? rec.customer_id || '' : '') : r.customer_id);
   if (out.customer_id && !readTable_('CUSTOMERS').some(function (x) { return x.id === out.customer_id; })) throw new Error('Không tìm thấy khách hàng của báo giá.');
@@ -1582,6 +1598,8 @@ ACTIONS.convertQuote = function (u, p) {
       bal = costBalance_(quoteLines_(q.id), p.balance === true ? {} : p.balance);
       items = bal.lines.map(function (x) { return { code: x.code, name: x.name, model: x.model, brand: x.brand, origin: x.origin, unit: x.unit, qty: x.qty, price_offer: x.price, price: num_(x.price), cost: '', cost_list: x.cost, source: 'QUOTE', note: x.note, spec: x.spec, vat_line: lineVat_(x, q) }; });
     }
+    var dsc = discIntoItems_(q, items, p.disc_round);      // bản 40: giảm giá tổng trừ vào đơn giá
+    items = dsc.items;
     var qc = custOfQuote_(q), hdOfC = (index_().docsByProject[q.project_id] || []).filter(function (d) { return d.type === 'HD' && custOfDoc_(d) === qc; })[0];
     var rec = { type: type, project_id: q.project_id, customer_id: qc, parent_id: p.parent_id || (hdOfC ? hdOfC.id : ''), source_quote_id: q.id, vat_pct: q.vat_pct, sign_date: today_(), terms: type === 'HD' ? [{ name: 'Đợt 1', pct: 100, days: 30 }] : [], doc_no: p.doc_no || '' };
     var res = saveDoc_(u, { rec: rec, items: items });
@@ -1590,7 +1608,7 @@ ACTIONS.convertQuote = function (u, p) {
     var pr = readTable_('PROJECTS').filter(function (x) { return x.id === q.project_id; })[0];
     if (pr && pr.status === 'Đang chào giá') upsert_('PROJECTS', Object.assign({}, pr, { status: 'Đang thực hiện', updated_at: now_() }));
     audit_(u, 'Chuyển báo giá', 'DOCS', res.doc.id, q.project_id, q.code + ' → ' + res.doc.code + (bal ? ' (cân ' + money_(bal.cost_total) + ' chi phí vào đơn giá)' : ''));
-    return { doc: res.doc, balanced: bal ? { cost_total: bal.cost_total, diff: bal.diff } : null };
+    return { doc: res.doc, balanced: bal ? { cost_total: bal.cost_total, diff: bal.diff } : null, discount: dsc.disc ? { amount: dsc.disc, diff: dsc.diff } : null };
   });
 };
 
@@ -1607,13 +1625,15 @@ function costBalance_(lines, o) {
   o = o || {};
   var R = [1, 100, 1000].indexOf(num_(o.round)) >= 0 ? num_(o.round) : 100, mode = o.mode === 'qty' ? 'qty' : o.mode === 'manual' ? 'manual' : 'value';
   var net = function (x) { return round_(num_(x.price) * (1 - num_(x.disc_pct) / 100)); };
-  var costIdx = Array.isArray(o.cost) && o.cost.length ? o.cost.map(Number) : lines.map(function (x, i) { return isCostLine_(x) ? i : -1; }).filter(function (i) { return i >= 0; });
+  var AMT = o.amount != null;      // bản 40: cộng / trừ một số tiền cho sẵn (giảm giá tổng = số âm), không cần dòng chi phí
+  var costIdx = AMT ? [] : Array.isArray(o.cost) && o.cost.length ? o.cost.map(Number) : lines.map(function (x, i) { return isCostLine_(x) ? i : -1; }).filter(function (i) { return i >= 0; });
   var isCost = {}; costIdx.forEach(function (i) { if (lines[i]) isCost[i] = 1; });
   var tg = (Array.isArray(o.target) && o.target.length ? o.target.map(Number) : lines.map(function (x, i) { return i; })).filter(function (i) { return lines[i] && !isCost[i] && num_(lines[i].qty) > 0; });
-  if (!Object.keys(isCost).length) throw new Error('Chưa có dòng chi phí cần cân (đánh dấu dòng chi phí, hoặc ghi chú "Cân vào đơn giá").');
+  if (!AMT && !Object.keys(isCost).length) throw new Error('Chưa có dòng chi phí cần cân (đánh dấu dòng chi phí, hoặc ghi chú "Cân vào đơn giá").');
   if (!tg.length) throw new Error('Không còn dòng hàng nào để nhận phần chi phí.');
   var C = 0; Object.keys(isCost).forEach(function (i) { C += round_(num_(lines[i].qty) * net(lines[i])); });
   var before = 0; lines.forEach(function (x) { before += round_(num_(x.qty) * net(x)); });
+  if (AMT) { C = round_(o.amount); before += C; }
   if (mode === 'manual') {     // tự nhập đơn giá mới từng dòng; phần chưa cân hết giữ nguyên là "còn lại", không tự dồn
     var mp = o.prices || {}, npm = {};
     tg.forEach(function (i) { var v = mp[i] != null && mp[i] !== '' ? round_(mp[i]) : net(lines[i]); if (v < 0) throw new Error('Đơn giá mới của "' + lines[i].name + '" không được âm.'); npm[i] = v; });
@@ -1625,7 +1645,7 @@ function costBalance_(lines, o) {
   }
   var w = tg.map(function (i) { return mode === 'qty' ? num_(lines[i].qty) : num_(lines[i].qty) * net(lines[i]); }), W = w.reduce(function (a, b) { return a + b; }, 0);
   if (!(W > 0)) throw new Error(mode === 'qty' ? 'Các dòng nhận phần cân chưa có số lượng.' : 'Các dòng nhận phần cân chưa có đơn giá (thử chia theo số lượng).');
-  var np = {}; tg.forEach(function (i, k) { var q = num_(lines[i].qty); np[i] = Math.round((net(lines[i]) + C * w[k] / W / q) / R) * R; });
+  var np = {}; tg.forEach(function (i, k) { var q = num_(lines[i].qty); np[i] = Math.max(0, Math.round((net(lines[i]) + C * w[k] / W / q) / R) * R); });
   var after = function () { var s = 0; lines.forEach(function (x, i) { if (!isCost[i]) s += round_(num_(x.qty) * (np[i] != null ? np[i] : net(x))); }); return s; };
   var diff = before - after();
   if (diff) {        // dồn phần lệch: chọn dòng làm tổng sát nhất, ưu tiên dòng giá trị lớn
@@ -1638,6 +1658,13 @@ function costBalance_(lines, o) {
   var out = []; lines.forEach(function (x, i) { if (isCost[i]) return; out.push(np[i] != null ? Object.assign({}, x, { price: np[i], disc_pct: 0, note: x.note }) : x); });
   return { lines: out, rows: rows, cost_idx: Object.keys(isCost).map(Number), cost_total: C, before: before, after: before - diff, diff: diff, round: R, mode: mode,
     costs: Object.keys(isCost).map(function (i) { var x = lines[i]; return { idx: +i, name: x.name, amount: round_(num_(x.qty) * net(x)) }; }) };
+}
+/* Giảm giá tổng của báo giá → trừ thẳng vào đơn giá các dòng (khi chuyển / cập nhật HĐ, PO), tổng gần như khớp */
+function discIntoItems_(q, items, R) {
+  var gross = 0; items.forEach(function (x) { gross += round_(num_(x.qty) * num_(x.price)); });
+  var D = discAmt_(q, gross); if (!D) return { items: items, disc: 0, diff: 0 };
+  var r = costBalance_(items, { amount: -D, mode: 'value', round: R || 100 });
+  return { items: r.lines, disc: D, diff: r.diff };
 }
 function quoteLines_(qid) { return readTable_('QUOTE_ITEMS').filter(function (x) { return x.quote_id === qid; }).sort(byLine_); }
 ACTIONS.costBalancePreview = function (u, p) {      // trả về các dòng (để chọn) + kết quả cân; cân chưa được thì trả lỗi kèm theo, không ném lỗi
@@ -1693,6 +1720,7 @@ ACTIONS.syncDocFromQuote = function (u, p) {    // Cập nhật PO / HĐ / PL đ
         cost: same ? o.cost : '', cost_src: same ? o.cost_src || '' : '', cost_list: x.cost, source: 'QUOTE', note: x.note, spec: x.spec, vat_line: lineVat_(x, q) };
     });
     if (!items.length) throw new Error('Báo giá chưa có dòng hàng.');
+    items = discIntoItems_(q, items).items;        // bản 40: giảm giá tổng trừ vào đơn giá
     var res = saveDoc_(u, { rec: Object.assign({}, d, { vat_pct: q.vat_pct, source_quote_id: q.id }), items: items });
     if ((', ' + (q.converted_to || '') + ',').indexOf(', ' + d.code + ',') < 0) upsert_('QUOTES', Object.assign({}, q, { converted_to: (q.converted_to ? q.converted_to + ', ' : '') + d.code, updated_at: now_() }));
     audit_(u, 'Cập nhật theo báo giá', 'DOCS', d.id, d.project_id, q.code + ' v' + q.version + ' → ' + d.code);
@@ -3294,7 +3322,8 @@ function lineTable_(rows, withPrice, tot) {
     h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + [r.brand, r.origin].filter(Boolean).map(esc_).join(' /<br>') + '</td><td class="c" style="white-space:nowrap">' + esc_(r.unit) + '</td><td class="c">' + qty_(r.qty) + '</td><td class="r">' + money_(net) + '</td>' + (mv ? '<td class="c">' + qty_(r.vat) + '%</td>' : '') + '<td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note || '') + '</td></tr>';
   });
   var gs = (tot.groups && tot.groups.length ? tot.groups : [{ rate: tot.vat_pct, base: tot.sub, vat: tot.vat }]).map(function (g) { return ['Thuế GTGT ' + qty_(g.rate) + '%' + (mv ? ' (trên ' + money_(g.base) + ')' : ''), g.vat, 0]; });
-  [['Cộng tiền hàng', tot.sub, 0]].concat(gs, [['Tổng thanh toán', tot.total, 1]]).forEach(function (x) {
+  var dl = tot.disc > 0 ? [['Cộng tiền hàng', tot.gross, 0], ['Giảm giá' + (tot.disc_pct ? ' (' + qty_(tot.disc_pct) + '%)' : ''), -tot.disc, 0], ['Cộng sau giảm giá', tot.sub, 0]] : [['Cộng tiền hàng', tot.sub, 0]];
+  dl.concat(gs, [['Tổng thanh toán', tot.total, 1]]).forEach(function (x) {
     h += '<tr><td class="tot" colspan="' + nc + '" style="text-align:right">' + (x[2] ? '<b>' + x[0] + '</b>' : x[0]) + '</td><td class="r">' + (x[2] ? '<b>' + money_(x[1]) + '</b>' : money_(x[1])) + '</td><td></td></tr>';
   });
   return h + '</table>';
@@ -3392,7 +3421,7 @@ function buildExport_(u, p) {
     }
     body = '<div class="bq">' + letterhead_(true) + '<h1>BÁO GIÁ</h1>' +
       '<table class="inf" width="100%" cellspacing="0" cellpadding="2">' + inf + '</table>' +
-      lineTable_(rows, 2, { sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
+      lineTable_(rows, 2, { gross: t.gross, disc: t.disc, disc_pct: t.disc_pct, sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
       '<p class="words"><i>Bằng chữ: ' + esc_(moneyWords_(t.total)) + '</i></p>' +
       '<p class="sec">Điều khoản và điều kiện:</p><table class="tm" width="100%" cellspacing="0" cellpadding="2">' + term('Bảo hành', q.warranty_text) + term('Địa điểm giao hàng', q.deliver_place) + term('Thời gian giao hàng', q.deliver_time) + term('Phương thức thanh toán', q.pay_method) + term('Hiệu lực báo giá', vt) + '</table>' +
       (q.note ? '<p class="sec">Ghi chú:</p><p>' + esc_(q.note) + '</p>' : '') +

@@ -468,7 +468,7 @@ function table(o) {
     var rows = filtered(), pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) st.page = pages;
     body.innerHTML = '';
     rows.slice((st.page - 1) * ps, st.page * ps).forEach(function (r) {
-      var tr = h('tr', { class: (o.onRow ? 'rw' : '') + (useSel && st.sel[r.id] ? ' picked' : ''), onclick: o.onRow ? function () { o.onRow(r); } : null });
+      var tr = h('tr', { class: (o.onRow ? 'rw' : '') + (useSel && st.sel[r.id] ? ' picked' : '') + (o.rowCls ? ' ' + (o.rowCls(r) || '') : ''), onclick: o.onRow ? function () { o.onRow(r); } : null });
       if (useSel) tr.appendChild(h('td', { class: 'ck', onclick: function (e) { e.stopPropagation(); if (e.target.tagName !== 'INPUT') { var cb = this.querySelector('input'); cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); } } },
         h('input', { type: 'checkbox', checked: !!st.sel[r.id], 'aria-label': 'Chọn dòng', onchange: function (e) { if (e.target.checked) st.sel[r.id] = 1; else delete st.sel[r.id]; tr.classList.toggle('picked', e.target.checked); drawSel(); } })));
       o.cols.forEach(function (c) {
@@ -553,6 +553,20 @@ function vatGroups(lines, docVat, amtFn) {
   var g = {}; lines.forEach(function (l) { var r = lineVat(l, docVat), a = Math.round(amtFn(l)), k = String(r), x = g[k] || (g[k] = { rate: r, base: 0, vat: 0 }); x.base += a; x.vat += Math.round(a * r / 100); });
   return Object.keys(g).map(function (k) { return g[k]; }).sort(function (a, b) { return a.rate - b.rate; });
 }
+/* Giảm giá tổng (bản 40) — giống hệt máy chủ (discAmt_ / discGroups_) */
+function discAmt(rec, gross) { var v = num(rec && rec.disc_value); if (!(v > 0) || !(gross > 0)) return 0; var d = rec.disc_mode === 'pct' ? Math.round(gross * v / 100) : Math.round(v); return Math.max(0, Math.min(gross, d)); }
+function discGroups(gs, D) {
+  var gross = 0; gs.forEach(function (g) { gross += g.base; }); if (!D || !gross) return gs;
+  var left = D; return gs.map(function (g, i) { var gd = i === gs.length - 1 ? left : Math.round(D * g.base / gross); left -= gd; return { rate: g.rate, base: g.base - gd, vat: g.vat - Math.round(gd * g.rate / 100) }; });
+}
+/* Tổng thanh toán mong muốn → số tiền giảm (thử quanh nghiệm gần đúng, lấy số cho tổng sát nhất) */
+function discForTotal(gs, want) {
+  var gross = 0, vt = 0; gs.forEach(function (g) { gross += g.base; vt += g.vat; }); if (!(gross > 0) || !(want > 0)) return 0;
+  var tot = function (D) { var t = gross - D; discGroups(gs, D).forEach(function (g) { t += g.vat; }); return t; };
+  var d0 = Math.round(gross - want * gross / (gross + vt)), best = Math.max(0, Math.min(gross, d0));
+  for (var k = -60; k <= 60; k++) { var D = Math.max(0, Math.min(gross, d0 + k)); if (Math.abs(tot(D) - want) < Math.abs(tot(best) - want)) best = D; }
+  return best;
+}
 /* ================= Bộ sửa dòng hàng ================= */
 /* mode: quote | doc | delivery */
 function lineEditor(o) {
@@ -579,14 +593,28 @@ function lineEditor(o) {
     var t = total(), ai = 0; cols.forEach(function (x, i) { if (x[0] === 'amount') ai = i; });
     var cs = ai + 1, tail = cols.length - ai - 1 + 1;          // # + các cột trước "Thành tiền"; các cột sau + cột xóa
     function row(label, val) { var r = h('tr', null, h('td', { colspan: cs, class: 'r' }, label), h('td', { class: 'r' }, val)); if (tail > 0) r.appendChild(h('td', { colspan: tail })); return r; }
-    var gs = vatGroups(lines, docVat(), amt), vt = 0, many = gs.length > 1;
+    var gs = vatGroups(lines, docVat(), amt), gs0 = gs, vt = 0, many = gs.length > 1, dq = mode === 'quote' && o.disc ? o.disc : null, D = dq ? discAmt(dq, t) : 0;
     foot.append(row(mode === 'quote' ? 'Cộng tiền hàng' : 'Tổng giá trị (chưa VAT)', M(t)));
+    if (dq) {     // giảm giá tổng: gõ % · số tiền · tổng thanh toán mong muốn — ô nào cũng tính ra 2 ô còn lại
+      var setD = function (mode2, val) { dq.disc_mode = val > 0 ? mode2 : ''; dq.disc_value = val > 0 ? val : 0; drawFoot(); if (o.onChange) o.onChange(); };
+      var inp = function (id, val, ph, title, fn) { return h('input', { id: id, type: 'text', inputmode: 'decimal', value: val, placeholder: ph, title: title, readOnly: !!o.readOnly, style: 'width:' + (id === 'discPct' ? 58 : 118) + 'px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-weight:400', onchange: function (e) { var t = String(e.target.value).trim(); fn(num(id === 'discPct' ? t.replace(',', '.') : t.replace(/[.\s]/g, '').replace(',', '.'))); } }); };
+      var pctShow = dq.disc_mode === 'pct' ? N(dq.disc_value) : '';      // gõ số tiền / tổng mong muốn: không hiện % lẻ
+      var gsD = discGroups(gs, D), totD = t - D; gsD.forEach(function (g) { totD += g.vat; });
+      var lab = h('span', { style: 'display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end' }, 'Giảm giá',
+        inp('discPct', pctShow, '%', 'Giảm theo % tổng tiền hàng', function (v) { setD('pct', Math.min(100, v)); }), '%  hoặc số tiền',
+        inp('discAmt', D ? M(D) : '', 'số tiền', 'Gõ thẳng số tiền giảm (làm tròn)', function (v) { setD('amt', Math.round(v)); }), 'hoặc tổng thanh toán',
+        inp('discWant', D ? M(totD) : '', 'tổng mong muốn', 'Gõ tổng thanh toán mong muốn (đã gồm VAT) → tự tính số tiền giảm', function (v) { setD('amt', v > 0 ? discForTotal(gs0, Math.round(v)) : 0); }));
+      foot.append(row(lab, D ? '−' + M(D) : '0'));
+      if (D) foot.append(row('Cộng sau giảm giá', M(t - D)));
+      gs = gsD; t = t - D; many = gs.length > 1;
+    }
     gs.forEach(function (g) { vt += g.vat; foot.append(row('Thuế GTGT ' + N(g.rate) + '%' + (many ? ' (trên ' + M(g.base) + ')' : ''), M(g.vat))); });
     foot.append(row(mode === 'quote' ? 'Tổng thanh toán' : 'Tổng giá trị (có VAT)', M(t + vt)));
     if (mode === 'quote') {
       var tc = 0; lines.forEach(function (l) { tc += num(l.qty) * num(l.cost); });
       if (tc > 0 && canPrice) { var rr = function (a, b) { var r = row(a, b); r.style.cssText = 'color:#6b7280;background:#f9fafb;font-size:12px'; r.classList.add('hide-sm'); return r; };
-        foot.append(rr('Nội bộ (không in) — Tổng giá mua', M(tc)), rr('Lãi gộp', M(t - tc)), rr('Hệ số trung bình (bán/mua)', N(Math.round(t / tc * 100) / 100))); }
+        var lg = rr('Lãi gộp' + (D ? ' (sau giảm giá)' : ''), M(t - tc)); if (t < tc) { lg.style.color = '#b91c1c'; lg.style.fontWeight = '700'; lg.cells[0].textContent = 'Lãi gộp (sau giảm giá) — ĐANG BÁN DƯỚI GIÁ MUA'; }
+        foot.append(rr('Nội bộ (không in) — Tổng giá mua', M(tc)), lg, rr('Hệ số trung bình (bán/mua)', N(Math.round(t / tc * 100) / 100))); }
     }
   }
   function draw() {

@@ -19,16 +19,17 @@ function customerTerms(pid, cid) {
 }
 
 /* ---- Tổng tiền báo giá ---- */
-function quoteSums(lines, vat) {
+function quoteSums(lines, vat, rec) {
   var cost = 0; lines.forEach(function (l) { cost += num(l.qty) * num(l.cost); });
-  var gs = vatGroups(lines, vat, function (l) { return num(l.qty) * num(l.price) * (1 - num(l.disc_pct) / 100); }), sub = 0, v = 0;
-  gs.forEach(function (g) { sub += g.base; v += g.vat; });
-  return { sub: sub, vat: v, total: sub + v, cost: cost, groups: gs };
+  var gs = vatGroups(lines, vat, function (l) { return num(l.qty) * num(l.price) * (1 - num(l.disc_pct) / 100); }), gross = 0, v = 0;
+  gs.forEach(function (g) { gross += g.base; });
+  var D = discAmt(rec, gross); gs = discGroups(gs, D); gs.forEach(function (g) { v += g.vat; });
+  return { gross: gross, disc: D, sub: gross - D, vat: v, total: gross - D + v, cost: cost, groups: gs };
 }
 
 /* ---- Kiểm tra trước khi xuất / gửi ---- */
 function quoteIssues(rec, lines) {
-  var out = [], sm = quoteSums(lines, rec.vat_pct), minc = num(S.cfg && S.cfg.min_coef);
+  var out = [], sm = quoteSums(lines, rec.vat_pct, rec), minc = num(S.cfg && S.cfg.min_coef);
   if (!lines.length) out.push('Báo giá chưa có dòng hàng.');
   if (!String(rec.contact_name || '').trim() && !String(rec.contact_phone || '').trim()) out.push('Chưa có người nhận / số điện thoại.');
   if (!String(rec.valid_text || '').trim()) out.push('Chưa ghi hiệu lực báo giá.');
@@ -36,6 +37,7 @@ function quoteIssues(rec, lines) {
   if (!String(rec.pay_method || '').trim()) out.push('Chưa có phương thức thanh toán.');
   lines.forEach(function (l, i) { if (!(num(l.price) > 0)) out.push('Dòng ' + (i + 1) + ' (' + (l.name || '?') + '): đơn giá bằng 0.'); });
   if (minc > 0 && S.perms.canPrice) {
+    if (sm.disc && sm.cost > 0 && sm.sub < sm.cost) out.push('Sau giảm giá tổng, cộng tiền hàng ' + M(sm.sub) + ' thấp hơn tổng giá mua ' + M(sm.cost) + ' (đang bán lỗ).');
     if (sm.cost > 0 && sm.sub / sm.cost < minc) out.push('Hệ số trung bình ' + N(Math.round(sm.sub / sm.cost * 100) / 100) + ' thấp hơn ngưỡng tối thiểu ' + N(minc) + '.');
     lines.forEach(function (l, i) { if (num(l.cost) > 0 && num(l.price) > 0 && num(l.price) / num(l.cost) < minc) out.push('Dòng ' + (i + 1) + ' (' + (l.name || '?') + '): hệ số ' + N(Math.round(num(l.price) / num(l.cost) * 100) / 100) + ' < ngưỡng ' + N(minc) + '.'); });
   }
@@ -69,7 +71,7 @@ function quoteCheck(rec, lines, goLabel) {
 
 /* ---- Gửi báo giá nhanh (văn bản dán Zalo) ---- */
 function quoteZaloText(rec, lines) {
-  var sm = quoteSums(lines, rec.vat_pct), pj = S.projects.filter(function (x) { return x.id === rec.project_id; })[0] || {};
+  var sm = quoteSums(lines, rec.vat_pct, rec), pj = S.projects.filter(function (x) { return x.id === rec.project_id; })[0] || {};
   var L = ['BÁO GIÁ ' + (rec.code || '') + (pj.name ? ' – ' + pj.name : ''), 'Ngày: ' + D(rec.date)];
   if (rec.contact_name) L.push('Kính gửi: ' + rec.contact_name);
   L.push('');
@@ -78,7 +80,7 @@ function quoteZaloText(rec, lines) {
     L.push((i + 1) + '. ' + l.name + (l.spec ? ' (' + l.spec + ')' : '') + (l.model ? ' – ' + l.model : '') + (l.brand ? ' – ' + l.brand : ''));
     L.push('    ' + N(l.qty) + ' ' + (l.unit || '') + ' × ' + M(net) + ' = ' + M(amt));
   });
-  L.push('', 'Cộng tiền hàng: ' + M(sm.sub), sm.groups.map(function (g) { return 'VAT ' + N(g.rate) + '%: ' + M(g.vat); }).join('\n'), 'TỔNG CỘNG: ' + M(sm.total) + ' đ', '');
+  L.push('', 'Cộng tiền hàng: ' + M(sm.gross) + (sm.disc ? '\nGiảm giá' + (rec.disc_mode === 'pct' ? ' (' + N(rec.disc_value) + '%)' : '') + ': −' + M(sm.disc) + '\nCộng sau giảm giá: ' + M(sm.sub) : ''), sm.groups.map(function (g) { return 'VAT ' + N(g.rate) + '%: ' + M(g.vat); }).join('\n'), 'TỔNG CỘNG: ' + M(sm.total) + ' đ', '');
   if (rec.valid_text) L.push('Hiệu lực: ' + rec.valid_text);
   if (rec.deliver_time) L.push('Giao hàng: ' + rec.deliver_time);
   if (rec.deliver_place) L.push('Địa điểm: ' + rec.deliver_place);
