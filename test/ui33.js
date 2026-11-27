@@ -19,7 +19,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
 
   console.log('— 3. Menu xếp theo dòng công việc');
   const nav = await E(`(()=>{const o=[];let g=null;document.querySelectorAll('#nav .grp, #nav a[data-k]').forEach(e=>{if(e.classList.contains('grp')){g={g:e.textContent,k:[]};o.push(g)}else if(g)g.k.push(e.dataset.k)});return o})()`);
-  const want = [['Tổng quan', ['dashboard']], ['Kinh doanh', ['customers', 'projects', 'pricelist', 'quotes', 'docs']], ['Mua hàng & Nhập khẩu', ['purchases', 'imports']], ['Kho & Giao hàng', ['stock', 'deliveries', 'certs', 'warranties']], ['Tài chính', ['costs', 'advances', 'payments']], ['Hệ thống', ['config']]];
+  const want = [['Tổng quan', ['tasks', 'dashboard']], ['Kinh doanh', ['customers', 'projects', 'pricelist', 'quotes', 'docs']], ['Mua hàng & Nhập khẩu', ['purchases', 'imports']], ['Kho & Giao hàng', ['stock', 'deliveries', 'certs', 'warranties']], ['Tài chính', ['costs', 'advances', 'payments']], ['Hệ thống', ['config']]];
   T('6 nhóm đúng thứ tự: Tổng quan · Kinh doanh · Mua hàng & Nhập khẩu · Kho & Giao hàng · Tài chính · Hệ thống', JSON.stringify(nav.map(x => [x.g, x.k])) === JSON.stringify(want), nav);
   await E(`document.querySelector('#nav').classList.add('open')`); await sleep(300);
   await pg.shot(SHOT + '/s33_1_menu.png');

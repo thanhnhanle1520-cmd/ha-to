@@ -37,6 +37,12 @@ function pnlView(rows) {
   return wrap;
 }
 
+/* ---- Công việc hằng ngày (bản 39): trang riêng, rộng hết màn hình ---- */
+PAGES.tasks = function () {
+  var view = $('#view'); view.innerHTML = '';
+  view.appendChild(taskPanel({ full: true }));
+  setTitle('Công việc hằng ngày');
+};
 PAGES.dashboard = function (p, q) {
   var f = { period: 'all', customer_id: '', project_id: '' }, view = $('#view');
   function range() {
@@ -50,10 +56,8 @@ PAGES.dashboard = function (p, q) {
     var r = range();
     return call('dashboard', { from: r.from, to: r.to, customer_id: f.customer_id, project_id: f.project_id }).then(draw);
   }
-  var taskBox = taskPanel({});
   function draw(d) {
-    view.innerHTML = '';
-    view.appendChild(taskBox);
+    view.innerHTML = '';     // bản 39: Dashboard chỉ còn báo cáo (công việc ở trang Công việc hằng ngày)
     view.appendChild(h('div', { class: 'bar2' },
       sel([['all', 'Tất cả'], ['month', 'Tháng này'], ['quarter', 'Quý này'], ['year', 'Năm nay']], f.period, function (e) { f.period = e.target.value; load(); }),
       sel(opt(S.customers), f.customer_id, function (e) { f.customer_id = e.target.value; f.project_id = ''; load(); }, 'Tất cả khách hàng'),

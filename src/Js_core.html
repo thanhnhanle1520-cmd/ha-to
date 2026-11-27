@@ -700,6 +700,7 @@ function attEditor(rows) {
 /* ================= Điều hướng ================= */
 /* Bộ icon nét (SVG tự vẽ trong app, không tải từ ngoài) — 24×24, nét theo màu chữ */
 var ICONS = {
+  tasks: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8l1.5 1.5L12 7M8 13l1.5 1.5L12 12M14 8h3M14 13h3M8 18h9"/>',
   dashboard: '<rect x="3" y="3" width="7" height="8" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="15" width="7" height="6" rx="1.5"/>',
   customers: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.8c1.9.6 3.1 2.4 3.5 5.2"/>',
   projects: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2.5h8.5A1.5 1.5 0 0 1 21 10v8.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>',
@@ -781,13 +782,14 @@ function menuBtn(label, items, attrs) {
 }
 /* Menu theo nhóm nghiệp vụ */
 var MENU_GROUPS = [     // bản 33: xếp theo dòng công việc: bán → mua → kho / giao → tiền
-  ['Tổng quan', [['dashboard', 'Dashboard']]],
+  ['Tổng quan', [['tasks', 'Công việc hằng ngày'], ['dashboard', 'Dashboard']]],     // bản 39: công việc có trang riêng, Dashboard chỉ báo cáo
   ['Kinh doanh', [['customers', 'Khách hàng'], ['projects', 'Dự án'], ['pricelist', 'Bảng giá'], ['quotes', 'Báo giá'], ['docs', 'HĐ / PO / Phụ lục HĐ']]],
   ['Mua hàng & Nhập khẩu', [['purchases', 'Mua hàng'], ['imports', 'Tờ khai nhập khẩu']]],
   ['Kho & Giao hàng', [['stock', 'Kho Nhập - Xuất - Tồn'], ['deliveries', 'Giao hàng'], ['certs', 'Xuất xưởng'], ['warranties', 'Bảo hành']]],
   ['Tài chính', [['costs', 'Chi phí dự án'], ['advances', 'Tạm ứng'], ['payments', 'Thanh toán']]],
   ['Hệ thống', [['config', 'Cấu hình']]]
 ];
+function permKey(k) { return k === 'tasks' ? 'dashboard' : k; }     // trang Công việc dùng chung quyền với Tổng quan
 var MENU = []; MENU_GROUPS.forEach(function (g) { g[1].forEach(function (m) { MENU.push([m[0], '', m[1]]); }); });
 function buildNav() {
   var nav = $('#nav'); nav.innerHTML = '';
@@ -795,7 +797,7 @@ function buildNav() {
   nav.classList.toggle('open', pinned);
   nav.appendChild(h('div', { class: 'logo', title: 'Ghim / thu gọn menu', onclick: function () { var o = nav.classList.toggle('open'); try { localStorage.setItem('navOpen', o ? '1' : '0'); } catch (e) { } var t = nav.querySelector('.navtg'); if (t) t.textContent = o ? '«' : '»'; } }, h('b', null, 'H'), h('span', { class: 'lb' }, 'HA TO ☰')));
   MENU_GROUPS.forEach(function (g, gi) {
-    var items = g[1].filter(function (m) { return S.perms[m[0]] && S.perms[m[0]].view; }); if (!items.length) return;
+    var items = g[1].filter(function (m) { return S.perms[permKey(m[0])] && S.perms[permKey(m[0])].view; }); if (!items.length) return;
     nav.appendChild(h('div', { class: 'grp' + (gi ? '' : ' first') }, g[0]));
     items.forEach(function (m) { nav.appendChild(h('a', { href: '#/' + m[0], 'data-k': m[0], title: m[1] }, icon(m[0]), h('span', { class: 'lb' }, m[1]))); });
     if (g[0] === 'Hệ thống') nav.appendChild(h('a', { id: 'draftnav', href: 'javascript:void(0)', title: 'Bản nháp chưa lưu', style: 'display:none', onclick: function () { draftsModal(); } }, icon('drafts'), h('span', { class: 'lb' }, 'Bản nháp')));
@@ -816,7 +818,7 @@ function backToList(def) { var h0 = S.lastList && S.lastList.length > 2 ? S.last
 function go(path) { location.hash = '#/' + path; }
 function route() {
   if (!S.user) return;
-  var r = parseHash(), p = r.path, page = p[0] || (S.perms.dashboard.view ? 'dashboard' : 'projects');
+  var r = parseHash(), p = r.path, page = p[0] || (S.perms.dashboard.view ? 'tasks' : 'projects');
   var k = page === 'quote' ? 'quotes' : page === 'customer' ? 'customers' : page === 'project' ? 'projects' : page === 'doc' ? 'docs' : page === 'delivery' ? 'deliveries' : page === 'purchase' || page === 'suppliers' ? 'purchases' : page === 'import' ? 'imports' : page === 'stockv' ? 'stock' : page;
   document.querySelectorAll('#nav a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-k') === k); });
   if (!/^(quote|doc|delivery)$/.test(page)) S.lastList = location.hash;
@@ -829,7 +831,7 @@ function route() {
   var old = $('#view'), v = old.cloneNode(false); v.id = 'view'; old.id = ''; if (keepH) v.style.minHeight = keepH + 'px'; old.parentNode.replaceChild(v, old);
   v.innerHTML = '<div class="mut" style="padding:20px">Đang tải…</div>';
   var fn = PAGES[page]; if (!fn) { v.textContent = 'Không có trang này.'; return; }
-  if (!S.perms[k] || !S.perms[k].view) { v.textContent = 'Bạn không có quyền xem mục này.'; return; }
+  if (!S.perms[permKey(k)] || !S.perms[permKey(k)].view) { v.textContent = 'Bạn không có quyền xem mục này.'; return; }
   TSEQ = 0;
   S.lastHash = location.hash;
   if (!same) { window.scrollTo(0, 0); $('#main').scrollTop = 0; }

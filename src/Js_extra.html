@@ -313,10 +313,10 @@ function paintReminders() {
   var c = { late: 0, today: 0, soon: 0 }, td = REM.td;
   REM.tasks.forEach(function (t) { var s = remState(t, td); if (s) { c[s]++; notify('Nhắc việc: ' + t.title, (s === 'late' ? 'Đã trễ hạn ' : 'Hạn ') + D(t.end_date || t.start_date), 'n:' + t.id + ':' + s + ':' + td); } });
   var n = c.late + c.today + c.soon, bar = document.getElementById('remind');
-  if (!bar) { bar = h('div', { id: 'remind', style: 'display:none;background:#fef3c7;color:#92400e;padding:6px 14px;border-bottom:1px solid #fcd34d;cursor:pointer;font-size:13px' }); var vw = document.getElementById('view'); vw.parentNode.insertBefore(bar, vw); bar.addEventListener('click', function (e) { if (e.target.tagName === 'B' && e.target.title) { REM.hide = true; bar.style.display = 'none'; } else go('dashboard'); }); }
+  if (!bar) { bar = h('div', { id: 'remind', style: 'display:none;background:#fef3c7;color:#92400e;padding:6px 14px;border-bottom:1px solid #fcd34d;cursor:pointer;font-size:13px' }); var vw = document.getElementById('view'); vw.parentNode.insertBefore(bar, vw); bar.addEventListener('click', function (e) { if (e.target.tagName === 'B' && e.target.title) { REM.hide = true; bar.style.display = 'none'; } else go('tasks'); }); }
   bar.innerHTML = ''; bar.append('🔔 ', [c.late ? c.late + ' việc trễ hạn' : '', c.today ? c.today + ' việc đến hạn hôm nay' : '', c.soon ? c.soon + ' việc sắp đến hạn' : ''].filter(Boolean).join(' · '), ' — bấm để xem ', h('b', { title: 'Ẩn', style: 'float:right;cursor:pointer' }, '✕'));
   bar.style.display = n && !REM.hide ? 'block' : 'none';
-  var a = document.querySelector('#nav a[data-k="dashboard"]'); if (a) { var b = a.querySelector('.cnt'); if (b) b.remove(); if (n) a.append(h('span', { class: 'cnt', style: 'background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px' }, n)); }
+  var a = document.querySelector('#nav a[data-k="tasks"]'); if (a) { var b = a.querySelector('.cnt'); if (b) b.remove(); if (n) a.append(h('span', { class: 'cnt', style: 'background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px' }, n)); }
 }
 function remPopup() {
   var td = REM.td, items = REM.tasks.map(function (t) { return { t: t, s: remState(t, td) }; }).filter(function (x) { return x.s; });
@@ -325,7 +325,7 @@ function remPopup() {
   var lb = { late: ['b-bad', 'Trễ'], today: ['b-warn', 'Hôm nay'], soon: ['b-info', 'Sắp đến'] };
   modal({ title: '🔔 Nhắc việc — ' + items.length + ' việc cần chú ý', body: h('div', { class: 'tw' }, h('table', { class: 't' }, h('thead', null, h('tr', null, ['', 'Công việc', 'Dự án', 'Hạn'].map(function (x) { return h('th', null, x); }))),
     h('tbody', null, items.map(function (x) { return h('tr', null, h('td', null, h('span', { class: 'badge ' + lb[x.s][0] }, lb[x.s][1])), h('td', null, x.t.title), h('td', { class: 'mut' }, x.t.project || ''), h('td', null, D(x.t.end_date || x.t.start_date))); })))),
-    buttons: [{ label: 'Xem công việc', cls: 'pri', fn: function (close) { close(); go('dashboard'); } }], closeLabel: 'Đóng' });
+    buttons: [{ label: 'Xem công việc', cls: 'pri', fn: function (close) { close(); go('tasks'); } }], closeLabel: 'Đóng' });
 }
 function refreshReminders() { return raw('taskList', { open: 1 }, true).then(function (r) { REM.tasks = r.tasks || []; REM.td = r.today || today(); paintReminders(); if (!REM.popped) { REM.popped = true; remPopup(); } }).catch(function () { }); }
 function remTimeCheck_unused() {
@@ -421,7 +421,7 @@ function resetDataModal() {
         st.textContent = 'Đã xóa. Đang đồng bộ lên Drive…';
         return window.HatoStore && HatoStore.syncNow ? Promise.resolve(HatoStore.syncNow()).catch(function () { }) : null;
       }).then(function () {
-        close(); reloadLookups(); toast('Đã xóa: ' + msg.join(' · ')); go(S.perms.dashboard.view ? 'dashboard' : 'projects'); route();
+        close(); reloadLookups(); toast('Đã xóa: ' + msg.join(' · ')); go(S.perms.dashboard.view ? 'tasks' : 'projects'); route();
       }, function (e) { st.textContent = ''; toast('Không xóa: ' + ((e && e.message) || e), true); });
     } }] });
   });

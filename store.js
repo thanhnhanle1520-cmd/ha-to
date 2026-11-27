@@ -259,17 +259,21 @@
   }
 
 
-  var pushing = Promise.resolve(), pushTimer = null;
+  var pushing = Promise.resolve(), pushTimer = null, queued = false;
+  var PUSH_MS = 300, POLL_MS = 10000;     // bản 39: lưu xong gửi lên Drive sau 0,3 giây; đang mở app thì 10 giây hỏi Drive một lần
   wb.onChange = function (n) { meta.dirty[n] = 1; };
   function afterApi() {                                // gọi sau mỗi lần chạy api()
     var names = Object.keys(wb.dirty); if (!names.length) return;
     wb.dirty = {}; names.forEach(function (n) { meta.dirty[n] = 1; });
     persistLocal(names).catch(function () { }); drawChip();
-    clearTimeout(pushTimer); pushTimer = setTimeout(function () { syncNow(); }, 1500);
+    clearTimeout(pushTimer); pushTimer = setTimeout(function () { syncNow(); }, PUSH_MS);
   }
   function syncNow() {
     if (passive) return Promise.resolve();
-    pushing = pushing.then(doSync, doSync); return pushing;
+    if (queued) return pushing;                         // đã có một lượt đang chờ chạy → không xếp thêm
+    queued = true;
+    var go = function () { queued = false; return doSync(); };
+    pushing = pushing.then(go, go); return pushing;
   }
   /* ---------- Gộp dữ liệu 3 bên: bản nền (lần đồng bộ trước) · máy này · Drive ----------
      Hai thiết bị sửa khác dòng → gộp, không báo xung đột. Cùng một dòng bị sửa khác nhau → bản có updated_at mới hơn thắng.
@@ -315,7 +319,7 @@
   function doSync(attempt) {
     attempt = typeof attempt === 'number' ? attempt : 0;
     if (state.conflict) return Promise.resolve();
-    var ts = Date.now(); setState({ phase: 'syncing' });
+    var ts = Date.now(); if (Object.keys(meta.dirty).length) setState({ phase: 'syncing' });     // hỏi Drive định kỳ không làm nhấp nháy biểu tượng
     var merged = [], pulled = false, bad = [], pushed = [], got = [];
     return signIn(false).then(function () { return Drive.init(); }).then(function () { return Drive.list(); }).then(function (remote) {
       var tasks = [];
@@ -328,6 +332,8 @@
       return seq(tasks, function (t) {
         return readChecked(t.n, t.x.id).then(function (p) {
           if (t.n === TOMB) { tombUnion(p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; return IDB.set('meta', clone(meta)); }
+          var dirtyNow = !!(meta.dirty[t.n] || (wb.dirty && wb.dirty[t.n]));     // bản 39: xét lại lúc dữ liệu về — người dùng có thể vừa lưu trong lúc đang tải từ Drive
+          if (dirtyNow && !t.merge) { t.merge = true; logEv('merge', t.n + ': có thay đổi mới trong lúc đang tải từ Drive → gộp, không ghi đè'); }
           if (!t.merge) { applyPayload(t.n, p); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; got.push(t.n); return saveBase(t.n, p).then(function () { return persistLocal([t.n]); }); }
           if (t.n === '_props') { wb.props = Object.assign({}, p.props || {}, wb.props || {}); meta.versions[t.n] = { id: t.x.id, version: t.x.version }; pulled = true; return persistLocal([t.n]); }
           return IDB.get('base:' + t.n).then(function (b) {
@@ -338,7 +344,7 @@
         }, function (e) { bad.push(t.n); logEv('error', t.n + '.json trên Drive ' + e.message + ' — giữ dữ liệu máy này, không ghi đè'); });
       });
     }).then(function () {
-      if (pulled) { env.resetCache(); try { if (typeof softRefresh === 'function') softRefresh(); } catch (e) { } }
+      if (pulled) { env.resetCache(); try { if (typeof refreshIfPageChanged === 'function') refreshIfPageChanged(); else if (typeof softRefresh === 'function') softRefresh(); if (window.refreshReminders) refreshReminders(); } catch (e) { } }     // bản 39: hỏi lại dữ liệu trang đang xem (không dùng bản nhớ cũ)
       return tombDetect(Object.keys(meta.dirty));
     }).then(function () {          // dòng đã xóa (ở đâu đó) mà máy này vẫn còn (tab cũ, máy cũ) → bỏ trước khi gửi
       var fixed = [];
@@ -352,8 +358,9 @@
       var names = Object.keys(meta.dirty).filter(function (n) { return (n === '_props' || n === TOMB || wb.sheets[n]) && bad.indexOf(n) < 0; });
       names.sort(function (a, b) { return (b === TOMB) - (a === TOMB); });              // gửi danh sách đã xóa trước   // bảng có tệp lỗi: không ghi đè, chờ xử lý
       return seq(names, function (n) {
-        var k = meta.versions[n], pl = sheetPayload(n);
+        var k = meta.versions[n], pl;
         return (n !== '_props' && n !== TOMB && merged.indexOf(n) < 0 && k && k.id ? IDB.get('base:' + n) : Promise.resolve(null)).then(function (b) {
+          pl = sheetPayload(n);                                                              // bản 39: chụp dữ liệu ngay lúc gửi (không phải trước khi đọc bản nền)
           if (b && JSON.stringify(b.rows) === JSON.stringify(pl.rows)) { delete meta.dirty[n]; return IDB.set('meta', clone(meta)); }   // giống bản đã đồng bộ → khỏi ghi lên Drive
           meta.dirty[n] = 2;                                                                  // đang gửi; nếu trong lúc gửi có sửa thêm thì onChange đặt lại = 1
           return (k && k.id ? Drive.version(k.id) : Promise.resolve(null)).then(function (v) {
@@ -553,7 +560,8 @@
     window.__redirecting = true;
     return new Promise(function (res) { var r = indexedDB.deleteDatabase(DBN); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }).then(function () { location.replace(location.pathname + location.search); });
   }
-  setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, 60000);     // tự lấy thay đổi từ thiết bị khác
+  setInterval(function () { if (isReady && document.visibilityState === 'visible' && !LOCAL) syncNow(); }, POLL_MS);     // tự lấy thay đổi từ thiết bị khác (bản 39: 10 giây)
+  window.addEventListener('focus', function () { if (isReady && !LOCAL) syncNow(); });
   function flushHidden() { if (!isReady) return; clearTimeout(pushTimer); if (Object.keys(meta.dirty || {}).length) syncNow(); }
   document.addEventListener('visibilitychange', function () { if (!isReady) return; if (document.visibilityState === 'visible') syncNow(); else flushHidden(); });
   window.addEventListener('pagehide', flushHidden);
