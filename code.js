@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.28.0';
+const APP_VERSION = '1.29.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -384,18 +384,26 @@ function usedCodes_(pre) {        // mã chứng từ đang dùng (mọi bảng 
   var u = {}; Object.keys(TABLES).forEach(function (n) { if (TABLES[n].indexOf('code') < 0 || n === 'COUNTERS') return; try { readTable_(n).forEach(function (r) { var c = String(r.code || ''); if (c.indexOf(pre) === 0) u[c] = 1; }); } catch (e) { } });
   return u;
 }
+/* Mã chứng từ (bản 36): Loại + Năm Tháng + số thứ tự, vd BG2611-003 (năm 26, tháng 11, số 003). Số chạy lại mỗi tháng.
+   Mã không theo năm (KH-001, NCC-001) giữ kiểu cũ. Mã cũ (BG-2026-002) giữ nguyên, chỉ chứng từ mới dùng kiểu này. */
+function yymm_() { var d = today_(); return d.slice(2, 4) + d.slice(5, 7); }
 function nextCode_(prefix, withYear) {
-  var key = withYear ? prefix + '-' + year_() : prefix;
+  var key = withYear ? prefix + yymm_() : prefix;
   var t = ss_().getSheetByName('COUNTERS'), last = t.getLastRow(), rowNo = 0, cur = 0;
   if (last >= 2) {
     var vals = t.getRange(2, 1, last - 1, 2).getValues();
     for (var i = 0; i < vals.length; i++) if (String(vals[i][0]) === key) { rowNo = i + 2; cur = num_(vals[i][1]); break; }
   }
   cur++;
-  var fmt = function (n) { return withYear ? prefix + '-' + year_() + '-' + pad_(n, 3) : prefix + '-' + pad_(n, 3); }, used = usedCodes_(key + '-');
+  var fmt = function (n) { return key + '-' + pad_(n, 3); }, used = usedCodes_(key + '-');
   while (used[fmt(cur)]) cur++;           // bỏ qua mã đã có (dữ liệu cũ quay lại, bộ đếm bị đặt lại…) → không cấp trùng
   if (rowNo) t.getRange(rowNo, 2).setValue(cur); else { ensureRows_(t, last + 1); t.getRange(last + 1, 1, 1, 2).setValues([[key, cur]]); }
-  return withYear ? prefix + '-' + year_() + '-' + pad_(cur, 3) : prefix + '-' + pad_(cur, 3);
+  return fmt(cur);
+}
+/* Số báo giá in ra: mã mới thêm đuôi sửa đổi .R1, .R2 (bản 1 không có đuôi); mã cũ giữ kiểu cũ "V2" */
+function quoteNo_(q) {
+  var v = num_(q.version) || 1, c = String(q.code || '');
+  return /^[A-Z]+\d{4}-\d+$/.test(c) ? c + (v > 1 ? '.R' + (v - 1) : '') : c + 'V' + v;
 }
 
 // ---------- Người dùng & quyền ----------
@@ -2821,7 +2829,7 @@ ACTIONS.stockVoucherSave = function (u, p) {
       return { id: x.id || newId_('PKI'), voucher_id: out.id, line_no: i + 1, item_code: c, name: k.name, unit: k.unit, qty: num_(x.qty), cost: STK_IN[out.kind] || out.kind === 'KIEM_KE' ? num_(x.cost) : 0, book_qty: out.kind === 'KIEM_KE' ? num_(x.book_qty) : 0, lot_key: '', note: String(x.note || '') };
     });
     if (!recs.length) throw new Error('Phiếu chưa có dòng hàng.');
-    if (isNew) out.code = nextCode_('PK', true);
+    if (isNew) out.code = nextCode_(STK_IN[out.kind] ? 'PN' : out.kind === 'KIEM_KE' ? 'KK' : 'PX', true);
     upsert_('STOCK_VOUCHERS', out);
     replaceChildren_('STOCK_VOUCHER_ITEMS', 'voucher_id', out.id, recs);
     audit_(u, isNew ? 'Tạo' : 'Sửa', 'STOCK_VOUCHERS', out.id, '', out.code + ' · ' + STK_KIND[out.kind] + ' · ' + recs.length + ' dòng');
@@ -2895,7 +2903,7 @@ ACTIONS.stockForDoc = function (u, p) {
 // Client sao lưu toàn bộ lên Drive TRƯỚC khi gọi. Bảng USERS không bao giờ xóa.
 var RESET_GROUPS = {
   projects: { label: 'Dự án và giao dịch (báo giá, HĐ / PO / Phụ lục, giao hàng, xuất xưởng, bảo hành, chi phí, tạm ứng, thanh toán, tệp đính kèm)', tables: ['PROJECTS', 'QUOTES', 'QUOTE_ITEMS', 'DOCS', 'DOC_ITEMS', 'DELIVERIES', 'DELIVERY_ITEMS', 'COSTS', 'ADVANCES', 'PAYMENTS', 'WARRANTIES', 'CERTS', 'FILES', 'RFQS'], counters: true },
-  purchases: { label: 'Mua hàng và kho (đơn mua, đợt hàng về, tờ khai nhập khẩu, phiếu kho, khóa sổ)', tables: ['PURCHASES', 'PURCHASE_ITEMS', 'RECEIPTS', 'RECEIPT_ITEMS', 'IMPORT_DECLS', 'IMPORT_DECL_ITEMS', 'IMPORT_ALLOCS', 'ITEM_ALIAS', 'STOCK_VOUCHERS', 'STOCK_VOUCHER_ITEMS', 'STOCK_PICKS', 'STOCK_CLOSES'], prefixes: ['DM', 'NH', 'TK', 'PK'] },
+  purchases: { label: 'Mua hàng và kho (đơn mua, đợt hàng về, tờ khai nhập khẩu, phiếu kho, khóa sổ)', tables: ['PURCHASES', 'PURCHASE_ITEMS', 'RECEIPTS', 'RECEIPT_ITEMS', 'IMPORT_DECLS', 'IMPORT_DECL_ITEMS', 'IMPORT_ALLOCS', 'ITEM_ALIAS', 'STOCK_VOUCHERS', 'STOCK_VOUCHER_ITEMS', 'STOCK_PICKS', 'STOCK_CLOSES'], prefixes: ['DM', 'NH', 'TK', 'PK', 'PN', 'PX', 'KK'] },
   customers: { label: 'Khách hàng', tables: ['CUSTOMERS'], prefixes: ['KH'] },
   suppliers: { label: 'Nhà cung cấp', tables: ['SUPPLIERS'], prefixes: ['NCC'] },
   tasks: { label: 'Công việc, nhật ký thao tác, nhật ký lỗi', tables: ['TASKS', 'AUDIT', 'ERRLOG'] },
@@ -3038,8 +3046,8 @@ ACTIONS.renumberCode = function (u, p) {      // cấp mã mới cho một dòng
   return withLock_(function () {
     RT = { user: RT.user, ss: RT.ss };
     var rec = readTable_(p.table).filter(function (x) { return x.id === p.id; })[0]; if (!rec) throw new Error('Không tìm thấy dòng.');
-    var old = String(rec.code || ''), seg = old.split('-'), withYear = seg.length >= 3 && /^\d{4}$/.test(seg[1]);
-    var nc = nextCode_(seg[0], withYear);
+    var old = String(rec.code || ''), seg = old.split('-'), mNew = /^([A-Z]+)\d{4}-\d+$/.exec(old), withYear = !!mNew || (seg.length >= 3 && /^\d{4}$/.test(seg[1]));
+    var nc = nextCode_(mNew ? mNew[1] : seg[0], withYear);
     var rows = p.table === 'QUOTES' ? readTable_('QUOTES').filter(function (q) { return q.code === old && q.project_id === rec.project_id; }) : [rec];
     rows.forEach(function (r) { upsert_(p.table, Object.assign({}, r, { code: nc, updated_at: now_() })); });
     if (p.table === 'DOCS') readTable_('QUOTES').forEach(function (q) { if (q.project_id === rec.project_id && (', ' + (q.converted_to || '') + ',').indexOf(', ' + old + ',') >= 0) upsert_('QUOTES', Object.assign({}, q, { converted_to: (', ' + q.converted_to + ',').replace(', ' + old + ',', ', ' + nc + ',').slice(2, -1) })); });
@@ -3070,7 +3078,7 @@ ACTIONS.resetData = function (u, p) {
     var ct = ss.getSheetByName('COUNTERS');
     if (ct && ct.getLastRow() >= 2) {
       var vals = ct.getRange(2, 1, ct.getLastRow() - 1, 2).getValues();
-      var keep = vals.filter(function (r) { var pre = String(r[0]).split('-')[0]; return r[0] !== '' && (on.projects ? keepP[pre] : !on.purchases || ['DM', 'NH'].indexOf(pre) < 0) && !(on.customers && pre === 'KH') && !(on.suppliers && pre === 'NCC'); });
+      var keep = vals.filter(function (r) { var pre = String(r[0]).split('-')[0].replace(/\d+$/, ''); /* BG-2026 → BG, BG2611 → BG */ return r[0] !== '' && (on.projects ? keepP[pre] : !on.purchases || ['DM', 'NH'].indexOf(pre) < 0) && !(on.customers && pre === 'KH') && !(on.suppliers && pre === 'NCC'); });
       ct.getRange(2, 1, vals.length, 2).clearContent();
       if (keep.length) ct.getRange(2, 1, keep.length, 2).setValues(keep);
       try { if (vals.length > keep.length) ct.deleteRows(2 + keep.length, vals.length - keep.length); } catch (e) { }
@@ -3124,11 +3132,17 @@ function moneyWords_(n) {
 }
 var FONT_ = '"Times New Roman",Times,serif';
 var BASE_CSS = '*{font-family:"Times New Roman",Times,serif}body,h1,h2,h3,p,div,span,table,th,td,b,i,u{font-family:"Times New Roman",Times,serif}body{font-size:13px;color:#000}h1{font-size:20px;text-align:center;margin:14px 0 4px}h2{font-size:15px;margin:10px 0 4px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:4px 5px;vertical-align:top;word-break:break-word}th{background:#fff}td.r{text-align:right}td.c,th.c{text-align:center}.nb td{border:none;padding:2px 4px}.sig{width:100%;margin-top:18px}.sig td{border:none;text-align:center;width:50%}.hd{width:100%}.hd td{border:none;vertical-align:top}.small{font-size:11px}';
-function letterhead_(big) {     // big (báo giá bản 35): tên công ty 14pt, địa chỉ 10,5pt
+function letterhead_(big) {     // big (báo giá bản 36): logo + thông tin công ty 1 hàng, chữ canh trái, kẻ mảnh bên dưới
   var img = images_('logo'), c = cfg_(), col = '#3a4a5c';
   var l2 = [c.phone ? 'ĐT: ' + esc_(c.phone) : '', c.tax_code ? 'MST: ' + esc_(c.tax_code) : '', c.website ? esc_(c.website) : ''].filter(Boolean).join(' &nbsp;|&nbsp; ');
-  var txt = '<div style="font-size:' + (big ? '14pt' : '15px') + ';font-weight:bold;color:' + col + ';margin-bottom:5px">' + esc_(String(c.company_name || '').toUpperCase()) + '</div>' +
-    '<div style="font-size:' + (big ? '10.5pt' : '11px') + ';line-height:' + (big ? '1.5' : '1.7') + '">' + (c.address ? esc_(c.address) + '<br>' : '') + l2 + (c.email ? '<br>Email: ' + esc_(c.email) : '') + '</div>';
+  if (big) {
+    var tb = '<div class="lh1">' + esc_(String(c.company_name || '').toUpperCase()) + '</div>' +
+      '<div class="lh2">' + (c.address ? esc_(c.address) + '<br>' : '') + l2 + (c.email ? (l2 ? ' &nbsp;|&nbsp; ' : '') + 'Email: ' + esc_(c.email) : '') + '</div>';
+    return '<table class="hd lh" width="100%" cellspacing="0" cellpadding="0"><tr>' + (img ? '<td width="21%" valign="middle" style="vertical-align:middle"><img src="' + img + '" width="124" height="45" alt=""></td>' : '') +
+      '<td valign="middle" style="vertical-align:middle">' + tb + '</td></tr></table><hr class="lh">';
+  }
+  var txt = '<div style="font-size:15px;font-weight:bold;color:' + col + ';margin-bottom:5px">' + esc_(String(c.company_name || '').toUpperCase()) + '</div>' +
+    '<div style="font-size:11px;line-height:1.7">' + (c.address ? esc_(c.address) + '<br>' : '') + l2 + (c.email ? '<br>Email: ' + esc_(c.email) : '') + '</div>';
   return '<table class="hd" width="100%" cellspacing="0" cellpadding="2"><tr>' + (img ? '<td width="22%" valign="middle"><img src="' + img + '" width="130" height="47" alt=""></td>' : '') + '<td valign="middle" align="center" style="text-align:center">' + txt + '</td></tr></table><hr style="border:1px solid ' + col + ';margin:2px 0 8px">';
 }
 function nationalHead_() { return '<div style="text-align:center"><b>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</b><br><b>Độc lập - Tự do - Hạnh phúc</b><br>---------------</div>'; }
@@ -3169,10 +3183,13 @@ function wrapHtml_(title, body, landscape, plain, print, opt) {
   var sz = landscape ? '29.7cm 21cm' : '21cm 29.7cm';
   if (print) {     // xem trước / in từ trình duyệt: lề giấy = 0 (trình duyệt không còn chỗ in ngày giờ, tên file, đường dẫn); lề NĐ 30 tạo bằng nội dung, lặp lại ở mọi trang
     var W = landscape ? '297mm' : '210mm', H = landscape ? '210mm' : '297mm';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC +
+    // có chân trang (báo giá bản 36): khi in dùng lề giấy thật + ô chân trang "mã · Trang x/y" (trình duyệt không in thêm ngày giờ, đường dẫn khi trang có ô lề riêng)
+    var FT = opt.footer ? '@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + MG + ';@bottom-right{content:"' + String(opt.footer).replace(/["\\]/g, '') + ' · Trang " counter(page) "/" counter(pages);font-family:"Times New Roman",serif;font-size:9pt;color:#555;vertical-align:middle}}' +
+      '@media print{.sheet{padding:0!important}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td{height:0!important}}' : '';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>' + (FT ? '' : '@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}') + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC +
       'html,body{margin:0;padding:0}body{background:#8a8f98}.sheet{width:' + W + ';min-height:' + H + ';box-sizing:border-box;margin:12px auto;padding:0 ' + mg[1] + 'mm 0 ' + mg[3] + 'mm;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}' +
       'table.pgw{width:100%;border-collapse:collapse}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td,table.pgw>tbody>tr>td{border:none;padding:0}table.pgw>thead>tr>td{height:' + mg[0] + 'mm}table.pgw>tfoot>tr>td{height:' + mg[2] + 'mm}' +
-      '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
+      '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}' + FT + '</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
   }
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + MG + '}' +
     '@page WordSection1{size:' + sz + ';' + (landscape ? 'mso-page-orientation:landscape;' : '') + 'margin:' + MG + '}div.WordSection1{page:WordSection1}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC + '</style></head><body><div class="WordSection1">' + body + '</div></body></html>';
@@ -3182,19 +3199,23 @@ function projectCtx_(pid, cid) {
   var cu = readTable_('CUSTOMERS').filter(function (x) { return x.id === (cid || pr.customer_id); })[0] || {};
   return { pr: pr, cu: cu };
 }
-/* Mẫu báo giá (bản 35): bỏ CK% — đơn giá in ra là giá sau chiết khấu; chữ to, dòng giãn đều; lề trái 20 · phải 15 · trên/dưới 15 mm */
-var QUOTE_MARGIN_ = [15, 15, 15, 20];
-var QUOTE_CSS_ = '.bq p,.bq td,.bq th,.bq div,.bq span{font-size:12pt;line-height:1.3}.bq h1{font-size:18pt;margin:10pt 0 2pt;text-align:center}.bq p{margin:0 0 6pt}.bq p.no{text-align:center;margin:0 0 12pt}' +
-  '.bq table.it th,.bq table.it td{font-size:11.5pt;padding:5pt;vertical-align:middle;border:1px solid #000}.bq table.it th{background:#eef1f5;font-weight:bold;text-align:center}.bq table.it td.tot{text-align:right}' +
-  '.bq table.inf td,.bq table.tm td{border:none;padding:2pt 4pt;vertical-align:top}.bq table.inf td.k{font-weight:bold;white-space:nowrap}.bq p.sec{font-weight:bold;margin:12pt 0 4pt}.bq p.bank,.bq p.bank b{font-size:11pt}' +
-  '.bq table.sig td{border:none;text-align:center;vertical-align:top;font-size:12pt}.bq table.sig i{font-size:11pt}.bq .gap{height:8pt}';
+/* Mẫu báo giá (bản 36): lề trên 12 · phải 12 · dưới 12 · trái 15 mm; giãn dòng 1,15; các phần cách nhau 6pt;
+   bảng hàng chữ 11pt, ô đệm 3pt, căn giữa dọc; chân trang "mã · Trang x/y". Mục tiêu 5–8 dòng hàng vừa 1 trang. */
+var QUOTE_MARGIN_ = [12, 12, 12, 15];
+var QUOTE_CSS_ = '.bq p,.bq td,.bq th,.bq div,.bq span{font-size:12pt;line-height:1.15}.bq p{margin:0}.bq h1{font-size:17pt;line-height:1.15;margin:5pt 0 4pt;text-align:center;letter-spacing:1pt}' +
+  '.bq table.lh td{border:none;padding:0}.bq .lh1{font-size:13pt;font-weight:bold;color:#3a4a5c;margin:0 0 2pt}.bq .lh2,.bq .lh2 span{font-size:10pt;line-height:1.3;color:#333}.bq hr.lh{border:none;border-top:0.75pt solid #3a4a5c;margin:4pt 0 0;height:0}' +
+  '.bq table.it{margin-top:6pt}.bq table.it th,.bq table.it td{font-size:11pt;line-height:1.15;padding:3pt;vertical-align:middle;border:0.75pt solid #000}.bq table.it th{background:#eef1f5;font-weight:bold;text-align:center}.bq table.it td.tot{text-align:right}.bq table.it td.r,.bq table.it td.c{white-space:nowrap}' +
+  '.bq table.inf{margin-top:2pt}.bq table.inf td,.bq table.tm td{border:none;padding:0.5pt 3pt;vertical-align:top}.bq table.inf td.k{font-weight:bold;white-space:nowrap}.bq table.inf td.sp{width:4%}' +
+  '.bq p.sec{font-weight:bold;margin:6pt 0 2pt}.bq p.words{margin:3pt 0 0}.bq p.end{margin-top:6pt}.bq p.bank{margin-top:6pt}.bq p.bank,.bq p.bank b{font-size:11pt}' +
+  '.bq table.sig{margin-top:6pt}.bq table.sig td{border:none;text-align:center;vertical-align:top;font-size:12pt;padding:0}.bq table.sig i{font-size:11pt}';
 function lineTable_(rows, withPrice, tot) {
   var sp = rows.some(function (r) { return String(r.spec || '').trim(); }), mv = (tot.groups || []).length > 1;     // nhiều mức VAT → thêm cột VAT
   var nc = (sp ? 8 : 7) + (mv ? 1 : 0);
-  var h = '<table class="it" border="1" width="100%" cellspacing="0" cellpadding="6"><tr><th style="width:6%;white-space:nowrap">STT</th><th>Tên hàng hóa</th>' + (sp ? '<th style="width:14%">Quy cách</th>' : '') + '<th style="width:10%">Model</th><th style="width:10%">Hãng / Xuất xứ</th><th style="width:8%;white-space:nowrap">ĐVT</th><th style="width:6%">SL</th><th style="width:11%">Đơn giá</th>' + (mv ? '<th style="width:6%">VAT</th>' : '') + '<th style="width:13%">Thành tiền</th><th style="width:9%;white-space:nowrap">Ghi chú</th></tr>';
+  var W = sp ? { m: 9, b: 11.5, n: 9.5 } : { m: 10.5, b: 13, n: 11 };      // độ rộng cột (%) — Tên hàng lấy phần còn lại, rộng nhất
+  var h = '<table class="it" border="1" width="100%" cellspacing="0" cellpadding="4"><tr><th style="width:5%;white-space:nowrap">STT</th><th>Tên hàng hóa</th>' + (sp ? '<th style="width:12%">Quy cách</th>' : '') + '<th style="width:' + W.m + '%">Model</th><th style="width:' + W.b + '%">Hãng /<br>Xuất xứ</th><th style="width:6.5%;white-space:nowrap">ĐVT</th><th style="width:5.5%">SL</th><th style="width:11.5%">Đơn giá</th>' + (mv ? '<th style="width:5.5%">VAT</th>' : '') + '<th style="width:13%">Thành tiền</th><th style="width:' + W.n + '%;white-space:nowrap">Ghi chú</th></tr>';
   rows.forEach(function (r, i) {
     var d = num_(r.disc_pct), net = d ? Math.round(num_(r.price) * (1 - d / 100)) : num_(r.price);     // không in cột CK%: có chiết khấu thì in đơn giá sau chiết khấu
-    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + esc_([r.brand, r.origin].filter(Boolean).join(' - ')) + '</td><td class="c" style="white-space:nowrap">' + esc_(r.unit) + '</td><td class="c">' + qty_(r.qty) + '</td><td class="r">' + money_(net) + '</td>' + (mv ? '<td class="c">' + qty_(r.vat) + '%</td>' : '') + '<td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note || '') + '</td></tr>';
+    h += '<tr><td class="c">' + (i + 1) + '</td><td>' + esc_(r.name) + '</td>' + (sp ? '<td>' + esc_(r.spec) + '</td>' : '') + '<td>' + esc_(r.model) + '</td><td>' + [r.brand, r.origin].filter(Boolean).map(esc_).join(' /<br>') + '</td><td class="c" style="white-space:nowrap">' + esc_(r.unit) + '</td><td class="c">' + qty_(r.qty) + '</td><td class="r">' + money_(net) + '</td>' + (mv ? '<td class="c">' + qty_(r.vat) + '%</td>' : '') + '<td class="r">' + money_(r.amount) + '</td><td>' + esc_(r.note || '') + '</td></tr>';
   });
   var gs = (tot.groups && tot.groups.length ? tot.groups : [{ rate: tot.vat_pct, base: tot.sub, vat: tot.vat }]).map(function (g) { return ['Thuế GTGT ' + qty_(g.rate) + '%' + (mv ? ' (trên ' + money_(g.base) + ')' : ''), g.vat, 0]; });
   [['Cộng tiền hàng', tot.sub, 0]].concat(gs, [['Tổng thanh toán', tot.total, 1]]).forEach(function (x) {
@@ -3278,23 +3299,31 @@ function buildExport_(u, p) {
     var q = readTable_('QUOTES').filter(function (x) { return x.id === id; })[0]; if (!q) throw new Error('Không tìm thấy báo giá.');
     var items = readTable_('QUOTE_ITEMS').filter(function (x) { return x.quote_id === id; }).sort(byLine_), t = quoteTotals_(q, items), pc = projectCtx_(q.project_id, custOfQuote_(q));
     var rows = items.map(function (i) { return Object.assign({}, i, { amount: lineAmt_(i.qty, i.price, i.disc_pct), vat: lineVat_(i, q) }); });
-    title = 'Báo giá ' + q.code + ' v' + q.version; fname = 'BaoGia_' + q.code + '_v' + q.version;
+    var qno = quoteNo_(q);
+    title = 'Báo giá ' + qno; fname = 'BaoGia_' + qno.replace(/[^A-Za-z0-9.-]/g, '_');
     var vt = q.valid_text != null && q.valid_text !== '' ? String(q.valid_text) : (num_(q.valid_days) || 30) + ' ngày kể từ ngày báo giá';
     var sender = readTable_('USERS').filter(function (x) { return String(x.email).toLowerCase() === String(q.created_by || '').toLowerCase(); })[0] || {};
     var sName = sender.name || (q.created_by === u.email ? u.name : '') || q.created_by || '', sPhone = sender.phone || '';
     var cName = q.contact_name || pc.pr.rep_name || pc.cu.contact || '', cPhone = q.contact_phone || pc.pr.rep_phone || pc.cu.phone || '', cMail = q.contact_email || pc.cu.email || '';
-    var term = function (k, v) { return '<tr><td width="32%">' + k + '</td><td>' + (v ? esc_(v) : '&nbsp;') + '</td></tr>'; };
-    var kv = function (k1, v1, k2, v2) { return '<tr><td class="k" width="17%">' + k1 + '</td><td width="47%">' + (v1 ? esc_(v1) : '') + '</td><td class="k" width="15%">' + (k2 || '') + '</td><td width="21%">' + (v2 ? esc_(v2) : '') + '</td></tr>'; };
-    body = '<div class="bq">' + letterhead_(true) + '<h1>BÁO GIÁ</h1><p class="no">Số: ' + esc_(q.code) + 'V' + esc_(q.version) + ' - ' + esc_(viDateLong_(q.date)) + '</p>' +
-      '<table class="inf" width="100%" cellspacing="0" cellpadding="3">' + kv('Khách hàng:', pc.cu.name || '', 'Người gửi:', sName) + kv('Người nhận:', cName, 'Điện thoại:', sPhone) + kv('Điện thoại:', cPhone) + kv('Email:', cMail) + kv('Công trình:', pc.pr.name || '') + '</table>' +
-      '<p class="gap"></p>' + lineTable_(rows, 2, { sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
-      '<p style="margin-top:6pt"><i>Bằng chữ: ' + esc_(moneyWords_(t.total)) + '</i></p>' +
-      '<p class="sec">Điều khoản và điều kiện:</p><table class="tm" width="100%" cellspacing="0" cellpadding="3">' + term('Bảo hành', q.warranty_text) + term('Địa điểm giao hàng', q.deliver_place) + term('Thời gian giao hàng', q.deliver_time) + term('Phương thức thanh toán', q.pay_method) + term('Hiệu lực báo giá', vt) + '</table>' +
+    var term = function (k, v) { return '<tr><td width="30%">' + k + '</td><td>' + (v ? esc_(v) : '&nbsp;') + '</td></tr>'; };
+    // thông tin 2 cột: trái = khách hàng, công trình; phải = số báo giá, ngày, người gửi
+    var L = [['Khách hàng:', pc.cu.name || ''], ['Người nhận:', cName], ['Điện thoại:', cPhone], ['Email:', cMail], ['Công trình:', pc.pr.name || '']].filter(function (x, i) { return i < 2 || i === 4 || x[1]; });
+    var R = [['Số báo giá:', qno], ['Ngày:', viDate_(q.date)], ['Người gửi:', sName], ['Điện thoại:', sPhone]].filter(function (x, i) { return i < 3 || x[1]; });
+    var inf = '';
+    for (var ri = 0; ri < Math.max(L.length, R.length); ri++) {
+      var a1 = L[ri] || ['', ''], b1 = R[ri] || ['', ''];
+      inf += '<tr><td class="k" width="15%">' + a1[0] + '</td><td width="46%">' + (a1[0] === 'Khách hàng:' ? '<b>' + esc_(a1[1]) + '</b>' : esc_(a1[1])) + '</td><td class="sp"></td><td class="k" width="13%">' + b1[0] + '</td><td>' + (b1[0] === 'Số báo giá:' ? '<b>' + esc_(b1[1]) + '</b>' : esc_(b1[1])) + '</td></tr>';
+    }
+    body = '<div class="bq">' + letterhead_(true) + '<h1>BÁO GIÁ</h1>' +
+      '<table class="inf" width="100%" cellspacing="0" cellpadding="2">' + inf + '</table>' +
+      lineTable_(rows, 2, { sub: t.sub, vat: t.vat, total: t.total, vat_pct: q.vat_pct, groups: t.groups }) +
+      '<p class="words"><i>Bằng chữ: ' + esc_(moneyWords_(t.total)) + '</i></p>' +
+      '<p class="sec">Điều khoản và điều kiện:</p><table class="tm" width="100%" cellspacing="0" cellpadding="2">' + term('Bảo hành', q.warranty_text) + term('Địa điểm giao hàng', q.deliver_place) + term('Thời gian giao hàng', q.deliver_time) + term('Phương thức thanh toán', q.pay_method) + term('Hiệu lực báo giá', vt) + '</table>' +
       (q.note ? '<p class="sec">Ghi chú:</p><p>' + esc_(q.note) + '</p>' : '') +
-      '<p class="gap"></p><p>Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
+      '<p class="end">Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
       bankBlock_().replace('<p class="small">', '<p class="bank">') +
-      '<table class="sig" width="100%" cellspacing="0" cellpadding="3"><tr><td width="50%"><b>KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></td><td width="50%"><b>XÁC NHẬN BÁO GIÁ</b><br><i>(Ký, ghi rõ họ tên)</i></td></tr><tr><td style="height:25mm">&nbsp;</td><td style="height:25mm">&nbsp;</td></tr></table></div>';
-    opt = { margin: QUOTE_MARGIN_, css: QUOTE_CSS_ };
+      '<table class="sig" width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%"><b>KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></td><td width="50%"><b>XÁC NHẬN BÁO GIÁ</b><br><i>(Ký, ghi rõ họ tên)</i></td></tr><tr><td style="height:18mm">&nbsp;</td><td style="height:18mm">&nbsp;</td></tr></table></div>';
+    opt = { margin: QUOTE_MARGIN_, css: QUOTE_CSS_, footer: qno };
     landscape = false;
   } else if (kind === 'hd') {
     need_(u, 'docs', 'view');
@@ -3402,6 +3431,9 @@ ACTIONS.export = function (u, p) {
   else if (fmt === 'xls') blob = Utilities.newBlob(html, 'application/vnd.ms-excel', r.fname + '.xls');
   else blob = Utilities.newBlob(html, 'application/msword', r.fname + '.doc');
   var out = { name: blob.getName(), mime: blob.getContentType(), base64: Utilities.base64Encode(blob.getBytes()) };
+  if (fmt === 'doc') {     // bản 36: trình duyệt dựng file .docx thật từ bản HTML này (logo, chữ ký nằm trong file, không sinh thư mục "_files")
+    var po = r.opt || {}; out.docx = { name: r.fname + '.docx', html: html, margin: po.margin || [20, 15, 20, 30], landscape: !!r.landscape, footer: po.footer || '' };
+  }
   if (p.drive) {   // lưu thêm vào Drive để luôn có file mở lại được (trình duyệt có thể chặn tải xuống trong khung ứng dụng)
     try { var f = exportFolder_().createFile(blob); out.url = f.getUrl(); } catch (e) { logError_('export', 'Lưu Drive: ' + String((e && e.message) || e)); }
   }

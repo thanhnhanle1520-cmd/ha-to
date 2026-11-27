@@ -15,7 +15,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   console.log('— Tạo PO mới'); await E('reloadLookups()');
   await E(`MEMO={};location.hash='#/doc/new?project=${pj.id}&type=PO'`); await sleep(2000);
   const sm = await E(`(()=>{const d=document.querySelector('details.pobox');return d?[d.open,d.querySelector('summary').textContent,d.textContent]:null})()`);
-  T('có khối "Lấy dòng hàng từ HĐ", mở sẵn khi tạo PO mới', sm && sm[0] && /Lấy dòng hàng từ HD-/.test(sm[1]) && /2 dòng còn lại/.test(sm[1]), sm);
+  T('có khối "Lấy dòng hàng từ HĐ", mở sẵn khi tạo PO mới', sm && sm[0] && /Lấy dòng hàng từ HD\d{4}-/.test(sm[1]) && /2 dòng còn lại/.test(sm[1]), sm);
   const rows = await E(`[...document.querySelectorAll('details.pobox tbody tr')].map(tr=>[...tr.children].map(td=>td.querySelector('input[type=number]')?td.querySelector('input').value:td.textContent))`);
   T('bình: HĐ 10, đã ở PO khác 4, còn lại 6, mặc định đưa 6', rows[0][3] === '10' && rows[0][4] === '4' && rows[0][6] === '6' && rows[0][7] === '6', rows[0]);
   T('tủ: còn lại 5', rows[1][6] === '5' && rows[1][7] === '5', rows[1]);

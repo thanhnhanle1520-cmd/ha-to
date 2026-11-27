@@ -169,7 +169,7 @@ PAGES.quote = function (p, q) {
       var rec = Object.assign({}, qt, pf.get());
       return safe(call('save', { table: 'quotes', rec: rec, items: lines })).then(function (r) { if (r) { if (S.draftCtl) S.draftCtl.clear(); var wn = quoteIssues(r.quote, lines).length; reloadLookups(); toast('Đã lưu báo giá ' + r.quote.code + (wn ? ' — còn ' + wn + ' điểm cần xem lại (bấm Kiểm tra)' : '')); after ? after(r.quote) : backToList('quotes'); } });
     }
-    var title = isNew ? 'Báo giá mới' : qt.code + ' · v' + qt.version;
+    var title = isNew ? 'Báo giá mới' : qNo(qt);
     var acts = [];
     if (!isNew) acts.push(exportMenu('quote', qt.id));
     acts.push(h('button', { onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá nhanh'));

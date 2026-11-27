@@ -21,6 +21,8 @@ function P(x) { return (Math.round((Number(x) || 0) * 1000) / 10).toLocaleString
 function D(s) { s = String(s || '').slice(0, 10); if (!s) return ''; var a = s.split('-'); return a.length === 3 ? a[2] + '/' + a[1] + '/' + a[0] : s; }
 function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+/* Số báo giá kèm lần sửa (bản 36): mã mới BG2611-003 → BG2611-003.R1, .R2…; mã cũ BG-2026-002 → "BG-2026-002 v2" */
+function qNo(q) { var v = +q.version || 1, c = String(q.code || ''); return /^[A-Z]+\d{4}-\d+$/.test(c) ? c + (v > 1 ? '.R' + (v - 1) : '') : c + (v > 1 ? ' v' + v : ''); }
 function strip(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd'); }
 function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
 function by(arr, k) { var m = {}; (arr || []).forEach(function (x) { m[x[k]] = x; }); return m; }
@@ -138,7 +140,7 @@ function exportDone(r) {          // báo kết quả xuất file: có liên k�
 }
 function doExport(kind, id, format) {
   if (format === 'pdf') return previewExport(kind, id);     // PDF: xem trước ngay trên màn hình, rồi in hoặc tải
-  return safe(call('export', { kind: kind, id: id, format: format, drive: 1 })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
+  return safe(call('export', { kind: kind, id: id, format: format, drive: 1 }).then(function (r) { return window.DocxWrite ? DocxWrite.convert(r) : r; })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
 }
 function previewExport(kind, id) {
   return safe(call('export', { kind: kind, id: id, format: 'html' })).then(function (r) {
@@ -173,7 +175,7 @@ function bulkExport(kind, ids, fmt, base) {
   function step() {
     if (i >= ids.length) return Promise.resolve();
     var id = ids[i++]; st.textContent = 'Đang xuất ' + i + '/' + ids.length + '…';
-    return raw('export', { kind: kind, id: id, format: fmt === 'pdf' ? 'html' : fmt }, true).then(function (r) { out.push(r); }, function (e) { errs.push((e && e.message) || String(e)); }).then(step);
+    return raw('export', { kind: kind, id: id, format: fmt === 'pdf' ? 'html' : fmt }, true).then(function (r) { return fmt === 'doc' && window.DocxWrite ? DocxWrite.convert(r) : r; }).then(function (r) { out.push(r); }, function (e) { errs.push((e && e.message) || String(e)); }).then(step);
   }
   return step().then(function () {
     busy(-1); st.remove();
@@ -207,6 +209,7 @@ function mergePrintHtml(list) {
   var END = '</bo' + 'dy>';      // không viết liền thẻ đóng body: build.py chèn script vào thẻ đóng body đầu tiên của trang
   var body = function (s) { var a = s.indexOf('<body'), b = s.lastIndexOf(END); return a < 0 ? s : s.slice(s.indexOf('>', a) + 1, b < 0 ? s.length : b); };
   var first = list[0], head = first.slice(0, first.indexOf('>', first.indexOf('<body')) + 1);
+  head = head.replace(/(@bottom-right\{content:)[^;]*;/, '$1"Trang " counter(page);');     // gộp nhiều báo giá: chân trang chỉ ghi số trang
   head = head.replace('</style>', '.bulkpg{break-after:page;page-break-after:always}.bulkpg:last-child{break-after:auto;page-break-after:auto}</style>');
   return head + list.map(function (s) { return '<div class="bulkpg">' + body(s) + '</div>'; }).join('') + END + '</html>';
 }

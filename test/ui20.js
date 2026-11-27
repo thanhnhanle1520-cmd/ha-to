@@ -19,7 +19,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   T('hàng cần mua: 3 dòng của 2 dự án', bl.length === 3 && bl.every(l => l.need === l.qty), bl.map(l => [l.project_code, l.name, l.need]));
   const L = (P, i, qty, price) => ({ project_id: P.pj.id, doc_id: P.hd.id, doc_item_id: P.it[i].id, name: P.it[i].name, unit: P.it[i].unit, qty, price });
   let r = await A('purchaseSave', { rec: { supplier_id: ncc.data.id, order_date: '2026-11-05', vat_pct: 10, status: 'DA_DAT' }, items: [L(PA, 0, 6, 220000), L(PB, 0, 20, 55000)] });
-  T('lưu đơn mua DM-…', r.ok && /^DM-2026-\d{3}$/.test(r.data.purchase.code), r);
+  T('lưu đơn mua DM-…', r.ok && /^DM\d{4}-\d{3}$/.test(r.data.purchase.code), r);
   const pu1 = r.data.purchase;
   T('đơn mua dòng không có dự án → báo lỗi', !(await A('purchaseSave', { rec: { supplier_id: ncc.data.id, status: 'DA_DAT' }, items: [{ name: 'Ống', qty: 1, price: 1 }] })).ok);
   let lst = (await A('purchaseList', { project_id: PA.pj.id })).data;
@@ -29,7 +29,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   console.log('— Hàng về theo đợt');
   const g = (await A('purchaseGet', { id: pu1.id })).data, ib = g.items.find(x => x.name === 'Bình ABC 8kg'), iv = g.items.find(x => x.name === 'Van góc D50');
   r = await A('receiptSave', { rec: { purchase_id: pu1.id, date: '2026-11-08' }, items: [{ purchase_item_id: ib.id, qty: 4 }] });
-  T('đợt 1: về 4 bình → "Về một phần"', r.ok && /^NH-2026-/.test(r.data.receipt.code) && (await A('purchaseGet', { id: pu1.id })).data.purchase.disp_status === 'VE_MOT_PHAN', r);
+  T('đợt 1: về 4 bình → "Về một phần"', r.ok && /^NH\d{4}-/.test(r.data.receipt.code) && (await A('purchaseGet', { id: pu1.id })).data.purchase.disp_status === 'VE_MOT_PHAN', r);
   r = await A('receiptSave', { rec: { purchase_id: pu1.id, date: '2026-11-09' }, items: [{ purchase_item_id: ib.id, qty: 3 }] });
   T('về vượt số đặt → hỏi xác nhận', r.ok && r.data.needConfirm && /tổng về 7 > đặt 6/.test(r.data.warnings[0]), r);
   r = await A('receiptSave', { rec: { purchase_id: pu1.id, date: '2026-11-09' }, items: [{ purchase_item_id: ib.id, qty: 2 }, { purchase_item_id: iv.id, qty: 20 }] });
@@ -54,7 +54,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await E('reloadLookups()');
   T('menu có "Mua hàng"', await E(`[...document.querySelectorAll('#nav a')].some(a=>/Mua hàng/.test(a.textContent))`));
   await E(`MEMO={};location.hash='#/purchases'`); await sleep(1500);
-  T('trang Mua hàng: đơn + trạng thái Đã về đủ', /DM-2026-/.test(await E(`document.querySelector('#view').textContent`)) && /Đã về đủ/.test(await E(`document.querySelector('#view').textContent`)));
+  T('trang Mua hàng: đơn + trạng thái Đã về đủ', /DM\d{4}-/.test(await E(`document.querySelector('#view').textContent`)) && /Đã về đủ/.test(await E(`document.querySelector('#view').textContent`)));
   await E(`MEMO={};location.hash='#/purchase/new'`); await sleep(1500);
   await E(`(()=>{const s=[...document.querySelectorAll('#view label')].find(l=>/Nhà cung cấp/.test(l.textContent)).querySelector('select');s.value=s.options[1].value;s.dispatchEvent(new Event('change'))})()`);
   await E(`[...document.querySelectorAll('#view button')].find(b=>b.textContent==='Chọn hàng cần mua').click()`); await sleep(1500);
@@ -78,7 +78,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   await pg.shot('/tmp/s20_purchase.png');
   await E(`MEMO={};location.hash='#/project/${PA.pj.id}/overview'`); await sleep(2000);
   const ov = await E(`document.querySelector('#view').textContent`);
-  T('dự án: thanh bước có "Mua hàng"; quy trình có bước Mua hàng với mã ĐM', /3\. Mua hàng/.test(ov) && /Mua hàng.*DM-2026-/.test(await E(`document.querySelector('.flow').textContent`)), ov.slice(0, 300));
+  T('dự án: thanh bước có "Mua hàng"; quy trình có bước Mua hàng với mã ĐM', /3\. Mua hàng/.test(ov) && /Mua hàng.*DM\d{4}-/.test(await E(`document.querySelector('.flow').textContent`)), ov.slice(0, 300));
   T('khối Tài chính có "chênh lệch giá mua" +172.000 (bình giá bình quân 212k, tủ +50k×2)', /trong đó chênh lệch giá mua\s*\+172\.000/.test(ov), (ov.match(/chênh lệch giá mua.{0,20}/)||[])[0]);
   T('bảng khối lượng có Đã đặt / Đã về', /đã đặt \/ đã về/.test(ov) && await E(`[...document.querySelectorAll('#view th')].some(t=>t.textContent==='Đã về')`));
   await pg.shot('/tmp/s20_project.png');

@@ -19,7 +19,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
   await E('reloadLookups()');
   T('dữ liệu thử đã tạo', !!(q1 && q2 && q3 && hd && po));
   // bắt file tải xuống thay vì lưu thật
-  await E(`window.__dl=[];XlsxWrite.download=function(n,sh){__dl.push({n:n,rows:sh[0].rows})};saveBlob=function(n,b){b.arrayBuffer().then(function(a){var u=new Uint8Array(a),k=0;for(var i=0;i<u.length-3;i++)if(u[i]===80&&u[i+1]===75&&u[i+2]===3&&u[i+3]===4)k++;__dl.push({n:n,size:u.length,files:k,type:b.type})})}`);
+  await E(`window.__dl=[];XlsxWrite.download=function(n,sh){__dl.push({n:n,rows:sh[0].rows})};saveBlob=function(n,b){b.arrayBuffer().then(function(a){var u=new Uint8Array(a),k=0,i=0,dv=new DataView(u.buffer);while(i+30<=u.length&&dv.getUint32(i,true)===0x04034b50){k++;i+=30+dv.getUint16(i+26,true)+dv.getUint16(i+28,true)+dv.getUint32(i+18,true);}__dl.push({n:n,size:u.length,files:k,type:b.type})})}`);
 
   console.log('— Khách hàng: cột chọn + Excel danh sách');
   await E(`MEMO={};location.hash='#/customers'`); await sleep(1500);

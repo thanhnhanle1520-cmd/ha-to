@@ -251,6 +251,8 @@ function P(x) { return (Math.round((Number(x) || 0) * 1000) / 10).toLocaleString
 function D(s) { s = String(s || '').slice(0, 10); if (!s) return ''; var a = s.split('-'); return a.length === 3 ? a[2] + '/' + a[1] + '/' + a[0] : s; }
 function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+/* Số báo giá kèm lần sửa (bản 36): mã mới BG2611-003 → BG2611-003.R1, .R2…; mã cũ BG-2026-002 → "BG-2026-002 v2" */
+function qNo(q) { var v = +q.version || 1, c = String(q.code || ''); return /^[A-Z]+\d{4}-\d+$/.test(c) ? c + (v > 1 ? '.R' + (v - 1) : '') : c + (v > 1 ? ' v' + v : ''); }
 function strip(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd'); }
 function debounce(fn, ms) { var t; return function () { var a = arguments, c = this; clearTimeout(t); t = setTimeout(function () { fn.apply(c, a); }, ms); }; }
 function by(arr, k) { var m = {}; (arr || []).forEach(function (x) { m[x[k]] = x; }); return m; }
@@ -368,7 +370,7 @@ function exportDone(r) {          // báo kết quả xuất file: có liên k�
 }
 function doExport(kind, id, format) {
   if (format === 'pdf') return previewExport(kind, id);     // PDF: xem trước ngay trên màn hình, rồi in hoặc tải
-  return safe(call('export', { kind: kind, id: id, format: format, drive: 1 })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
+  return safe(call('export', { kind: kind, id: id, format: format, drive: 1 }).then(function (r) { return window.DocxWrite ? DocxWrite.convert(r) : r; })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
 }
 function previewExport(kind, id) {
   return safe(call('export', { kind: kind, id: id, format: 'html' })).then(function (r) {
@@ -403,7 +405,7 @@ function bulkExport(kind, ids, fmt, base) {
   function step() {
     if (i >= ids.length) return Promise.resolve();
     var id = ids[i++]; st.textContent = 'Đang xuất ' + i + '/' + ids.length + '…';
-    return raw('export', { kind: kind, id: id, format: fmt === 'pdf' ? 'html' : fmt }, true).then(function (r) { out.push(r); }, function (e) { errs.push((e && e.message) || String(e)); }).then(step);
+    return raw('export', { kind: kind, id: id, format: fmt === 'pdf' ? 'html' : fmt }, true).then(function (r) { return fmt === 'doc' && window.DocxWrite ? DocxWrite.convert(r) : r; }).then(function (r) { out.push(r); }, function (e) { errs.push((e && e.message) || String(e)); }).then(step);
   }
   return step().then(function () {
     busy(-1); st.remove();
@@ -437,6 +439,7 @@ function mergePrintHtml(list) {
   var END = '</bo' + 'dy>';      // không viết liền thẻ đóng body: build.py chèn script vào thẻ đóng body đầu tiên của trang
   var body = function (s) { var a = s.indexOf('<body'), b = s.lastIndexOf(END); return a < 0 ? s : s.slice(s.indexOf('>', a) + 1, b < 0 ? s.length : b); };
   var first = list[0], head = first.slice(0, first.indexOf('>', first.indexOf('<body')) + 1);
+  head = head.replace(/(@bottom-right\{content:)[^;]*;/, '$1"Trang " counter(page);');     // gộp nhiều báo giá: chân trang chỉ ghi số trang
   head = head.replace('</style>', '.bulkpg{break-after:page;page-break-after:always}.bulkpg:last-child{break-after:auto;page-break-after:auto}</style>');
   return head + list.map(function (s) { return '<div class="bulkpg">' + body(s) + '</div>'; }).join('') + END + '</html>';
 }
@@ -1400,7 +1403,7 @@ PAGES.customer = function (p) {
     } else if (tab === 'quotes') {
       host.appendChild(table({ rows: b.quotes, search: function (r) { return r.code + ' ' + r.project_name; }, onRow: function (r) { go('quote/' + r.id); }, empty: 'Chưa có báo giá.',
         select: bulkActs('quote', 'BaoGia_' + fileSafe(c.code || c.short_name || c.name)), xls: 'Bao_gia_' + fileSafe(c.code || c.short_name || c.name),
-        cols: [{ k: 'code', label: 'Mã', fmt: function (r) { return r.code + (r.version > 1 ? ' v' + r.version : ''); } }, { k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'project_name', label: 'Dự án' },
+        cols: [{ k: 'code', label: 'Mã', fmt: function (r) { return qNo(r); } }, { k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'project_name', label: 'Dự án' },
           { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge' }, r.status) : ''; } }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } }] }));
     } else if (tab === 'docs') {
       host.appendChild(table({ rows: b.docs, search: function (r) { return [r.code, r.doc_no, r.project_name].join(' '); }, onRow: function (r) { go('doc/' + r.id); }, empty: 'Chưa có HĐ / PO.',
@@ -1530,7 +1533,7 @@ function customersCard(b) {
   var cost = b.customers.some(function (c) { return c.profit !== undefined; });
   var cols = [{ k: 'name', label: 'Khách hàng', max: 34, fmt: function (r) { return h('span', null, h('a', { href: '#/customer/' + r.customer_id, onclick: function (e) { e.stopPropagation(); } }, r.name), r.main ? h('span', { class: 'mut', style: 'font-size:11px' }, ' · khách chính') : null); } },
     { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge ' + (BID_CLS[r.status] || '') }, r.status) : ''; } },
-    { k: 'lq', label: 'Báo giá mới nhất', val: function (r) { return r.last_quote ? r.last_quote.date : ''; }, fmt: function (r) { var q = r.last_quote; return q ? h('span', null, h('a', { href: '#/quote/' + q.id, onclick: function (e) { e.stopPropagation(); } }, q.code + (q.version > 1 ? ' v' + q.version : '')), h('span', { class: 'mut' }, ' · ' + D(q.date) + ' · ' + M(q.total))) : '—'; } },
+    { k: 'lq', label: 'Báo giá mới nhất', val: function (r) { return r.last_quote ? r.last_quote.date : ''; }, fmt: function (r) { var q = r.last_quote; return q ? h('span', null, h('a', { href: '#/quote/' + q.id, onclick: function (e) { e.stopPropagation(); } }, qNo(q)), h('span', { class: 'mut' }, ' · ' + D(q.date) + ' · ' + M(q.total))) : '—'; } },
     { k: 'n_quotes', label: 'Số BG', cls: 'r' }, { k: 'value', label: 'Giá trị ký', cls: 'r', fmt: function (r) { return r.value ? M(r.value) : ''; } }, { k: 'revenue', label: 'Đã giao (doanh thu)', cls: 'r', fmt: function (r) { return r.revenue ? M(r.revenue) : ''; } },
     { k: 'paid', label: 'Đã thu', cls: 'r', fmt: function (r) { return r.paid ? M(r.paid) : ''; } }, { k: 'receivable', label: 'Còn phải thu', cls: 'r', fmt: function (r) { return r.receivable > 1 ? h('b', { class: 'neg' }, M(r.receivable)) : ''; } }];
   if (cost) cols.push({ k: 'profit', label: 'Lãi gộp', cls: 'r', fmt: function (r) { return r.revenue ? h('span', { class: r.profit < 0 ? 'neg' : '' }, M(r.profit)) : ''; } });
@@ -1607,7 +1610,7 @@ function newQuoteForCustomer(pj) {
     buttons: [{ label: 'Tạo báo giá', cls: 'pri', fn: function (close) { if (!cs.value) return toast('Chọn khách hàng', true); close(); go('quote/new?project=' + pj.id + '&customer=' + cs.value); } }] });
 }
 function quotesTable(rows, showProject, showCust) {
-  var cols = [{ k: 'code', label: 'Mã' }, { k: 'version', label: 'Bản', cls: 'c', fmt: function (r) { return 'v' + r.version + (r.is_latest ? '' : ''); } }];
+  var cols = [{ k: 'code', label: 'Mã' }, { k: 'version', label: 'Bản', cls: 'c', fmt: function (r) { return /^[A-Z]+\d{4}-\d+$/.test(r.code) ? (r.version > 1 ? 'R' + (r.version - 1) : 'Gốc') : 'v' + r.version; } }];
   if (showProject) cols.push({ k: 'project_name', label: 'Dự án', fmt: pjCell }, { k: 'customer_name', label: 'Khách hàng' });
   else if (showCust) cols.push({ k: 'customer_name', label: 'Khách hàng', max: 30 });
   cols.push({ k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'line_count', label: 'Số dòng', cls: 'r' }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } },
@@ -1872,7 +1875,7 @@ function flowCard(b) {
       items.length ? h('div', null, items.slice(0, 8), items.length > 8 ? h('div', { class: 'mut', style: 'font-size:12px' }, '… còn ' + (items.length - 8) + ' mục') : null) : h('div', { class: 'mut', style: 'font-size:12px' }, empty));
   };
   var it = function (link, a, bb, c, badge2) { return h('div', { class: 'flow-it', onclick: link ? function () { go(link); } : null, style: link ? 'cursor:pointer' : '' }, h('span', { class: 'code' }, a), badge2 || null, h('span', { class: 'mut' }, bb), h('span', { class: 'r', style: 'margin-left:auto' }, c)); };
-  var qs = (f.quotes || []).map(function (q) { return it('quote/' + q.id, q.code + (q.version > 1 ? ' v' + q.version : ''), D(q.date), M(q.total), q.converted ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : q.status ? h('span', { class: 'badge' }, q.status) : null); });
+  var qs = (f.quotes || []).map(function (q) { return it('quote/' + q.id, qNo(q), D(q.date), M(q.total), q.converted ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : q.status ? h('span', { class: 'badge' }, q.status) : null); });
   var ds = (b.docs || []).slice().sort(function (x, y) { return String(x.sign_date || '').localeCompare(String(y.sign_date || '')); }).map(function (d) { return it('doc/' + d.id, d.code, (TL[d.type] || d.type) + (d.doc_no ? ' · ' + d.doc_no : '') + (d.sign_date ? ' · ' + D(d.sign_date) : '') + (d.n_files ? ' · 📎' + d.n_files : ''), M(d.type === 'HD' ? d.current_value : d.value), plhdTag(d)); });
   var dl = (f.deliveries || []).map(function (d) { return it('delivery/' + d.id, d.code, D(d.date), M(d.value), h('span', { class: 'badge ' + (STATUS_CLS[d.status] || '') }, STATUS_LB[d.status] || d.status)); });
   var cs = cost ? f.costs.map(function (c) { return it('project/' + b.project.id + '/costs', c.type || 'Chi phí', D(c.date) + (c.payer === 'KHACH' ? ' · khách trả' : '') + (c.note ? ' · ' + c.note : ''), M(c.amount)); }) : [];
@@ -2058,7 +2061,7 @@ PAGES.quote = function (p, q) {
       var rec = Object.assign({}, qt, pf.get());
       return safe(call('save', { table: 'quotes', rec: rec, items: lines })).then(function (r) { if (r) { if (S.draftCtl) S.draftCtl.clear(); var wn = quoteIssues(r.quote, lines).length; reloadLookups(); toast('Đã lưu báo giá ' + r.quote.code + (wn ? ' — còn ' + wn + ' điểm cần xem lại (bấm Kiểm tra)' : '')); after ? after(r.quote) : backToList('quotes'); } });
     }
-    var title = isNew ? 'Báo giá mới' : qt.code + ' · v' + qt.version;
+    var title = isNew ? 'Báo giá mới' : qNo(qt);
     var acts = [];
     if (!isNew) acts.push(exportMenu('quote', qt.id));
     acts.push(h('button', { onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá nhanh'));
@@ -4294,5 +4297,5 @@ function dupCodesModal() {
 
 </script>
 
-<script src="xlsx-lite.js"></script><script src="tk-parse.js"></script><script src="xlsx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
+<script src="xlsx-lite.js"></script><script src="tk-parse.js"></script><script src="xlsx-write.js"></script><script src="docx-write.js"></script><script src="migrate.js"></script><script src="overrides.js"></script></body>
 </html>

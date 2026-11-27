@@ -182,7 +182,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
   T('tab Khóa sổ: hiện ngày khóa + lịch sử', await E(`/đang khóa đến ngày 22\\/11\\/2026/.test(document.querySelector('#view').textContent)`), await E(`document.querySelector('#view').textContent.slice(0,200)`));
   await pg.shot(SHOT + '/s32_10_khoa_so.png');
   await E(`location.hash='#/stock?tab=phieu'`); await sleep(1200);
-  T('tab Phiếu kho liệt kê phiếu tay', await E(`(document.querySelector('#view tbody').textContent.match(/PK-/g)||[]).length>=3`));
+  T('tab Phiếu kho liệt kê phiếu tay', await E(`(document.querySelector('#view tbody').textContent.match(/P[NX]\\d{4}-|KK\\d{4}-/g)||[]).length>=3`));
 
   console.log('— Nhập / xuất file kho');
   await E(`window.__dlOrig=XlsxWrite.download;XlsxWrite.download=function(n,sh){window.__dl={n:n,sh:sh}};window.__xf=function(rows,name){var b=XlsxWrite.build([{name:'Phieu kho',rows:rows},{name:'Huong dan',rows:[['Hướng dẫn']]}]);return new File([b],name)};window.__load=function(f){var i=document.querySelector('#btnStkFile').previousElementSibling.previousElementSibling;var dt=new DataTransfer();dt.items.add(f);i.files=dt.files;i.dispatchEvent(new Event('change'))};1`);
@@ -205,7 +205,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
   await E(`(()=>{const d=[...document.querySelectorAll('#view input')].find(i=>i.type==='date'||i.type==='text');d.value='2026-11-26';d.dispatchEvent(new Event('input'));})()`);
   await E(`window.__dl=null;document.querySelector('#btnStkTpl').click()`); await sleep(1200);
   const kf = await E(`__dl && {n:__dl.n,h:__dl.sh[0].rows[0],r:__dl.sh[0].rows.slice(1)}`);
-  T('kiểm kê: "Tải file kiểm kê" ra danh sách tồn sổ sách theo ngày, cột "Thực tế" để trống', kf && /^Kiem_ke_2026-11-26/.test(kf.n) && kf.h[4] === 'Thực tế' && kf.r.some(r => r[0] === 'SP0004' && r[3] === 155 && r[4] === ''), kf);
+  T('kiểm kê: "Tải file kiểm kê" ra danh sách tồn sổ sách theo ngày, cột "Thực tế" để trống', kf && /^Kiem_ke_\d{4}-\d\d-\d\d/.test(kf.n) && kf.h[4] === 'Thực tế' && kf.r.some(r => r[0] === 'SP0004' && r[3] === 155 && r[4] === ''), kf);
   const kr = kf.r.map(r => r.slice()); kr.find(r => r[0] === 'SP0004')[4] = 150;
   await E(`__load(__xf(${JSON.stringify([kf.h].concat(kr))},'kiemke.xlsx'))`); await sleep(1500);
   T('nạp file kiểm kê: chỉ lấy dòng đã điền "Thực tế", chênh lệch −5', await E(`(()=>{const m=document.querySelector('.md');const tr=[...m.querySelectorAll('tbody tr')];return tr.length===1 && tr[0].children[1].textContent==='SP0004' && tr[0].children[5].textContent==='-5'})()`), await E(`document.querySelector('.md') && document.querySelector('.md tbody').textContent`));

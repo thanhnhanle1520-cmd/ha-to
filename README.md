@@ -7,6 +7,7 @@ Trang chạy: https://thanhnhanle1520-cmd.github.io/ha-to/
 - `code.js` = `src/Code.gs`: nghiệp vụ (báo giá, HĐ, giao hàng, công việc…). Chạy trên lớp mô phỏng `shim.js` (bảng tính trong bộ nhớ).
 - `store.js`: đăng nhập Google, lưu mỗi bảng thành 1 file JSON trong `Drive/HA TO/data`, bản sao trong máy (IndexedDB), đồng bộ gộp theo dòng giữa nhiều thiết bị, sao lưu / khôi phục, nhật ký, đo hiệu năng.
 - `xlsx-lite.js`, `xlsx-write.js`: đọc / ghi Excel không cần thư viện ngoài.
+- `docx-write.js`: dựng file Word .docx thật từ bản in (logo, chữ ký nằm trong file).
 - `sw.js`: lưu sẵn ứng dụng để mở nhanh, báo khi có bản mới.
 
 ## Cấu trúc thư mục

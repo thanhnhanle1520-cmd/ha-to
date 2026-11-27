@@ -108,7 +108,7 @@ function customersCard(b) {
   var cost = b.customers.some(function (c) { return c.profit !== undefined; });
   var cols = [{ k: 'name', label: 'Khách hàng', max: 34, fmt: function (r) { return h('span', null, h('a', { href: '#/customer/' + r.customer_id, onclick: function (e) { e.stopPropagation(); } }, r.name), r.main ? h('span', { class: 'mut', style: 'font-size:11px' }, ' · khách chính') : null); } },
     { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge ' + (BID_CLS[r.status] || '') }, r.status) : ''; } },
-    { k: 'lq', label: 'Báo giá mới nhất', val: function (r) { return r.last_quote ? r.last_quote.date : ''; }, fmt: function (r) { var q = r.last_quote; return q ? h('span', null, h('a', { href: '#/quote/' + q.id, onclick: function (e) { e.stopPropagation(); } }, q.code + (q.version > 1 ? ' v' + q.version : '')), h('span', { class: 'mut' }, ' · ' + D(q.date) + ' · ' + M(q.total))) : '—'; } },
+    { k: 'lq', label: 'Báo giá mới nhất', val: function (r) { return r.last_quote ? r.last_quote.date : ''; }, fmt: function (r) { var q = r.last_quote; return q ? h('span', null, h('a', { href: '#/quote/' + q.id, onclick: function (e) { e.stopPropagation(); } }, qNo(q)), h('span', { class: 'mut' }, ' · ' + D(q.date) + ' · ' + M(q.total))) : '—'; } },
     { k: 'n_quotes', label: 'Số BG', cls: 'r' }, { k: 'value', label: 'Giá trị ký', cls: 'r', fmt: function (r) { return r.value ? M(r.value) : ''; } }, { k: 'revenue', label: 'Đã giao (doanh thu)', cls: 'r', fmt: function (r) { return r.revenue ? M(r.revenue) : ''; } },
     { k: 'paid', label: 'Đã thu', cls: 'r', fmt: function (r) { return r.paid ? M(r.paid) : ''; } }, { k: 'receivable', label: 'Còn phải thu', cls: 'r', fmt: function (r) { return r.receivable > 1 ? h('b', { class: 'neg' }, M(r.receivable)) : ''; } }];
   if (cost) cols.push({ k: 'profit', label: 'Lãi gộp', cls: 'r', fmt: function (r) { return r.revenue ? h('span', { class: r.profit < 0 ? 'neg' : '' }, M(r.profit)) : ''; } });
@@ -185,7 +185,7 @@ function newQuoteForCustomer(pj) {
     buttons: [{ label: 'Tạo báo giá', cls: 'pri', fn: function (close) { if (!cs.value) return toast('Chọn khách hàng', true); close(); go('quote/new?project=' + pj.id + '&customer=' + cs.value); } }] });
 }
 function quotesTable(rows, showProject, showCust) {
-  var cols = [{ k: 'code', label: 'Mã' }, { k: 'version', label: 'Bản', cls: 'c', fmt: function (r) { return 'v' + r.version + (r.is_latest ? '' : ''); } }];
+  var cols = [{ k: 'code', label: 'Mã' }, { k: 'version', label: 'Bản', cls: 'c', fmt: function (r) { return /^[A-Z]+\d{4}-\d+$/.test(r.code) ? (r.version > 1 ? 'R' + (r.version - 1) : 'Gốc') : 'v' + r.version; } }];
   if (showProject) cols.push({ k: 'project_name', label: 'Dự án', fmt: pjCell }, { k: 'customer_name', label: 'Khách hàng' });
   else if (showCust) cols.push({ k: 'customer_name', label: 'Khách hàng', max: 30 });
   cols.push({ k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'line_count', label: 'Số dòng', cls: 'r' }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } },
@@ -450,7 +450,7 @@ function flowCard(b) {
       items.length ? h('div', null, items.slice(0, 8), items.length > 8 ? h('div', { class: 'mut', style: 'font-size:12px' }, '… còn ' + (items.length - 8) + ' mục') : null) : h('div', { class: 'mut', style: 'font-size:12px' }, empty));
   };
   var it = function (link, a, bb, c, badge2) { return h('div', { class: 'flow-it', onclick: link ? function () { go(link); } : null, style: link ? 'cursor:pointer' : '' }, h('span', { class: 'code' }, a), badge2 || null, h('span', { class: 'mut' }, bb), h('span', { class: 'r', style: 'margin-left:auto' }, c)); };
-  var qs = (f.quotes || []).map(function (q) { return it('quote/' + q.id, q.code + (q.version > 1 ? ' v' + q.version : ''), D(q.date), M(q.total), q.converted ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : q.status ? h('span', { class: 'badge' }, q.status) : null); });
+  var qs = (f.quotes || []).map(function (q) { return it('quote/' + q.id, qNo(q), D(q.date), M(q.total), q.converted ? h('span', { class: 'badge b-ok' }, 'Đã chốt') : q.status ? h('span', { class: 'badge' }, q.status) : null); });
   var ds = (b.docs || []).slice().sort(function (x, y) { return String(x.sign_date || '').localeCompare(String(y.sign_date || '')); }).map(function (d) { return it('doc/' + d.id, d.code, (TL[d.type] || d.type) + (d.doc_no ? ' · ' + d.doc_no : '') + (d.sign_date ? ' · ' + D(d.sign_date) : '') + (d.n_files ? ' · 📎' + d.n_files : ''), M(d.type === 'HD' ? d.current_value : d.value), plhdTag(d)); });
   var dl = (f.deliveries || []).map(function (d) { return it('delivery/' + d.id, d.code, D(d.date), M(d.value), h('span', { class: 'badge ' + (STATUS_CLS[d.status] || '') }, STATUS_LB[d.status] || d.status)); });
   var cs = cost ? f.costs.map(function (c) { return it('project/' + b.project.id + '/costs', c.type || 'Chi phí', D(c.date) + (c.payer === 'KHACH' ? ' · khách trả' : '') + (c.note ? ' · ' + c.note : ''), M(c.amount)); }) : [];

@@ -325,7 +325,7 @@ PAGES.customer = function (p) {
     } else if (tab === 'quotes') {
       host.appendChild(table({ rows: b.quotes, search: function (r) { return r.code + ' ' + r.project_name; }, onRow: function (r) { go('quote/' + r.id); }, empty: 'Chưa có báo giá.',
         select: bulkActs('quote', 'BaoGia_' + fileSafe(c.code || c.short_name || c.name)), xls: 'Bao_gia_' + fileSafe(c.code || c.short_name || c.name),
-        cols: [{ k: 'code', label: 'Mã', fmt: function (r) { return r.code + (r.version > 1 ? ' v' + r.version : ''); } }, { k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'project_name', label: 'Dự án' },
+        cols: [{ k: 'code', label: 'Mã', fmt: function (r) { return qNo(r); } }, { k: 'date', label: 'Ngày', fmt: function (r) { return D(r.date); } }, { k: 'project_name', label: 'Dự án' },
           { k: 'status', label: 'Trạng thái', fmt: function (r) { return r.status ? h('span', { class: 'badge' }, r.status) : ''; } }, { k: 'total', label: 'Tổng (có VAT)', cls: 'r', fmt: function (r) { return M(r.total); } }] }));
     } else if (tab === 'docs') {
       host.appendChild(table({ rows: b.docs, search: function (r) { return [r.code, r.doc_no, r.project_name].join(' '); }, onRow: function (r) { go('doc/' + r.id); }, empty: 'Chưa có HĐ / PO.',

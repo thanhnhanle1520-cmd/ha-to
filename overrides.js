@@ -7,7 +7,7 @@ function dl(name, mime, b64) {                      // tải file xuống máy (
 function exportDone(r) { toast('Đã tải ' + r.name); }
 function doExport(kind, id, format) {
   if (format === 'pdf') return previewExport(kind, id);
-  return safe(call('export', { kind: kind, id: id, format: format })).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });
+  return safe(call('export', { kind: kind, id: id, format: format }).then(DocxWrite.convert)).then(function (r) { if (r) { dl(r.name, r.mime, r.base64); exportDone(r); } });     // Word: 1 file .docx
 }
 function previewExport(kind, id) {                   // PDF = xem trước rồi In → Lưu thành PDF (tức thì, không qua máy chủ)
   return safe(call('export', { kind: kind, id: id, format: 'html' })).then(function (r) {
