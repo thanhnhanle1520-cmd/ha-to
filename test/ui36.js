@@ -58,9 +58,9 @@ const has = c => { try { cp.execSync('which ' + c, { stdio: 'ignore' }); return 
 
   console.log('— 1, 4. Mẫu in báo giá');
   const x = (await A('export', { kind: 'quote', id: q.id, format: 'html' })).data.html;
-  T('lề: trái 15 · phải 12 · trên 12 · dưới 12 mm', /padding:0 12mm 0 15mm/.test(x) && /@page\{size:A4;margin:12mm 12mm 12mm 15mm;/.test(x), (x.match(/@page\{[^@]{0,80}/) || [''])[0]);
+  T('lề: trái 15 · phải 12 · trên 12 · dưới 12 mm', /padding:0 12mm 0 15mm/.test(x) && /@page\{size:A4;margin:0\}/.test(x) && /thead>tr>td\{height:12mm\}/.test(x), (x.match(/@page\{[^@]{0,80}/) || [''])[0]);
   T('giãn dòng 1,15; bảng hàng 11pt, đệm ô 3pt, căn giữa dọc', /line-height:1\.15/.test(x) && /table\.it td\{font-size:11pt;line-height:1\.15;padding:3pt;vertical-align:middle/.test(x));
-  T('chân trang: mã báo giá · Trang x/y', /@bottom-right\{content:"BG\d{4}-001 · Trang " counter\(page\) "\/" counter\(pages\)/.test(x));
+  T('chân trang PDF: mã báo giá trong vùng lề dưới (lặp mỗi trang), không dùng lề của hộp thoại In', /<tfoot><tr><td><div class="pgft">BG\d{4}-001<\/div>/.test(x) && !/@bottom-right/.test(x));
   T('thông tin khách 2 cột: Khách hàng / Công trình bên trái, Số báo giá / Ngày / Người gửi bên phải', /Khách hàng:<\/td>.*Số báo giá:<\/td>/.test(x) && /Công trình:/.test(x) && /Ngày:<\/td>/.test(x));
   T('Hãng / Xuất xứ 2 dòng: "Sông Hồng-Thái Dương /<br>Việt Nam"', /Sông Hồng-Thái Dương \/<br>Việt Nam/.test(x));
   T('chia lại cột: STT 5%, Hãng / Xuất xứ 13%, Ghi chú 11%', /width:5%;white-space:nowrap">STT/.test(x) && /width:13%">Hãng \/<br>Xuất xứ/.test(x) && /width:11%;white-space:nowrap">Ghi chú/.test(x));
@@ -70,6 +70,11 @@ const has = c => { try { cp.execSync('which ' + c, { stdio: 'ignore' }); return 
   const pdf = await pv.send('Page.printToPDF', { preferCSSPageSize: true });
   const pdfBuf = Buffer.from(pdf.result.data, 'base64'), nPages = (pdfBuf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
   T('báo giá 6 dòng hàng in vừa 1 trang A4', nPages === 1, nPages);
+  // in như hộp thoại Chrome chọn Lề "Không có" (bản 37: lề vẫn đúng vì tạo trong nội dung)
+  const pdf0 = await pv.send('Page.printToPDF', { preferCSSPageSize: false, paperWidth: 8.27, paperHeight: 11.69, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 });
+  const p0 = Buffer.from(pdf0.result.data, 'base64');
+  T('in với Lề "Không có": vẫn 1 trang', (p0.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length === 1);
+  if (has('pdftoppm')) { const d0 = fs.mkdtempSync('/tmp/pdf37-'); fs.writeFileSync(d0 + '/a.pdf', p0); cp.execFileSync('pdftoppm', ['-r', '80', '-png', '-singlefile', d0 + '/a.pdf', d0 + '/a']); fs.copyFileSync(d0 + '/a.png', SHOT + '/s37_1_pdf_le_khong_co.png'); }
   await pv.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 1200, deviceScaleFactor: 1, mobile: false });
   await sleep(300); await pv.shot(SHOT + '/s36_2_mau_bao_gia.png'); pv.close();
   try { fs.unlinkSync(PREV); } catch (e) { }

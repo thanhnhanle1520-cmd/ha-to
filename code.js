@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.29.0';
+const APP_VERSION = '1.30.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -3183,13 +3183,13 @@ function wrapHtml_(title, body, landscape, plain, print, opt) {
   var sz = landscape ? '29.7cm 21cm' : '21cm 29.7cm';
   if (print) {     // xem trước / in từ trình duyệt: lề giấy = 0 (trình duyệt không còn chỗ in ngày giờ, tên file, đường dẫn); lề NĐ 30 tạo bằng nội dung, lặp lại ở mọi trang
     var W = landscape ? '297mm' : '210mm', H = landscape ? '210mm' : '297mm';
-    // có chân trang (báo giá bản 36): khi in dùng lề giấy thật + ô chân trang "mã · Trang x/y" (trình duyệt không in thêm ngày giờ, đường dẫn khi trang có ô lề riêng)
-    var FT = opt.footer ? '@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + MG + ';@bottom-right{content:"' + String(opt.footer).replace(/["\\]/g, '') + ' · Trang " counter(page) "/" counter(pages);font-family:"Times New Roman",serif;font-size:9pt;color:#555;vertical-align:middle}}' +
-      '@media print{.sheet{padding:0!important}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td{height:0!important}}' : '';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>' + (FT ? '' : '@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}') + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC +
+    // chân trang (báo giá bản 37): ghi mã chứng từ trong vùng lề dưới, lặp lại mỗi trang. Lề vẫn tạo bằng nội dung nên chọn "Lề" kiểu nào khi in cũng đúng.
+    var FT = opt.footer ? '<div class="pgft">' + esc_(opt.footer) + '</div>' : '';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:0}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC +
       'html,body{margin:0;padding:0}body{background:#8a8f98}.sheet{width:' + W + ';min-height:' + H + ';box-sizing:border-box;margin:12px auto;padding:0 ' + mg[1] + 'mm 0 ' + mg[3] + 'mm;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}' +
       'table.pgw{width:100%;border-collapse:collapse}table.pgw>thead>tr>td,table.pgw>tfoot>tr>td,table.pgw>tbody>tr>td{border:none;padding:0}table.pgw>thead>tr>td{height:' + mg[0] + 'mm}table.pgw>tfoot>tr>td{height:' + mg[2] + 'mm}' +
-      '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}' + FT + '</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
+      '.pgft{text-align:right;font-size:9pt;color:#555;line-height:1;padding-top:' + Math.max(2, mg[2] / 2 - 2) + 'mm}table.pgw>tfoot>tr>td{vertical-align:top}' +
+      '@media print{body{background:none}.sheet{margin:0;box-shadow:none;min-height:0}}</style></head><body><div class="sheet"><table class="pgw"><thead><tr><td></td></tr></thead><tfoot><tr><td>' + FT + '</td></tr></tfoot><tbody><tr><td>' + body + '</td></tr></tbody></table></div></body></html>';
   }
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(title) + '</title><style>@page{size:' + (landscape ? 'A4 landscape' : 'A4') + ';margin:' + MG + '}' +
     '@page WordSection1{size:' + sz + ';' + (landscape ? 'mso-page-orientation:landscape;' : '') + 'margin:' + MG + '}div.WordSection1{page:WordSection1}' + BASE_CSS + (plain ? 'th{background:#fff;background-color:#fff}' : '') + XC + '</style></head><body><div class="WordSection1">' + body + '</div></body></html>';
@@ -3322,7 +3322,7 @@ function buildExport_(u, p) {
       (q.note ? '<p class="sec">Ghi chú:</p><p>' + esc_(q.note) + '</p>' : '') +
       '<p class="end">Quý công ty vui lòng xác nhận rõ về kỹ thuật sản phẩm.</p><p>Nếu quý công ty muốn biết thêm chi tiết, vui lòng liên hệ lại với chúng tôi.</p><p>Chúng tôi rất mong nhận được sự hợp tác từ quý công ty.</p>' +
       bankBlock_().replace('<p class="small">', '<p class="bank">') +
-      '<table class="sig" width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%"><b>KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></td><td width="50%"><b>XÁC NHẬN BÁO GIÁ</b><br><i>(Ký, ghi rõ họ tên)</i></td></tr><tr><td style="height:18mm">&nbsp;</td><td style="height:18mm">&nbsp;</td></tr></table></div>';
+      '<table class="sig" width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%"><b>KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></td><td width="50%"><b>XÁC NHẬN BÁO GIÁ</b><br><i>(Ký, ghi rõ họ tên)</i></td></tr><tr><td style="height:22mm">&nbsp;</td><td style="height:22mm">&nbsp;</td></tr></table></div>';
     opt = { margin: QUOTE_MARGIN_, css: QUOTE_CSS_, footer: qno };
     landscape = false;
   } else if (kind === 'hd') {

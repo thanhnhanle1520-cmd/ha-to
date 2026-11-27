@@ -35,7 +35,7 @@ const PREV = path.join(__dirname, '..', 'dist', '__xem_bao_gia.html');
   T('mẫu in: không còn cột CK%', !/CK%|CK %/.test(x0));
   T('lề trang báo giá (bản 36): trái 15 mm, phải 12 mm, trên / dưới 12 mm', /padding:0 12mm 0 15mm/.test(x0) && /thead>tr>td\{height:12mm\}/.test(x0), (x0.match(/padding:0 [^;]+;/) || [''])[0]);
   T('chữ (bản 36): nội dung 12pt, bảng hàng 11pt, tiêu đề 17pt, tên công ty 13pt', /\.bq p,\.bq td[^}]*font-size:12pt/.test(x0) && /table\.it td\{font-size:11pt/.test(x0) && /\.bq h1\{font-size:17pt/.test(x0) && /\.lh1\{font-size:13pt;font-weight:bold/.test(x0));
-  T('3 câu kết tách 3 dòng; chữ ký 2 bên có "(Ký, ghi rõ họ tên)" + chỗ ký 18 mm', (x0.match(/<p( class="end")?>(Quý công ty vui lòng|Nếu quý công ty|Chúng tôi rất mong)/g) || []).length === 3 && (x0.match(/\(Ký, ghi rõ họ tên\)/g) || []).length === 2 && /height:18mm/.test(x0));
+  T('3 câu kết tách 3 dòng; chữ ký 2 bên có "(Ký, ghi rõ họ tên)" + chỗ ký 22 mm', (x0.match(/<p( class="end")?>(Quý công ty vui lòng|Nếu quý công ty|Chúng tôi rất mong)/g) || []).length === 3 && (x0.match(/\(Ký, ghi rõ họ tên\)/g) || []).length === 2 && /height:22mm/.test(x0));
   const wd = (await A('export', { kind: 'quote', id: q0.id, format: 'doc' })).data;
   const doc = Buffer.from(wd.base64, 'base64').toString('utf8');
   T('file Word: cùng lề (@page 12mm 12mm 12mm 15mm) và CSS mẫu mới', /margin:12mm 12mm 12mm 15mm/.test(doc) && /\.bq h1\{font-size:17pt/.test(doc) && !/CK%/.test(doc));
