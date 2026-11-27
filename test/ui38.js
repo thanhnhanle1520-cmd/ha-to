@@ -1,0 +1,84 @@
+// Bản 38: cân chi phí (vận chuyển, chi phí ngoài) vào đơn giá — trong báo giá (tạo bản sửa .R) và khi chuyển thành HĐ / PO
+const { launch, open } = require('./cdp'); const fs = require('fs'); const sleep = ms => new Promise(r => setTimeout(r, ms));
+let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓', n); } else { bad++; console.log('  ✗ FAIL:', n, JSON.stringify(x === undefined ? '' : x).slice(0, 600)); } };
+const SHOT = process.env.SHOT_DIR || '/tmp';
+(async () => {
+  const c = await launch(); const pg = await open(c.port, 'http://127.0.0.1:8765/index.html?local=1'); await sleep(4500);
+  const E = s => pg.ev(s), A = (a, p) => E(`api(${JSON.stringify(a)},${JSON.stringify(p || {})})`);
+  await pg.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+  await E(`(()=>{const ss=ss_();if(ss.getSheetByName('DuLieu_Chung'))return;const sh=ss.insertSheet('DuLieu_Chung');const v=[['STT','Thương hiệu','Nhóm hàng','Tên tiếng Việt','Model','ĐVT','Giá vốn','Giá bán tham chiếu','Trạng thái'],[1,'Sông Hồng','Bình','Bình chữa cháy bột ABC 4kg','SH.AP4','Bình',250000,360000,'Đang bán']];sh.getRange(1,1,v.length,v[0].length).setValues(v);})()`);
+  const cu = (await A('save', { table: 'customers', rec: { name: 'Công ty CP Kỹ thuật và Xây dựng Searefico', contact: 'Ms. Hương' } })).data;
+  const pj = (await A('save', { table: 'projects', rec: { name: 'GRAND MERCURE HỘI AN', customer_id: cu.id, status: 'Đang chào giá' } })).data;
+  const li = (name, model, unit, qty, price, cost, note) => ({ name, model, brand: 'Sông Hồng-Thái Dương', origin: 'Việt Nam', unit, qty, price, cost, note });
+  const items = [li('Bình chữa cháy bột ABC SÔNG HỒNG 4kg', 'SH.AP4', 'Bình', 4, 360000, 250000, 'Cấp phép lưu thông'), li('Bình chữa cháy khí CO2 SÔNG HỒNG 5kg', 'SH.C5', 'Bình', 4, 696000, 500000, 'Cấp phép lưu thông'),
+    { name: 'Chi phí giao hàng', unit: 'Chuyến', qty: 1, price: 800000, cost: 0, note: 'Cân vào đơn giá' }];
+  const q = (await A('save', { table: 'quotes', rec: { project_id: pj.id, vat_pct: 8 }, items })).data.quote;
+  await E(`MEMO={};location.hash='#/quotes'`); await sleep(1500); await E(`location.reload()`); await sleep(4500);
+
+  console.log('— Tính cân');
+  let p = (await A('costBalancePreview', { quote_id: q.id, opt: {} })).data;
+  T('tự nhận dòng chi phí (ghi chú "Cân vào đơn giá" / ĐVT Chuyến)', p.lines[2].auto_cost && !p.lines[0].auto_cost && p.costs.length === 1 && p.cost_total === 800000, p.costs);
+  T('theo thành tiền, tròn 100đ: 360.000 → 428.200; 696.000 → 827.800', p.rows[0].price === 428200 && p.rows[1].price === 827800, p.rows);
+  T('tổng trước thuế giữ nguyên 5.024.000, không lệch', p.before === 5024000 && p.after === 5024000 && p.diff === 0, [p.before, p.after, p.diff]);
+  p = (await A('costBalancePreview', { quote_id: q.id, opt: { mode: 'qty', round: 1000 } })).data;
+  T('theo số lượng: mỗi bình gánh 100.000 → 460.000 / 796.000', p.rows[0].price === 460000 && p.rows[1].price === 796000 && p.diff === 0, p.rows);
+  p = (await A('costBalancePreview', { quote_id: q.id, opt: { cost: [2], target: [1] } })).data;
+  T('chỉ chia cho dòng chọn: CO2 gánh hết 800.000 → 896.000, bình bột giữ 360.000', p.rows.length === 1 && p.rows[0].price === 896000, p.rows);
+  const q3 = (await A('save', { table: 'quotes', rec: { project_id: pj.id, vat_pct: 8 }, items: [li('Bình 4kg', 'A', 'Bình', 3, 333333, 0, ''), li('Bình 5kg', 'B', 'Bình', 7, 100001, 0, ''), { name: 'Chi phí bốc xếp', unit: 'Lần', qty: 1, price: 123457 }] })).data.quote;
+  p = (await A('costBalancePreview', { quote_id: q3.id, opt: {} })).data;
+  T('số lẻ: phần lệch do làm tròn dồn vào 1 dòng, lệch còn dưới 100đ × SL nhỏ nhất', p.rows.every(r => r.price % 100 === 0) && Math.abs(p.diff) <= 150, [p.rows, p.diff]);
+  p = (await A('costBalancePreview', { quote_id: q.id, opt: { cost: [-1] } })).data;
+  T('không chọn dòng chi phí → báo rõ, không cân', /Chưa có dòng chi phí/.test(p.error || ''), p.error);
+
+  console.log('— Màn báo giá: nút Cân chi phí → xem trước → tạo bản sửa');
+  await E(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(1800);
+  await E(`document.querySelector('#btnCostBal').click()`); await sleep(1200);
+  const md = await E(`document.querySelector('.md').textContent`);
+  T('hộp thoại: chọn dòng chi phí / dòng nhận, cách chia, bảng Đơn giá cũ → mới', /Chi phí cần cân/.test(md) && /Nhận phần cân/.test(md) && /Đơn giá cũ/.test(md) && /428\.200/.test(md) && /khớp, không lệch/.test(md), md.slice(0, 400));
+  await pg.shot(SHOT + '/s38_1_can_chi_phi.png');
+  await E(`(()=>{const s=document.querySelector('.md select');s.value='qty';s.dispatchEvent(new Event('change'))})()`); await sleep(800);
+  T('đổi sang chia theo số lượng → xem trước cập nhật 460.000', /460\.000/.test(await E(`document.querySelector('#cbalPrev').textContent`)));
+  await E(`(()=>{const s=document.querySelector('.md select');s.value='value';s.dispatchEvent(new Event('change'))})()`); await sleep(800);
+  console.log('— Tự nhập (cân tay)');
+  await E(`(()=>{const s=document.querySelector('.md select');s.value='manual';s.dispatchEvent(new Event('change'))})()`); await sleep(900);
+  T('tự nhập: bắt đầu từ số chia tự động, ô gõ tay được, đã cân đủ ✓', await E(`document.querySelectorAll('#cbalPrev input.cbal-in').length===4`) && /Đã cân 800\.000 \/ cần cân 800\.000 · còn lại 0/.test(await E(`document.querySelector('#cbalSum').textContent`)));
+  await E(`(()=>{const i=document.querySelector('#cbalPrev input[data-k="add"]');i.value='50000';i.dispatchEvent(new Event('change'))})()`); await sleep(900);
+  T('gõ cân thêm 50.000/bình cho dòng 1 → còn lại 72.800, tô đỏ', /còn lại 72\.800/.test(await E(`document.querySelector('#cbalSum').textContent`)) && await E(`getComputedStyle(document.querySelector('#cbalSum')).color==='rgb(185, 28, 28)'`), await E(`document.querySelector('#cbalSum').textContent`));
+  await E(`(()=>{const i=document.querySelectorAll('#cbalPrev input[data-k="price"]')[1];i.value='850000';i.dispatchEvent(new Event('change'))})()`); await sleep(900);
+  T('gõ thẳng đơn giá mới CO2 850.000 → cân thêm tự tính 154.000, còn lại -16.000', await E(`document.querySelectorAll('#cbalPrev input[data-k="add"]')[1].value`) === '154000' && /còn lại -16\.000/.test(await E(`document.querySelector('#cbalSum').textContent`)));
+  await pg.shot(SHOT + '/s38_4_tu_nhap.png');
+  await E(`document.querySelector('#cbalPush').click()`); await sleep(900);
+  T('nút "Dồn phần còn lại" → còn lại 0 ✓', /còn lại 0 ✓/.test(await E(`document.querySelector('#cbalSum').textContent`)), await E(`document.querySelector('#cbalSum').textContent`));
+  const mp = (await A('costBalancePreview', { quote_id: q.id, opt: { cost: [2], target: [0, 1], mode: 'manual', prices: { 0: 400000, 1: 800000 } } })).data;
+  T('máy chủ: tự nhập 400.000 / 800.000 → đã cân 576.000, còn lại 224.000 (không tự dồn)', mp.after === 4800000 && mp.diff === 224000, [mp.after, mp.diff]);
+  await E(`(()=>{const s=document.querySelector('.md select');s.value='value';s.dispatchEvent(new Event('change'))})()`); await sleep(800);
+  await E(`[...document.querySelectorAll('.md .mf button')].find(b=>/Tạo bản sửa đã cân/.test(b.textContent)).click()`); await sleep(2000);
+  const hs = await E(`location.hash`), rid = hs.split('/')[2];
+  const rq = (await A('get', { table: 'quotes', id: rid })).data;
+  T('tạo bản sửa .R1: 2 dòng (bỏ dòng chi phí), đơn giá đã cân', rq.quote.version === 2 && rq.items.length === 2 && rq.items[0].price === 428200 && rq.items[1].price === 827800, rq.items && rq.items.map(i => [i.name, i.price]));
+  T('giá vốn giữ nguyên (250.000 / 500.000)', rq.items[0].cost === 250000 && rq.items[1].cost === 500000);
+  T('tiêu đề trang: ' + q.code + '.R1', /\.R1/.test(await E(`document.querySelector('#title, h1, .ttl') ? document.querySelector('#title, h1, .ttl').textContent : document.title`)) || /\.R1/.test(await E(`document.body.textContent.slice(0,3000)`)));
+  const og = (await A('get', { table: 'quotes', id: q.id })).data;
+  T('báo giá gốc giữ nguyên 3 dòng (còn dòng chi phí để đối chiếu)', og.items.length === 3);
+
+  console.log('— Chuyển thành HĐ có cân chi phí');
+  await E(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(1800);
+  await E(`[...document.querySelectorAll('button')].find(b=>/Chuyển thành HĐ/.test(b.textContent)).click()`); await sleep(600);
+  await E(`document.querySelector('#cvBal').click()`); await sleep(1200);
+  await E(`[...document.querySelectorAll('.md .mf button')].find(b=>/Dùng cách cân này/.test(b.textContent)).click()`); await sleep(600);
+  T('ô tick "Cân chi phí vào đơn giá" được chọn + ghi cách cân', await E(`document.querySelector('#cvBal').checked`) && /1 dòng chi phí, chia theo thành tiền/.test(await E(`document.querySelector('.md').textContent`)));
+  await pg.shot(SHOT + '/s38_2_chuyen_hd.png');
+  await E(`(()=>{const s=document.querySelector('.md select');s.value='HD';s.dispatchEvent(new Event('change'))})()`);
+  await E(`[...document.querySelectorAll('.md .mf button')].find(b=>b.textContent==='Chuyển').click()`); await sleep(2200);
+  const did = (await E(`location.hash`)).split('/')[1].split('?')[0] === 'doc' ? (await E(`location.hash`)).split('/')[2] : '';
+  const dd = (await A('get', { table: 'docs', id: did })).data;
+  const sum = dd.items.reduce((s, i) => s + i.qty * i.price, 0);
+  T('HĐ: 2 dòng, đơn giá 428.200 / 827.800, tổng trước thuế 5.024.000', dd.items.length === 2 && dd.items[0].price === 428200 && dd.items[1].price === 827800 && sum === 5024000, dd.items && dd.items.map(i => [i.name, i.price]));
+  await E(`(()=>{const x=[...document.querySelectorAll('#view h3, #view .card h3, #view b')].find(e=>/Dòng hàng/.test(e.textContent));if(x)x.scrollIntoView();})()`); await sleep(400);
+  await pg.shot(SHOT + '/s38_3_hd_da_can.png');
+  const r2 = (await A('convertQuote', { quote_id: q.id, type: 'PO' })).data;
+  T('không tick → chuyển như cũ (3 dòng, có dòng chi phí)', (await A('get', { table: 'docs', id: r2.doc.id })).data.items.length === 3);
+
+  console.log(`\n${ok} đạt, ${bad} lỗi`); if (pg.logs.length) console.log('Lỗi console:', pg.logs);
+  pg.close(); c.proc.kill(); process.exit(bad ? 1 : 0);
+})().catch(e => { console.log('CRASH', e && e.stack || e); process.exit(2); });

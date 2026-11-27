@@ -3,7 +3,7 @@
  * Dữ liệu: Google Sheet (script gắn trực tiếp vào file). Giao diện: Index.html
  * Chạy hàm setup() một lần để tạo các sheet, rồi Deploy > Web app.
  */
-const APP_VERSION = '1.30.0';
+const APP_VERSION = '1.31.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const PRICE_SHEETS = ['DuLieu_Chung', 'Trang tính1']; // sheet bảng giá (cập nhật trực tiếp trên trang tính)
 const CACHE_TTL = 600;      // giây (10 phút); keepWarm làm mới mỗi 5 phút nên cache luôn nóng
@@ -1577,6 +1577,11 @@ ACTIONS.convertQuote = function (u, p) {
       var net = round_(num_(x.price) * (1 - num_(x.disc_pct) / 100));
       return { code: x.code, name: x.name, model: x.model, brand: x.brand, origin: x.origin, unit: x.unit, qty: x.qty, price_offer: x.price, price: net, cost: '', cost_list: x.cost, source: 'QUOTE', note: x.note, spec: x.spec, vat_line: lineVat_(x, q) };
     });
+    var bal = null;
+    if (p.balance) {      // bản 38: cân chi phí vào đơn giá khi chuyển; báo giá gốc giữ nguyên dòng chi phí
+      bal = costBalance_(quoteLines_(q.id), p.balance === true ? {} : p.balance);
+      items = bal.lines.map(function (x) { return { code: x.code, name: x.name, model: x.model, brand: x.brand, origin: x.origin, unit: x.unit, qty: x.qty, price_offer: x.price, price: num_(x.price), cost: '', cost_list: x.cost, source: 'QUOTE', note: x.note, spec: x.spec, vat_line: lineVat_(x, q) }; });
+    }
     var qc = custOfQuote_(q), hdOfC = (index_().docsByProject[q.project_id] || []).filter(function (d) { return d.type === 'HD' && custOfDoc_(d) === qc; })[0];
     var rec = { type: type, project_id: q.project_id, customer_id: qc, parent_id: p.parent_id || (hdOfC ? hdOfC.id : ''), source_quote_id: q.id, vat_pct: q.vat_pct, sign_date: today_(), terms: type === 'HD' ? [{ name: 'Đợt 1', pct: 100, days: 30 }] : [], doc_no: p.doc_no || '' };
     var res = saveDoc_(u, { rec: rec, items: items });
@@ -1584,8 +1589,79 @@ ACTIONS.convertQuote = function (u, p) {
     upsert_('QUOTES', q2);
     var pr = readTable_('PROJECTS').filter(function (x) { return x.id === q.project_id; })[0];
     if (pr && pr.status === 'Đang chào giá') upsert_('PROJECTS', Object.assign({}, pr, { status: 'Đang thực hiện', updated_at: now_() }));
-    audit_(u, 'Chuyển báo giá', 'DOCS', res.doc.id, q.project_id, q.code + ' → ' + res.doc.code);
-    return { doc: res.doc };
+    audit_(u, 'Chuyển báo giá', 'DOCS', res.doc.id, q.project_id, q.code + ' → ' + res.doc.code + (bal ? ' (cân ' + money_(bal.cost_total) + ' chi phí vào đơn giá)' : ''));
+    return { doc: res.doc, balanced: bal ? { cost_total: bal.cost_total, diff: bal.diff } : null };
+  });
+};
+
+/* ===== Cân chi phí vào đơn giá (bản 38) =====
+   Dòng chi phí (vận chuyển, chi phí ngoài…) được chia vào đơn giá các dòng hàng rồi bỏ khỏi bảng.
+   o.cost: chỉ số dòng chi phí (bỏ trống → tự nhận: ghi chú "cân vào đơn giá", ĐVT "Chuyến", tên bắt đầu "Chi phí");
+   o.target: chỉ số dòng nhận phần cân (bỏ trống → mọi dòng còn lại); o.mode: 'value' (theo thành tiền) | 'qty' (theo số lượng);
+   o.round: làm tròn đơn giá mới (1 | 100 | 1000). Phần lệch do làm tròn dồn vào 1 dòng để tổng gần nhất với trước. Giá vốn không đổi. */
+function isCostLine_(x) {
+  var s = function (v) { return String(v || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').trim(); };
+  return /can vao don gia/.test(s(x.note)) || s(x.unit) === 'chuyen' || /^chi phi/.test(s(x.name));
+}
+function costBalance_(lines, o) {
+  o = o || {};
+  var R = [1, 100, 1000].indexOf(num_(o.round)) >= 0 ? num_(o.round) : 100, mode = o.mode === 'qty' ? 'qty' : o.mode === 'manual' ? 'manual' : 'value';
+  var net = function (x) { return round_(num_(x.price) * (1 - num_(x.disc_pct) / 100)); };
+  var costIdx = Array.isArray(o.cost) && o.cost.length ? o.cost.map(Number) : lines.map(function (x, i) { return isCostLine_(x) ? i : -1; }).filter(function (i) { return i >= 0; });
+  var isCost = {}; costIdx.forEach(function (i) { if (lines[i]) isCost[i] = 1; });
+  var tg = (Array.isArray(o.target) && o.target.length ? o.target.map(Number) : lines.map(function (x, i) { return i; })).filter(function (i) { return lines[i] && !isCost[i] && num_(lines[i].qty) > 0; });
+  if (!Object.keys(isCost).length) throw new Error('Chưa có dòng chi phí cần cân (đánh dấu dòng chi phí, hoặc ghi chú "Cân vào đơn giá").');
+  if (!tg.length) throw new Error('Không còn dòng hàng nào để nhận phần chi phí.');
+  var C = 0; Object.keys(isCost).forEach(function (i) { C += round_(num_(lines[i].qty) * net(lines[i])); });
+  var before = 0; lines.forEach(function (x) { before += round_(num_(x.qty) * net(x)); });
+  if (mode === 'manual') {     // tự nhập đơn giá mới từng dòng; phần chưa cân hết giữ nguyên là "còn lại", không tự dồn
+    var mp = o.prices || {}, npm = {};
+    tg.forEach(function (i) { var v = mp[i] != null && mp[i] !== '' ? round_(mp[i]) : net(lines[i]); if (v < 0) throw new Error('Đơn giá mới của "' + lines[i].name + '" không được âm.'); npm[i] = v; });
+    var aft = 0; lines.forEach(function (x, i) { if (!isCost[i]) aft += round_(num_(x.qty) * (npm[i] != null ? npm[i] : net(x))); });
+    var outM = []; lines.forEach(function (x, i) { if (isCost[i]) return; outM.push(npm[i] != null ? Object.assign({}, x, { price: npm[i], disc_pct: 0 }) : x); });
+    return { lines: outM, rows: tg.map(function (i) { var o0 = net(lines[i]); return { idx: i, name: lines[i].name, unit: lines[i].unit, qty: num_(lines[i].qty), old: o0, add: npm[i] - o0, price: npm[i] }; }),
+      cost_idx: Object.keys(isCost).map(Number), cost_total: C, before: before, after: aft, diff: before - aft, round: R, mode: mode,
+      costs: Object.keys(isCost).map(function (i) { var x = lines[i]; return { idx: +i, name: x.name, amount: round_(num_(x.qty) * net(x)) }; }) };
+  }
+  var w = tg.map(function (i) { return mode === 'qty' ? num_(lines[i].qty) : num_(lines[i].qty) * net(lines[i]); }), W = w.reduce(function (a, b) { return a + b; }, 0);
+  if (!(W > 0)) throw new Error(mode === 'qty' ? 'Các dòng nhận phần cân chưa có số lượng.' : 'Các dòng nhận phần cân chưa có đơn giá (thử chia theo số lượng).');
+  var np = {}; tg.forEach(function (i, k) { var q = num_(lines[i].qty); np[i] = Math.round((net(lines[i]) + C * w[k] / W / q) / R) * R; });
+  var after = function () { var s = 0; lines.forEach(function (x, i) { if (!isCost[i]) s += round_(num_(x.qty) * (np[i] != null ? np[i] : net(x))); }); return s; };
+  var diff = before - after();
+  if (diff) {        // dồn phần lệch: chọn dòng làm tổng sát nhất, ưu tiên dòng giá trị lớn
+    var best = null;
+    tg.forEach(function (i) { var q = num_(lines[i].qty), k = Math.round(diff / (q * R)), res = diff - k * q * R, val = q * np[i]; if (np[i] + k * R <= 0) return; if (!best || Math.abs(res) < Math.abs(best.res) || (Math.abs(res) === Math.abs(best.res) && val > best.val)) best = { i: i, k: k, res: res, val: val }; });
+    if (best && best.k) np[best.i] += best.k * R;
+    diff = before - after();
+  }
+  var rows = tg.map(function (i) { var x = lines[i], o0 = net(x); return { idx: i, name: x.name, unit: x.unit, qty: num_(x.qty), old: o0, add: np[i] - o0, price: np[i] }; });
+  var out = []; lines.forEach(function (x, i) { if (isCost[i]) return; out.push(np[i] != null ? Object.assign({}, x, { price: np[i], disc_pct: 0, note: x.note }) : x); });
+  return { lines: out, rows: rows, cost_idx: Object.keys(isCost).map(Number), cost_total: C, before: before, after: before - diff, diff: diff, round: R, mode: mode,
+    costs: Object.keys(isCost).map(function (i) { var x = lines[i]; return { idx: +i, name: x.name, amount: round_(num_(x.qty) * net(x)) }; }) };
+}
+function quoteLines_(qid) { return readTable_('QUOTE_ITEMS').filter(function (x) { return x.quote_id === qid; }).sort(byLine_); }
+ACTIONS.costBalancePreview = function (u, p) {      // trả về các dòng (để chọn) + kết quả cân; cân chưa được thì trả lỗi kèm theo, không ném lỗi
+  need_(u, 'quotes', 'view');
+  var lines = quoteLines_(p.quote_id); if (!lines.length) throw new Error('Báo giá chưa có dòng hàng.');
+  var out = { lines: lines.map(function (x, i) { return { idx: i, name: x.name, unit: x.unit, qty: num_(x.qty), price: round_(num_(x.price) * (1 - num_(x.disc_pct) / 100)), note: x.note || '', auto_cost: isCostLine_(x) }; }) };
+  try {
+    var r = costBalance_(lines, p.opt || {});
+    ['rows', 'costs', 'cost_total', 'before', 'after', 'diff', 'round', 'mode'].forEach(function (k) { out[k] = r[k]; });
+  } catch (e) { out.error = String((e && e.message) || e); }
+  return out;
+};
+ACTIONS.costBalanceQuote = function (u, p) {     // tạo phiên bản mới (.R) của báo giá với đơn giá đã cân, bỏ dòng chi phí
+  need_(u, 'quotes', 'create');
+  return withLock_(function () {
+    RT = { user: RT.user, ss: RT.ss };
+    var q = readTable_('QUOTES').filter(function (x) { return x.id === p.quote_id; })[0]; if (!q) throw new Error('Không tìm thấy báo giá.');
+    var r = costBalance_(quoteLines_(q.id), p.opt || {});
+    var maxV = Math.max.apply(null, readTable_('QUOTES').filter(function (x) { return x.code === q.code; }).map(function (x) { return x.version; }));
+    var nq = Object.assign({}, q, { status: 'Nháp', id: newId_('Q'), version: maxV + 1, date: today_(), converted_to: '', created_by: u.email, created_at: now_(), updated_at: now_() });
+    var items = r.lines.map(function (x, k) { var o = Object.assign({}, x, { id: newId_('QI'), quote_id: nq.id, line_no: k + 1 }); if (num_(o.cost) > 0 && x.price !== undefined) o.coef = Math.round(num_(o.price) / num_(o.cost) * 1000) / 1000; return o; });
+    upsert_('QUOTES', nq); appendMany_('QUOTE_ITEMS', items);
+    audit_(u, 'Cân chi phí', 'QUOTES', nq.id, nq.project_id, quoteNo_(nq) + ' ← ' + quoteNo_(q) + ': cân ' + money_(r.cost_total) + ' vào ' + r.rows.length + ' dòng');
+    return { id: nq.id, version: nq.version, code: nq.code, diff: r.diff };
   });
 };
 

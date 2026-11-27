@@ -178,6 +178,7 @@ PAGES.quote = function (p, q) {
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { title: 'Cùng dự án, gửi cho khách khác (nhà thầu khác) — chép dòng hàng, sửa được', onclick: function () { quoteToCustomer(qt); } }, 'Báo giá cho khách khác'));
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(); } }, 'Lưu'));
     if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); } }, 'Phiên bản mới'));
+    if (!isNew && S.perms.quotes.create) acts.push(h('button', { id: 'btnCostBal', title: 'Chia chi phí vận chuyển, chi phí ngoài vào đơn giá các dòng hàng (tạo bản sửa mới)', onclick: function () { costBalanceModal(qt); } }, 'Cân chi phí'));
     if (!isNew && S.perms.docs.create) acts.push(h('button', { onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO / Phụ lục HĐ'));
     if (!isNew && S.perms.docs.edit && canEdit && (d.linked_docs || []).length) acts.push(h('button', { id: 'btnSyncDoc', title: 'Đưa dòng hàng, giá, VAT của báo giá này sang văn bản đã chuyển', onclick: function () { save(function () { syncDocModal(qt, d.linked_docs); }); } }, 'Cập nhật ' + d.linked_docs.map(function (x) { return x.type === 'HD' ? 'HĐ' : x.type === 'PLHD' ? 'PLHD' : 'PO'; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' / ')));
     if (!isNew && S.perms.quotes.edit) acts.push(h('button', { class: 'dng', onclick: function () { quoteDelete(qt, d.versions || []); } }, 'Xóa'));
@@ -225,8 +226,79 @@ function quoteToCustomer(qt) {
 }
 function convertModal(qt) {
   var type = sel([['HD', 'Hợp đồng (HĐ)'], ['PO', 'Đơn đặt hàng (PO)'], ['PLHD', 'Phụ lục HĐ']], 'PO'), no = h('input', { type: 'text', placeholder: 'Số văn bản (tuỳ chọn)' });
-  modal({ title: 'Chuyển báo giá ' + qt.code + ' v' + qt.version, body: h('div', { class: 'fg' }, h('label', null, 'Loại văn bản', type), h('label', null, 'Số văn bản', no), h('div', { class: 'full mut' }, 'Dòng hàng được sao chép sang văn bản; đơn giá chốt = đơn giá báo giá sau chiết khấu. Có thể chỉnh lại trong văn bản.')),
-    buttons: [{ label: 'Chuyển', cls: 'pri', fn: function (close) { safe(call('convertQuote', { quote_id: qt.id, type: type.value, doc_no: no.value })).then(function (r) { if (r) { close(); toast('Đã tạo ' + r.doc.code); go('doc/' + r.doc.id); } }); } }] });
+  var bal = null, bx = h('input', { type: 'checkbox', id: 'cvBal' }), bInfo = h('div', { style: 'color:#166534;margin-top:2px' }, '');
+  var showBal = function () { bInfo.textContent = bal ? 'Đã chọn: ' + bal.cost.length + ' dòng chi phí, chia ' + (bal.mode === 'qty' ? 'theo số lượng' : bal.mode === 'manual' ? 'tự nhập' : 'theo thành tiền') + ', làm tròn ' + (bal.round === 1 ? '1đ' : M(bal.round) + 'đ') : ''; };
+  bx.onchange = function () { if (bx.checked) { bx.checked = false; costBalanceModal(qt, { applyLabel: 'Dùng cách cân này', onApply: function (opt) { bal = opt; bx.checked = true; showBal(); } }); } else { bal = null; showBal(); } };
+  modal({ title: 'Chuyển báo giá ' + qNo(qt), body: h('div', { class: 'fg' }, h('label', null, 'Loại văn bản', type), h('label', null, 'Số văn bản', no),
+      h('div', { class: 'full', style: 'display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb' }, bx, h('div', null, h('label', { for: 'cvBal', style: 'display:inline;font-weight:600;cursor:pointer' }, 'Cân chi phí vào đơn giá'), h('div', { class: 'mut' }, 'Chia chi phí vận chuyển, chi phí ngoài vào đơn giá các dòng hàng; văn bản không còn dòng chi phí riêng.'), bInfo)),
+      h('div', { class: 'full mut' }, 'Dòng hàng được sao chép sang văn bản; đơn giá chốt = đơn giá báo giá sau chiết khấu. Có thể chỉnh lại trong văn bản. Báo giá gốc giữ nguyên.')),
+    buttons: [{ label: 'Chuyển', cls: 'pri', fn: function (close) { safe(call('convertQuote', { quote_id: qt.id, type: type.value, doc_no: no.value, balance: bal || undefined })).then(function (r) { if (r) { close(); toast('Đã tạo ' + r.doc.code + (r.balanced ? ' (đã cân ' + M(r.balanced.cost_total) + 'đ chi phí vào đơn giá)' : '')); go('doc/' + r.doc.id); } }); } }] });
+}
+/* ---- Cân chi phí vào đơn giá (bản 38) ----
+   opts.onApply(opt): khi bấm áp dụng (opt = {cost, target, mode, round}); opts.applyLabel: chữ trên nút */
+function costBalanceModal(qt, opts) {
+  opts = opts || {};
+  var st = { cost: null, target: null, mode: 'value', round: 100, prices: {}, last: null }, base = null, body = h('div', { class: 'cbal' }), info = h('div'), prev = h('div');
+  var mode = sel([['value', 'Theo tỷ lệ thành tiền (dòng giá trị lớn gánh nhiều hơn)'], ['qty', 'Theo số lượng (mỗi đơn vị gánh như nhau)'], ['manual', 'Tự nhập (gõ tay phần cân / đơn giá mới)']], 'value', function () {
+    if (mode.value === 'manual' && st.last) { st.prices = {}; st.last.rows.forEach(function (x) { st.prices[x.idx] = x.price; }); }      // bắt đầu từ số chia tự động đang xem
+    st.mode = mode.value; run(); });
+  var rnd = sel([['100', 'Làm tròn đơn giá đến 100đ'], ['1000', 'Làm tròn đến 1.000đ'], ['1', 'Không làm tròn']], '100', function () { st.round = +rnd.value; run(); });
+  body.appendChild(h('div', { class: 'fg' }, h('label', null, 'Cách chia', mode), h('label', null, 'Làm tròn', rnd)));
+  body.appendChild(info); body.appendChild(prev);
+  function picks(lines) {      // bảng chọn: dòng nào là chi phí, dòng nào nhận phần cân
+    var t = h('table', { class: 't' }, h('thead', null, h('tr', null, h('th', null, 'Chi phí cần cân'), h('th', null, 'Nhận phần cân'), h('th', null, 'Dòng hàng'), h('th', { class: 'r' }, 'SL'), h('th', { class: 'r' }, 'Đơn giá'), h('th', null, 'Ghi chú'))));
+    var tb = h('tbody'); t.appendChild(tb);
+    lines.forEach(function (l) {
+      var isC = st.cost.indexOf(l.idx) >= 0, isT = !isC && st.target.indexOf(l.idx) >= 0;
+      var c1 = h('input', { type: 'checkbox', checked: isC, 'aria-label': 'Chi phí cần cân: ' + l.name, onchange: function () { st.cost = st.cost.filter(function (i) { return i !== l.idx; }); st.target = st.target.filter(function (i) { return i !== l.idx; }); if (c1.checked) st.cost.push(l.idx); else st.target.push(l.idx); run(); } });
+      var c2 = h('input', { type: 'checkbox', checked: isT, disabled: isC, 'aria-label': 'Nhận phần cân: ' + l.name, onchange: function () { st.target = st.target.filter(function (i) { return i !== l.idx; }); if (c2.checked) st.target.push(l.idx); run(); } });
+      tb.appendChild(h('tr', { class: isC ? 'cbal-cost' : '' }, h('td', { class: 'c' }, c1), h('td', { class: 'c' }, c2), h('td', null, l.name), h('td', { class: 'r' }, String(l.qty) + ' ' + (l.unit || '')), h('td', { class: 'r' }, M(l.price)), h('td', { class: 'mut' }, l.note || '')));
+    });
+    return t;
+  }
+  function run() {
+    var opt = st.cost ? { cost: st.cost.length ? st.cost : [-1], target: st.target.length ? st.target : [-1], mode: st.mode, round: st.round, prices: st.mode === 'manual' ? st.prices : undefined } : {};
+    return safe(call('costBalancePreview', { quote_id: qt.id, opt: opt })).then(function (r) {
+      if (!r) return;
+      if (!st.cost) { base = r.lines; st.cost = base.filter(function (l) { return l.auto_cost; }).map(function (l) { return l.idx; }); st.target = base.filter(function (l) { return !l.auto_cost; }).map(function (l) { return l.idx; }); }
+      info.innerHTML = ''; info.appendChild(h('p', { class: 'mut', style: 'margin:8px 0 4px' }, 'Đánh dấu dòng chi phí cần cân và các dòng hàng nhận phần cân:')); info.appendChild(picks(base));
+      prev.innerHTML = ''; st.ok = !r.error; st.last = r.error ? null : r;
+      if (r.error) { prev.appendChild(h('p', { id: 'cbalErr', style: 'color:#b91c1c;margin-top:8px' }, r.error)); return; }
+      var tb = h('tbody'), man = st.mode === 'manual';
+      r.rows.forEach(function (x) {
+        var cell = function (v, key) {       // ô gõ tay: "add" = cân thêm / đvt, "price" = đơn giá mới
+          return h('input', { type: 'number', step: 'any', value: v, class: 'cbal-in', 'data-k': key, 'data-i': x.idx, style: 'width:110px;text-align:right', 'aria-label': (key === 'add' ? 'Cân thêm / đvt: ' : 'Đơn giá mới: ') + x.name,
+            onchange: function (e) { var n = Math.round(+e.target.value || 0); st.prices[x.idx] = key === 'add' ? x.old + n : n; run(); } });
+        };
+        tb.appendChild(h('tr', null, h('td', null, x.name), h('td', { class: 'r' }, String(x.qty)), h('td', { class: 'r' }, M(x.old)),
+          h('td', { class: 'r', style: 'color:#b45309' }, man ? cell(x.add, 'add') : '+' + M(x.add)), h('td', { class: 'r' }, man ? cell(x.price, 'price') : h('b', null, M(x.price)))));
+      });
+      prev.appendChild(h('p', { style: 'margin:10px 0 4px' }, h('b', null, 'Xem trước: '), 'cân ' + M(r.cost_total) + 'đ (' + r.costs.map(function (c) { return c.name; }).join(', ') + ') vào ' + r.rows.length + ' dòng hàng'));
+      prev.appendChild(h('table', { class: 't', id: 'cbalPrev' }, h('thead', null, h('tr', null, h('th', null, 'Dòng hàng'), h('th', { class: 'r' }, 'SL'), h('th', { class: 'r' }, 'Đơn giá cũ'), h('th', { class: 'r' }, 'Cân thêm / đvt'), h('th', { class: 'r' }, 'Đơn giá mới'))), tb));
+      if (man) {
+        var done = r.cost_total - r.diff, left = r.diff;
+        prev.appendChild(h('p', { id: 'cbalSum', style: 'margin-top:8px;font-weight:600;color:' + (left ? '#b91c1c' : '#166534') }, 'Đã cân ' + M(done) + ' / cần cân ' + M(r.cost_total) + ' · còn lại ' + M(left) + (left ? '' : ' ✓')));
+        if (left) {
+          var to = sel(r.rows.map(function (x) { return [String(x.idx), x.name + ' (SL ' + x.qty + ')']; }), String(r.rows.slice().sort(function (a, b) { return a.qty - b.qty; })[0].idx));
+          prev.appendChild(h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px' }, h('span', null, 'Dồn phần còn lại vào dòng'), to,
+            h('button', { id: 'cbalPush', onclick: function () { var x = r.rows.filter(function (y) { return String(y.idx) === to.value; })[0]; if (!x) return; st.prices[x.idx] = x.price + Math.round(left / x.qty); run(); } }, 'Dồn'),
+            h('span', { class: 'mut' }, 'Chia cho SL của dòng; SL lớn thì có thể còn lẻ vài đồng.')));
+        }
+      } else prev.appendChild(h('p', { id: 'cbalSum', class: r.diff ? '' : 'mut', style: 'margin-top:6px' + (r.diff ? ';color:#b45309' : '') }, 'Tổng trước thuế: trước ' + M(r.before) + ' · sau ' + M(r.after) + (r.diff ? ' · lệch ' + M(r.diff) + 'đ do làm tròn' : ' · khớp, không lệch')));
+    });
+  }
+  run();
+  modal({ title: 'Cân chi phí vào đơn giá · ' + qNo(qt), wide: true, body: body, closeLabel: 'Hủy',
+    buttons: [{ label: opts.applyLabel || 'Tạo bản sửa đã cân', cls: 'pri', fn: function (close) {
+      if (!st.ok) return toast('Chưa cân được: chọn dòng chi phí và dòng nhận phần cân.', true);
+      var opt = { cost: st.cost, target: st.target, mode: st.mode, round: st.round, prices: st.mode === 'manual' ? st.prices : undefined };
+      var apply = function () {
+        if (opts.onApply) { close(); return opts.onApply(opt); }
+        safe(call('costBalanceQuote', { quote_id: qt.id, opt: opt })).then(function (r) { if (r) { close(); toast('Đã tạo ' + qNo(r) + ': đơn giá đã cân chi phí' + (r.diff ? ' (còn lệch ' + M(r.diff) + 'đ)' : '')); go('quote/' + r.id); } });
+      };
+      if (st.mode === 'manual' && st.last && st.last.diff) return confirmBox('Còn lệch ' + M(st.last.diff) + ' đồng so với chi phí cần cân (' + M(st.last.cost_total) + 'đ). Vẫn áp dụng?', apply);
+      apply();
+    } }] });
 }
 
 /* ---- Hợp đồng / PO / Phụ lục HĐ ---- */
