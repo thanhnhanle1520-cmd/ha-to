@@ -36,7 +36,7 @@ let ok = 0, bad = 0; const T = (n, c, x) => { if (c) { ok++; console.log('  ✓'
   let r = await A('remove', { table: 'quotes', id: q2.id });
   T('xóa báo giá đã chốt khi chưa xác nhận → chặn', !r.ok && /Cần xác nhận/.test(r.error), r.error);
   await E(`MEMO={};location.hash='#/quote/${q2.id}'`); await sleep(1800);
-  await E(`[...document.querySelectorAll('#acts button')].find(b=>b.textContent==='Xóa').click()`); await sleep(500);
+  await E(`document.querySelector('#btnQMore').click();document.querySelector('#miDelete').click()`); await sleep(500);
   const mt = await E(`document.querySelector('.ov').textContent`);
   T('nút Xóa có ở báo giá đã chốt; hộp xác nhận nêu HĐ giữ nguyên + chọn xóa tất cả phiên bản', /Báo giá đã chốt/.test(mt) && /giữ nguyên dòng hàng/.test(mt) && /Tất cả 2 phiên bản/.test(mt), mt.slice(0, 300));
   await pg.shot('/tmp/s23_quote.png');

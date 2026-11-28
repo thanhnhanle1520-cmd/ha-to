@@ -104,7 +104,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
   const qb = await E(`[...document.querySelectorAll('#acts button')].map(b=>({t:b.textContent,ic:!!b.querySelector('svg.bi, .bi svg'),only:b.classList.contains('ionly')}))`);
   const f = t => qb.find(x => x.t === t) || {};
   T('trang báo giá: Lưu có biểu tượng + chữ', f('Lưu').ic && !f('Lưu').only, qb);
-  T('trang báo giá: Excel / PDF / Word chỉ biểu tượng', ['Excel', 'PDF', 'Word'].every(t => f(t).ic && f(t).only), qb);
+  T('trang báo giá (bản 42): In / PDF và Gửi báo giá có biểu tượng + chữ; Excel / Word chuyển vào menu Thêm', ['In / PDF', 'Gửi báo giá'].every(t => f(t).ic && !f(t).only) && !f('Excel').t, qb);
   await pg.shot(SHOT + '/s30_4_bao_gia_nut.png');
   await E(`MEMO={};location.hash='#/customers'`); await sleep(1200);
   T('"+ Khách hàng" có biểu tượng, chữ vẫn là "+ Khách hàng"', await E(`(()=>{const b=[...document.querySelectorAll('#acts button')].find(b=>b.textContent==='+ Khách hàng');return !!b && !!b.querySelector('.bi') && b.querySelector('.lb .vh').textContent==='+ ' && b.querySelector('.lb').lastChild.textContent==='Khách hàng'})()`));

@@ -63,7 +63,7 @@ const PREV = path.join(__dirname, '..', 'dist', '__xem_bao_gia40.html');
 
   console.log('— Chuyển HĐ: giảm giá trừ vào đơn giá');
   await E(`location.hash='#/'`); await sleep(600); await E(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(1800);
-  await E(`[...document.querySelectorAll('button')].find(b=>/Chuyển thành HĐ/.test(b.textContent)).click()`); await sleep(600);
+  await E(`document.querySelector('#btnQNew').click();document.querySelector('#miConvert').click()`); await sleep(600);
   { const cvt = await E(`(document.querySelector('#cvDisc')||{}).textContent||document.querySelector('.modal')?.textContent||'NO MODAL'`); T('hộp chuyển: báo trước "Giảm giá tổng 5% sẽ được trừ thẳng vào đơn giá"', /Giảm giá tổng 5%.*trừ thẳng vào đơn giá/.test(cvt), cvt.slice(0,300)); }
   await pg.shot(SHOT + '/s40_3_chuyen_hd.png');
   await E(`(()=>{const s=document.querySelector('.md select');s.value='HD';s.dispatchEvent(new Event('change'))})()`);

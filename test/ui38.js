@@ -32,7 +32,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
 
   console.log('— Màn báo giá: nút Cân chi phí → xem trước → tạo bản sửa');
   await E(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(1800);
-  await E(`document.querySelector('#btnCostBal').click()`); await sleep(1200);
+  await E(`document.querySelector('#btnQMore').click();document.querySelector('#btnCostBal').click()`); await sleep(1200);
   const md = await E(`document.querySelector('.md').textContent`);
   T('hộp thoại: chọn dòng chi phí / dòng nhận, cách chia, bảng Đơn giá cũ → mới', /Chi phí cần cân/.test(md) && /Nhận phần cân/.test(md) && /Đơn giá cũ/.test(md) && /428\.200/.test(md) && /khớp, không lệch/.test(md), md.slice(0, 400));
   await pg.shot(SHOT + '/s38_1_can_chi_phi.png');
@@ -63,7 +63,7 @@ const SHOT = process.env.SHOT_DIR || '/tmp';
 
   console.log('— Chuyển thành HĐ có cân chi phí');
   await E(`MEMO={};location.hash='#/quote/${q.id}'`); await sleep(1800);
-  await E(`[...document.querySelectorAll('button')].find(b=>/Chuyển thành HĐ/.test(b.textContent)).click()`); await sleep(600);
+  await E(`document.querySelector('#btnQNew').click();document.querySelector('#miConvert').click()`); await sleep(600);
   await E(`document.querySelector('#cvBal').click()`); await sleep(1200);
   await E(`[...document.querySelectorAll('.md .mf button')].find(b=>/Dùng cách cân này/.test(b.textContent)).click()`); await sleep(600);
   T('ô tick "Cân chi phí vào đơn giá" được chọn + ghi cách cân', await E(`document.querySelector('#cvBal').checked`) && /1 dòng chi phí, chia theo thành tiền/.test(await E(`document.querySelector('.md').textContent`)));

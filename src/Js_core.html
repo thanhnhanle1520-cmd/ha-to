@@ -769,7 +769,7 @@ function icon(k) { var s = document.createElement('span'); s.className = 'ic'; s
    Chữ của nút vẫn giữ nguyên trong nút (textContent không đổi), chỉ đổi cách hiện:
    - BTN_ONLY: việc ai cũng hiểu (In, Excel, PDF, Word…) → chỉ hiện biểu tượng trên thanh công cụ; rê chuột / đọc màn hình vẫn có chữ.
    - Còn lại: biểu tượng + chữ. Trên điện thoại (< 640px) nút phụ ở thanh trên cùng chỉ còn biểu tượng. */
-var BTN_IC = [[/^\+ /, 'plus'], [/^Lưu( |$)/, 'save'], [/^(In|In \/ Lưu PDF|In tóm tắt)$/, 'print'], [/^(Excel|Xuất Excel|Excel danh sách)$/, 'excel'], [/^(PDF|Xuất PDF|Tải PDF|PDF gộp)$/, 'pdf'], [/^(Word|Xuất Word)$/, 'word'],
+var BTN_IC = [[/^\+ /, 'plus'], [/^Lưu( |$)/, 'save'], [/^(In|In \/ Lưu PDF|In tóm tắt|In \/ PDF)$/, 'print'], [/^(Excel|Xuất Excel|Excel danh sách)$/, 'excel'], [/^(PDF|Xuất PDF|Tải PDF|PDF gộp)$/, 'pdf'], [/^(Word|Xuất Word)$/, 'word'],
   [/^Xóa( |$)/, 'trash'], [/^Sửa( |$)/, 'edit'], [/^(Sao chép|Chép|Copy)( |$)/, 'copy'], [/^Tải (file mẫu|Bảng giá|xuống)/, 'download'], [/^(Tải lên|Nhập file|Nhập hàng loạt)$/, 'upload'], [/^(Word \(zip\)|Excel \(zip\))$/, 'zip'], [/^Gửi( |$)/, 'send']];
 var BTN_ONLY = /^(In|Excel|PDF|Word)$/;
 function btnIcon(b) {
@@ -797,14 +797,24 @@ function btnIconAll(root) { if (root.tagName === 'BUTTON') btnIcon(root); else i
   if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
 })();
 /* Nút có menu nhỏ (vd. TBGH ▾ → Word / PDF) */
-function menuBtn(label, items, attrs) {
-  var b = h('button', Object.assign({ class: 'mbtn', type: 'button', 'aria-haspopup': 'true', title: label }, attrs || {}), label, h('span', { class: 'car', 'aria-hidden': 'true' }, '▾'));
+function menuBtn(label, items, attrs, noCaret) {
+  // items: { label, fn, id?, cls?, title? } | { sep: true } | { head: 'Nhóm' }  (bản 42: thêm vạch ngăn, tiêu đề nhóm, nút đỏ)
+  var b = h('button', Object.assign({ class: 'mbtn', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', title: label }, attrs || {}), label, noCaret ? null : h('span', { class: 'car', 'aria-hidden': 'true' }, '▾'));
   b.addEventListener('click', function (e) {
-    e.stopPropagation(); var old = document.querySelector('.pop'); if (old) { var same = old._for === b; old.remove(); if (same) return; }
-    var pop = h('div', { class: 'pop', role: 'menu' }, items.map(function (it) { return h('button', { type: 'button', role: 'menuitem', onclick: function () { pop.remove(); it.fn(); } }, it.label); }));
-    pop._for = b; document.body.appendChild(pop);
-    var r = b.getBoundingClientRect(); pop.style.top = (r.bottom + 4) + 'px'; pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
-    setTimeout(function () { document.addEventListener('click', function off(ev) { if (!pop.contains(ev.target)) pop.remove(); document.removeEventListener('click', off); }); }, 0);
+    e.stopPropagation(); var kb = e.detail === 0, old = document.querySelector('.pop'); if (old) { var same = old._for === b; old._close(); if (same) return; }
+    var list = (typeof items === 'function' ? items() : items).filter(Boolean);
+    var pop = h('div', { class: 'pop', role: 'menu' }, list.map(function (it) {
+      if (it.sep) return h('div', { class: 'psep', role: 'separator' });
+      if (it.head) return h('div', { class: 'phead' }, it.head);
+      return h('button', { type: 'button', role: 'menuitem', id: it.id || null, class: it.cls || null, title: it.title || null, onclick: function () { pop._close(); it.fn(); } }, it.label);
+    }));
+    function onKey(ev) { if (ev.key === 'Escape') { pop._close(); b.focus(); } }
+    function off(ev) { if (!pop.contains(ev.target)) pop._close(); }
+    pop._close = function () { pop.remove(); b.setAttribute('aria-expanded', 'false'); document.removeEventListener('keydown', onKey); document.removeEventListener('click', off); window.removeEventListener('scroll', pop._close, true); };
+    pop._for = b; document.body.appendChild(pop); b.setAttribute('aria-expanded', 'true');
+    var r = b.getBoundingClientRect(); pop.style.top = (r.bottom + 4) + 'px'; var w = pop.offsetWidth, lx = r.left + w > innerWidth - 8 ? r.right - w : r.left; pop.style.left = Math.max(8, lx) + 'px';
+    document.addEventListener('keydown', onKey);
+    setTimeout(function () { document.addEventListener('click', off); window.addEventListener('scroll', pop._close, true); if (kb) { var f = pop.querySelector('button'); if (f) f.focus(); } }, 0);     // mở bằng bàn phím → đưa con trỏ vào mục đầu
   });
   return b;
 }

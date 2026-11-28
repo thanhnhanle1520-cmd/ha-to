@@ -170,18 +170,39 @@ PAGES.quote = function (p, q) {
       return safe(call('save', { table: 'quotes', rec: rec, items: lines })).then(function (r) { if (r) { if (S.draftCtl) S.draftCtl.clear(); var wn = quoteIssues(r.quote, lines).length; reloadLookups(); toast('Đã lưu báo giá ' + r.quote.code + (wn ? ' — còn ' + wn + ' điểm cần xem lại (bấm Kiểm tra)' : '')); after ? after(r.quote) : backToList('quotes'); } });
     }
     var title = isNew ? 'Báo giá mới' : qNo(qt);
-    var acts = [];
-    if (!isNew) acts.push(exportMenu('quote', qt.id));
-    acts.push(h('button', { onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá nhanh'));
-    acts.push(h('button', { onclick: function () { quoteCheck(cur(), lines, 'tiếp tục').then(function (ok) { if (ok) toast('Không có điểm bất thường'); }); } }, 'Kiểm tra'));
-    if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('copyQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo bản sao ' + r.code); go('quote/' + r.id); } }); } }, 'Copy báo giá'));
-    if (!isNew && S.perms.quotes.create) acts.push(h('button', { title: 'Cùng dự án, gửi cho khách khác (nhà thầu khác) — chép dòng hàng, sửa được', onclick: function () { quoteToCustomer(qt); } }, 'Báo giá cho khách khác'));
+    /* Thanh nút gọn (bản 42): luôn hiện Lưu · In / PDF · Gửi báo giá; việc tạo mới gom vào "Tạo từ báo giá ▾", việc ít dùng vào "⋯ Thêm".
+       Nút theo trạng thái: báo giá "Đã gửi" chưa chuyển → hiện "Chuyển thành HĐ / PO" ra ngoài; đã có HĐ/PO → hiện "Cập nhật PO" ra ngoài. */
+    var acts = [], canNew = !isNew && S.perms.quotes.create, canConv = !isNew && S.perms.docs.create;
+    var linked = d.linked_docs || [], canSync = !isNew && S.perms.docs.edit && canEdit && linked.length;
+    var syncLabel = 'Cập nhật ' + linked.map(function (x) { return x.type === 'HD' ? 'HĐ' : x.type === 'PLHD' ? 'PLHD' : 'PO'; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' / ');
+    var doRevise = function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); };
+    var doCopy = function () { safe(call('copyQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo bản sao ' + r.code); go('quote/' + r.id); } }); };
+    var doSync = function () { save(function () { syncDocModal(qt, linked); }); };
+    var doCheck = function () { quoteCheck(cur(), lines, 'tiếp tục').then(function (ok) { if (ok) toast('Không có điểm bất thường'); }); };
+    var convOut = canConv && !qt.converted_to && qt.status === 'Đã gửi';
+    var mNew = [canNew && { label: 'Phiên bản mới (sửa lại)', id: 'miRevise', title: 'Tạo bản sửa .R tiếp theo của báo giá này', fn: doRevise },
+      canNew && { label: 'Copy báo giá', id: 'miCopy', title: 'Tạo báo giá mới (mã mới) chép từ báo giá này', fn: doCopy },
+      canNew && { label: 'Báo giá cho khách khác', id: 'miOtherCust', title: 'Cùng dự án, gửi cho khách khác (nhà thầu khác) — chép dòng hàng, sửa được', fn: function () { quoteToCustomer(qt); } },
+      canConv && { sep: true },
+      canConv && { label: 'Chuyển thành HĐ / PO / Phụ lục HĐ', id: 'miConvert', fn: function () { convertModal(qt); } },
+      canSync && { label: syncLabel, id: 'miSync', title: 'Đưa dòng hàng, giá, VAT của báo giá này sang văn bản đã chuyển', fn: doSync }].filter(Boolean);
+    while (mNew.length && mNew[0].sep) mNew.shift();
+    var mMore = [{ label: 'Kiểm tra', id: 'miCheck', title: 'Soát điểm bất thường: thiếu giá, bán dưới giá mua, thiếu thông tin…', fn: doCheck },
+      canNew && { label: 'Cân chi phí', id: 'btnCostBal', title: 'Chia chi phí vận chuyển, chi phí ngoài vào đơn giá các dòng hàng (tạo bản sửa mới)', fn: function () { costBalanceModal(qt); } },
+      !isNew && { sep: true },
+      !isNew && { label: 'Xuất Excel', id: 'miXls', fn: function () { doExport('quote', qt.id, 'xls'); } },
+      !isNew && { label: 'Xuất Word', id: 'miDoc', fn: function () { doExport('quote', qt.id, 'doc'); } },
+      !isNew && S.perms.quotes.edit && { sep: true },
+      !isNew && S.perms.quotes.edit && { label: 'Xóa báo giá', id: 'miDelete', cls: 'dng', fn: function () { quoteDelete(qt, d.versions || []); } }].filter(Boolean);
+    if (mNew.length) acts.push(menuBtn('Tạo từ báo giá', mNew, { id: 'btnQNew', title: 'Phiên bản mới, copy, báo giá cho khách khác, chuyển thành HĐ / PO' }));
+    acts.push(menuBtn('⋯ Thêm', mMore, { id: 'btnQMore', title: 'Kiểm tra, cân chi phí, xuất Excel / Word, xóa', 'aria-label': 'Thêm thao tác' }, true));
+    if (convOut || canSync) acts.push(h('span', { class: 'qsep', 'aria-hidden': 'true' }));
+    if (convOut) acts.push(h('button', { id: 'btnConvert', title: 'Báo giá đã gửi khách: chuyển thành HĐ / PO / Phụ lục HĐ', onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO'));
+    if (canSync) acts.push(h('button', { id: 'btnSyncDoc', title: 'Đưa dòng hàng, giá, VAT của báo giá này sang văn bản đã chuyển', onclick: doSync }, syncLabel));
+    acts.push(h('span', { class: 'qsep', 'aria-hidden': 'true' }));
+    acts.push(h('button', { id: 'btnQSend', title: 'Gửi báo giá nhanh qua Zalo / email', onclick: function () { quoteQuickSend(cur(), lines); } }, 'Gửi báo giá'));
+    if (!isNew) acts.push(h('button', { id: 'btnQPrint', title: 'Xem trước, in hoặc tải PDF', onclick: function () { doExport('quote', qt.id, 'pdf'); } }, 'In / PDF'));
     if (canEdit) acts.push(h('button', { class: 'pri', onclick: function () { save(); } }, 'Lưu'));
-    if (!isNew && S.perms.quotes.create) acts.push(h('button', { onclick: function () { safe(call('reviseQuote', { id: qt.id })).then(function (r) { if (r) { toast('Đã tạo phiên bản v' + r.version); go('quote/' + r.id); } }); } }, 'Phiên bản mới'));
-    if (!isNew && S.perms.quotes.create) acts.push(h('button', { id: 'btnCostBal', title: 'Chia chi phí vận chuyển, chi phí ngoài vào đơn giá các dòng hàng (tạo bản sửa mới)', onclick: function () { costBalanceModal(qt); } }, 'Cân chi phí'));
-    if (!isNew && S.perms.docs.create) acts.push(h('button', { onclick: function () { convertModal(qt); } }, 'Chuyển thành HĐ / PO / Phụ lục HĐ'));
-    if (!isNew && S.perms.docs.edit && canEdit && (d.linked_docs || []).length) acts.push(h('button', { id: 'btnSyncDoc', title: 'Đưa dòng hàng, giá, VAT của báo giá này sang văn bản đã chuyển', onclick: function () { save(function () { syncDocModal(qt, d.linked_docs); }); } }, 'Cập nhật ' + d.linked_docs.map(function (x) { return x.type === 'HD' ? 'HĐ' : x.type === 'PLHD' ? 'PLHD' : 'PO'; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' / ')));
-    if (!isNew && S.perms.quotes.edit) acts.push(h('button', { class: 'dng', onclick: function () { quoteDelete(qt, d.versions || []); } }, 'Xóa'));
     setTitle(title, acts);
     if (!isNew && d.versions.length > 1) v.appendChild(h('div', { class: 'bar2' }, h('span', { class: 'mut' }, 'Phiên bản:'), d.versions.map(function (x) { return h('a', { class: 'badge ' + (x.id === qt.id ? 'b-info' : ''), href: '#/quote/' + x.id }, 'v' + x.version); })));
     if (qt.converted_to) v.appendChild(h('div', { class: 'card' }, h('span', { class: 'badge b-ok' }, 'Đã chốt'), ' Đã chuyển thành: ', h('b', null, qt.converted_to)));
